@@ -1,0 +1,8 @@
+<resources>
+    <color name="panel_bg">#B31B1B1B</color>
+    <color name="success_green">#4CAF50</color>
+    <color name="warning_orange">#FF9800</color>
+    <color name="error_red">#F44336</color>
+    <color name="overlay_point">#00E5FF</color>
+    <color name="overlay_line">#00FF95</color>
+</resources>
