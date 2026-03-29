@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/benchmark_stats.dart';
-import '../screens/home_screen.dart';
+import '../screens/home_screen.dart' hide Colors;
 
 class MetricsOverlay extends StatelessWidget {
   final String modelName;
@@ -55,7 +55,7 @@ class MetricsOverlay extends StatelessWidget {
   }
 
   String _angleLabel() => switch (exerciseType) {
-    ExerciseType.bicepCurl => 'Elbow°',
+    ExerciseType.bicepCurlFront || ExerciseType.bicepCurlLeft || ExerciseType.bicepCurlRight => 'Elbow°',
   };
 
   Widget _metricRow(String label, String value, Color valueColor) {

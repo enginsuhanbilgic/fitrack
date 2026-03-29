@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'screens/home_screen.dart';
+import 'screens/home_screen.dart' hide Colors;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
