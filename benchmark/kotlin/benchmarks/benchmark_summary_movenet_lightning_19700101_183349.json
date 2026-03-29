@@ -1,0 +1,19 @@
+{
+  "model": "MoveNet Lightning",
+  "duration_ms": 60020,
+  "total_frames": 1488,
+  "pose_frames": 1488,
+  "pose_detection_rate": 1,
+  "rep_count": 8,
+  "mean_latency_ms": 14.13239247311828,
+  "p50_latency_ms": 14,
+  "p95_latency_ms": 16,
+  "min_latency_ms": 12,
+  "max_latency_ms": 26,
+  "average_fps": 24.791736087970676,
+  "device_manufacturer": "Xiaomi",
+  "device_model": "2412DPC0AG",
+  "android_version": "16",
+  "started_at_epoch_ms": 59569447,
+  "finished_at_epoch_ms": 59629467
+}

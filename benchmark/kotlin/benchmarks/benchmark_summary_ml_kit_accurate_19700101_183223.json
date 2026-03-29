@@ -1,0 +1,19 @@
+{
+  "model": "ML Kit Accurate",
+  "duration_ms": 60002,
+  "total_frames": 613,
+  "pose_frames": 613,
+  "pose_detection_rate": 1,
+  "rep_count": 13,
+  "mean_latency_ms": 52.50244698205547,
+  "p50_latency_ms": 50,
+  "p95_latency_ms": 78.39999999999998,
+  "min_latency_ms": 27,
+  "max_latency_ms": 111,
+  "average_fps": 10.216326122462585,
+  "device_manufacturer": "Xiaomi",
+  "device_model": "2412DPC0AG",
+  "android_version": "16",
+  "started_at_epoch_ms": 59483563,
+  "finished_at_epoch_ms": 59543565
+}

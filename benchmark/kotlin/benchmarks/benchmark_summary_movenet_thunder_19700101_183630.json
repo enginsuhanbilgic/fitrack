@@ -1,0 +1,19 @@
+{
+  "model": "MoveNet Thunder",
+  "duration_ms": 60010,
+  "total_frames": 1287,
+  "pose_frames": 1287,
+  "pose_detection_rate": 1,
+  "rep_count": 14,
+  "mean_latency_ms": 36.976689976689975,
+  "p50_latency_ms": 37,
+  "p95_latency_ms": 40,
+  "min_latency_ms": 34,
+  "max_latency_ms": 44,
+  "average_fps": 21.446425595734045,
+  "device_manufacturer": "Xiaomi",
+  "device_model": "2412DPC0AG",
+  "android_version": "16",
+  "started_at_epoch_ms": 59730411,
+  "finished_at_epoch_ms": 59790421
+}
