@@ -1,0 +1,19 @@
+{
+  "model": "MediaPipe Pose Lite",
+  "duration_ms": 60011,
+  "total_frames": 956,
+  "pose_frames": 956,
+  "pose_detection_rate": 1,
+  "rep_count": 17,
+  "mean_latency_ms": 48.47489539748954,
+  "p50_latency_ms": 49,
+  "p95_latency_ms": 65,
+  "min_latency_ms": 22,
+  "max_latency_ms": 83,
+  "average_fps": 15.930412757661095,
+  "device_manufacturer": "Xiaomi",
+  "device_model": "2412DPC0AG",
+  "android_version": "16",
+  "started_at_epoch_ms": 59801857,
+  "finished_at_epoch_ms": 59861868
+}
