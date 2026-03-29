@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/pose_landmark.dart';
-import '../screens/home_screen.dart';
+import '../screens/home_screen.dart' hide Colors;
 import '../utils/skeleton_connections.dart';
 
 class SkeletonPainter extends CustomPainter {
@@ -24,16 +24,18 @@ class SkeletonPainter extends CustomPainter {
     final contentAspect = (aspectRatio != null && aspectRatio! > 0) ? aspectRatio! : (3.0 / 4.0);
     final screenAspect = size.width / size.height;
 
+    // BoxFit.cover: scale so content fills the entire canvas on both axes.
+    // The larger scale wins (content overflows on one axis, centered and clipped).
     double scaleX, scaleY;
     double offsetX = 0, offsetY = 0;
 
     if (screenAspect > contentAspect) {
-      // Screen is wider — fit to width, clip top/bottom
+      // Screen is wider than content → scale to fill width, content overflows vertically
       scaleX = size.width;
       scaleY = size.width / contentAspect;
       offsetY = (size.height - scaleY) / 2;
     } else {
-      // Screen is taller — fit to height, clip left/right
+      // Screen is taller than content → scale to fill height, content overflows horizontally
       scaleY = size.height;
       scaleX = size.height * contentAspect;
       offsetX = (size.width - scaleX) / 2;
@@ -56,7 +58,7 @@ class SkeletonPainter extends CustomPainter {
     final bool isMLKit = landmarks.length > 17;
     final List<List<int>> connections;
     final Set<int>? allowedKeypoints;
-    if (exerciseType == ExerciseType.bicepCurl) {
+    if (exerciseType == ExerciseType.bicepCurlFront || exerciseType == ExerciseType.bicepCurlLeft || exerciseType == ExerciseType.bicepCurlRight) {
       connections = isMLKit ? mlkitBicepCurlSkeletonConnections : bicepCurlSkeletonConnections;
       allowedKeypoints = isMLKit ? mlkitBicepCurlKeypoints : bicepCurlKeypoints;
     } else {
@@ -108,6 +110,13 @@ class SkeletonPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(SkeletonPainter oldDelegate) {
-    return landmarks != oldDelegate.landmarks || exerciseType != oldDelegate.exerciseType;
+    // List reference always differs after setState; compare length + first
+    // landmark to detect actual data changes without a full deep-equal scan.
+    if (exerciseType != oldDelegate.exerciseType) return true;
+    if (landmarks.length != oldDelegate.landmarks.length) return true;
+    if (landmarks.isEmpty) return false;
+    final a = landmarks[0];
+    final b = oldDelegate.landmarks[0];
+    return a.x != b.x || a.y != b.y || a.confidence != b.confidence;
   }
 }

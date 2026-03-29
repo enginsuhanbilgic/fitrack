@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'benchmark_screen.dart';
 
-enum PoseModel { mlkit, mlkitFull, movenet, yoloPose }
+enum PoseModel { mlkit, mlkitFull, movenet, yoloPose, mediapipeLite, mediapipeFull }
 enum InputSource { liveCamera, videoFile }
-enum ExerciseType { bicepCurl }
+enum ExerciseType { bicepCurlFront, bicepCurlLeft, bicepCurlRight }
 
 extension PoseModelLabel on PoseModel {
   String get label {
@@ -16,13 +16,19 @@ extension PoseModelLabel on PoseModel {
         return 'MoveNet Lightning';
       case PoseModel.yoloPose:
         return 'YOLO-Pose';
+      case PoseModel.mediapipeLite:
+        return 'MediaPipe Lite';
+      case PoseModel.mediapipeFull:
+        return 'MediaPipe Full';
     }
   }
 }
 
 extension ExerciseTypeLabel on ExerciseType {
   String get label => switch (this) {
-    ExerciseType.bicepCurl => 'Bicep Curl',
+    ExerciseType.bicepCurlFront => 'Bicep Curl (Front)',
+    ExerciseType.bicepCurlLeft => 'Bicep Curl (Left Side)',
+    ExerciseType.bicepCurlRight => 'Bicep Curl (Right Side)',
   };
 }
 
@@ -35,7 +41,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   PoseModel _selectedModel = PoseModel.mlkit;
-  ExerciseType _selectedExercise = ExerciseType.bicepCurl;
+  ExerciseType _selectedExercise = ExerciseType.bicepCurlFront;
 
   void _navigateToBenchmark(InputSource source) {
     Navigator.push(

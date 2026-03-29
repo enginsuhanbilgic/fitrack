@@ -106,22 +106,30 @@ class BenchmarkEngine {
   }
 
   double? _calculateElbowAngle(List<PoseLandmark> landmarks) {
-    if (service.keypointCount == 33) {
-      // BlazePose (ML Kit): Left(11, 13, 15), Right(12, 14, 16)
-      final double? leftAngle = _getAngle(landmarks, 11, 13, 15);
-      final double? rightAngle = _getAngle(landmarks, 12, 14, 16);
-      if (leftAngle != null && rightAngle != null) {
-        return (leftAngle + rightAngle) / 2.0;
-      }
-      return leftAngle ?? rightAngle;
-    } else {
-      // COCO-17 (MoveNet, YOLO-Pose): Left(5, 7, 9), Right(6, 8, 10)
-      final double? leftAngle = _getAngle(landmarks, 5, 7, 9);
-      final double? rightAngle = _getAngle(landmarks, 6, 8, 10);
-      if (leftAngle != null && rightAngle != null) {
-        return (leftAngle + rightAngle) / 2.0;
-      }
-      return leftAngle ?? rightAngle;
+    bool isBlazePose = service.keypointCount == 33;
+
+    // Indices: shoulder, elbow, wrist
+    final int lS = isBlazePose ? 11 : 5;
+    final int lE = isBlazePose ? 13 : 7;
+    final int lW = isBlazePose ? 15 : 9;
+
+    final int rS = isBlazePose ? 12 : 6;
+    final int rE = isBlazePose ? 14 : 8;
+    final int rW = isBlazePose ? 16 : 10;
+
+    final double? leftAngle = _getAngle(landmarks, lS, lE, lW);
+    final double? rightAngle = _getAngle(landmarks, rS, rE, rW);
+
+    switch (exerciseType) {
+      case ExerciseType.bicepCurlFront:
+        if (leftAngle != null && rightAngle != null) {
+          return (leftAngle + rightAngle) / 2.0;
+        }
+        return leftAngle ?? rightAngle;
+      case ExerciseType.bicepCurlLeft:
+        return leftAngle;
+      case ExerciseType.bicepCurlRight:
+        return rightAngle;
     }
   }
 
@@ -142,7 +150,9 @@ class BenchmarkEngine {
 
   void _dispatchRepLogic(double angle) {
     switch (exerciseType) {
-      case ExerciseType.bicepCurl:
+      case ExerciseType.bicepCurlFront:
+      case ExerciseType.bicepCurlLeft:
+      case ExerciseType.bicepCurlRight:
         _processBicepCurl(angle);
     }
   }
@@ -171,4 +181,3 @@ class BenchmarkEngine {
     _angleSmoothingBuffer.clear();
   }
 }
-
