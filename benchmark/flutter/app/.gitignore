@@ -1,5 +1,13 @@
 # Miscellaneous
 *.class
+# Gradle files
+.gradle/
+build/
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Log/OS Files
 *.log
 *.pyc
 *.swp
@@ -13,6 +21,15 @@
 migrate_working_dir/
 
 # IntelliJ related
+# Android Studio generated files and folders
+captures/
+.externalNativeBuild/
+.cxx/
+*.aab
+*.apk
+output-metadata.json
+
+# IntelliJ
 *.iml
 *.ipr
 *.iws
@@ -32,6 +49,9 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+# Keystore files
+*.jks
+*.keystore
 
 # Symbolication related
 app.*.symbols
@@ -43,3 +63,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+# Google Services (e.g. APIs or Firebase)
+google-services.json
+
+# Android Profiling
+*.hprof

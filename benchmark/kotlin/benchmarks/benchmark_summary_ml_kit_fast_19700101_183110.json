@@ -1,0 +1,19 @@
+{
+  "model": "ML Kit Fast",
+  "duration_ms": 60008,
+  "total_frames": 683,
+  "pose_frames": 681,
+  "pose_detection_rate": 0.9970717423133236,
+  "rep_count": 6,
+  "mean_latency_ms": 47.60761346998536,
+  "p50_latency_ms": 45,
+  "p95_latency_ms": 86,
+  "min_latency_ms": 9,
+  "max_latency_ms": 178,
+  "average_fps": 11.381815757898947,
+  "device_manufacturer": "Xiaomi",
+  "device_model": "2412DPC0AG",
+  "android_version": "16",
+  "started_at_epoch_ms": 59410033,
+  "finished_at_epoch_ms": 59470041
+}
