@@ -5,6 +5,16 @@ library;
 /// Minimum landmark confidence to use a frame for rep counting / feedback.
 const double kMinLandmarkConfidence = 0.4;
 
+// ── Biomechanical Logic (Index-1) ───────────────────────
+/// Mandatory lockout after state transition to prevent double-counting.
+const Duration kStateDebounce = Duration(milliseconds: 500);
+
+/// Reset to IDLE if stuck in active state for this long (Zombie user).
+const Duration kStuckStateLimit = Duration(seconds: 5);
+
+/// Minimum confidence for far-side limbs; if lower, use near-side as proxy.
+const double kFarSideConfidenceGate = 0.4;
+
 // ── Biceps Curl FSM thresholds (degrees) ────────────────
 /// IDLE → CONCENTRIC when elbow angle drops below this.
 const double kCurlStartAngle = 150.0;

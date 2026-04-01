@@ -24,21 +24,41 @@ class FormAnalyzer {
     final ref = _repStartSnapshot;
     if (ref == null) return errors;
 
-    // Torso length for normalisation.
-    final shoulder = current.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence);
-    final hip = current.landmark(LM.leftHip, minConfidence: kMinLandmarkConfidence);
-    final torsoLen = verticalDist(shoulder, hip);
+    // Torso length for normalisation (L_torso).
+    // Try to get max confidence side for scale baseline.
+    final leftShoulder = current.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence);
+    final leftHip = current.landmark(LM.leftHip, minConfidence: kMinLandmarkConfidence);
+    final rightShoulder = current.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence);
+    final rightHip = current.landmark(LM.rightHip, minConfidence: kMinLandmarkConfidence);
+
+    final leftLen = verticalDist(leftShoulder, leftHip);
+    final rightLen = verticalDist(rightShoulder, rightHip);
+    
+    // Fallback: pick the best visible side or average if both are good.
+    final double? torsoLen;
+    if (leftLen != null && rightLen != null) {
+      torsoLen = (leftLen + rightLen) / 2.0;
+    } else {
+      torsoLen = leftLen ?? rightLen;
+    }
+
     if (torsoLen == null || torsoLen < 0.01) return errors;
 
-    // ── Torso swing ──
-    final shoulderShift = horizontalShift(ref, current, LM.leftShoulder);
-    if (shoulderShift != null && shoulderShift / torsoLen > kSwingThreshold) {
+    // ── Torso swing (use most confident side acromion displacement) ──
+    final leftSwing = horizontalShift(ref, current, LM.leftShoulder);
+    final rightSwing = horizontalShift(ref, current, LM.rightShoulder);
+    final bestSwing = leftSwing ?? rightSwing;
+
+    if (bestSwing != null && bestSwing / torsoLen > kSwingThreshold) {
       errors.add(FormError.torsoSwing);
     }
 
-    // ── Elbow drift ──
-    final elbowShift = horizontalShift(ref, current, LM.leftElbow);
-    if (elbowShift != null && elbowShift / torsoLen > kDriftThreshold) {
+    // ── Elbow drift (use most confident side elbow displacement) ──
+    final leftDrift = horizontalShift(ref, current, LM.leftElbow);
+    final rightDrift = horizontalShift(ref, current, LM.rightElbow);
+    final bestDrift = leftDrift ?? rightDrift;
+
+    if (bestDrift != null && bestDrift / torsoLen > kDriftThreshold) {
       errors.add(FormError.elbowDrift);
     }
 

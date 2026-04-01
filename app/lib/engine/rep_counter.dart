@@ -40,6 +40,10 @@ class RepCounter {
   double? _lastAngle;
   List<FormError> _lastErrors = const [];
 
+  // Timing & Debounce (Index-1)
+  DateTime? _lastTransitionTime;
+  DateTime? _stateStartTime;
+
   // Smoothing: small ring buffer for angle.
   final List<double> _angleBuffer = [];
   static const int _smoothWindow = 3;
@@ -47,6 +51,7 @@ class RepCounter {
   RepCounter({this.side = ExerciseSide.both});
 
   RepSnapshot update(PoseResult result) {
+    final now = DateTime.now();
     final angle = _computeAngle(result);
     _lastAngle = angle;
 
@@ -60,12 +65,27 @@ class RepCounter {
     final smoothed =
         _angleBuffer.reduce((a, b) => a + b) / _angleBuffer.length;
 
+    // Check Stuck-State Timer (Zombie detection)
+    if (_state != RepState.idle && _stateStartTime != null) {
+      if (now.difference(_stateStartTime!) > kStuckStateLimit) {
+        _resetToIdle();
+        return _snapshot();
+      }
+    }
+
+    // Check Transition Lockout (Debounce)
+    if (_lastTransitionTime != null &&
+        now.difference(_lastTransitionTime!) < kStateDebounce) {
+      return _snapshot();
+    }
+
     // ── FSM transitions ──
+    final oldState = _state;
     switch (_state) {
       case RepState.idle:
         if (smoothed < kCurlStartAngle) {
           _state = RepState.concentric;
-          _form.onRepStart(result); // snapshot for form comparison
+          _form.onRepStart(result);
         }
         break;
 
@@ -73,11 +93,8 @@ class RepCounter {
         _lastErrors = _form.evaluate(result);
         if (smoothed <= kCurlPeakAngle) {
           _state = RepState.peak;
-        }
-        // Safety: if user extends back without reaching peak → drop rep.
-        if (smoothed > kCurlStartAngle) {
-          _state = RepState.idle;
-          _form.onRepEnd();
+        } else if (smoothed > kCurlStartAngle) {
+          _resetToIdle();
         }
         break;
 
@@ -91,14 +108,24 @@ class RepCounter {
         _lastErrors = _form.evaluate(result);
         if (smoothed >= kCurlEndAngle) {
           _reps++;
-          _state = RepState.idle;
-          _form.onRepEnd();
+          _resetToIdle();
           _lastErrors = const [];
         }
         break;
     }
 
+    if (_state != oldState) {
+      _lastTransitionTime = now;
+      _stateStartTime = now;
+    }
+
     return _snapshot();
+  }
+
+  void _resetToIdle() {
+    _state = RepState.idle;
+    _form.onRepEnd();
+    _stateStartTime = null;
   }
 
   /// Start a new set — resets reps, keeps set count.
@@ -108,6 +135,7 @@ class RepCounter {
     _angleBuffer.clear();
     _form.reset();
     _state = RepState.idle;
+    _stateStartTime = null;
     _lastErrors = const [];
   }
 
@@ -118,6 +146,7 @@ class RepCounter {
     _state = RepState.idle;
     _angleBuffer.clear();
     _form.reset();
+    _stateStartTime = null;
     _lastErrors = const [];
     _lastAngle = null;
   }
