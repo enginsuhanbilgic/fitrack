@@ -49,5 +49,12 @@ const int kCameraFps = 30;
 
 // ── Setup Check ─────────────────────────────────────────
 /// Number of consecutive frames all required landmarks must pass the confidence
-/// gate before transitioning from SETUP_CHECK to ACTIVE.
+/// gate before transitioning from SETUP_CHECK to COUNTDOWN.
 const int kSetupCheckFrames = 10;
+
+// ── Countdown & Session ──────────────────────────────────
+/// Starting value for the hands-free countdown (counts down to 1 then fires GO).
+const int kCountdownSeconds = 3;
+
+/// Seconds of continuous landmark absence in ACTIVE phase before auto-termination.
+const double kAbsenceTimeoutSec = 3.0;

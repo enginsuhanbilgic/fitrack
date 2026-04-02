@@ -30,7 +30,7 @@ enum FormError {
 }
 
 /// Top-level session lifecycle state.
-enum WorkoutPhase { setupCheck, active }
+enum WorkoutPhase { setupCheck, countdown, active, completed }
 
 /// Required ML Kit landmark indices per exercise.
 class ExerciseRequirements {

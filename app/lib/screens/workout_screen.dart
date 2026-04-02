@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -9,8 +10,10 @@ import '../models/pose_landmark.dart';
 import '../services/camera_service.dart';
 import '../services/pose/mlkit_pose_service.dart';
 import '../services/pose/pose_service.dart';
+import '../services/tts_service.dart';
 import '../widgets/rep_counter_display.dart';
 import '../widgets/skeleton_painter.dart';
+import 'summary_screen.dart';
 
 class WorkoutScreen extends StatefulWidget {
   final ExerciseType exercise;
@@ -24,16 +27,27 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   final CameraService _camera = CameraService();
   late final PoseService _pose;
   late final RepCounter _repCounter;
+  late final TtsService _tts;
   final LandmarkSmoother _smoother = LandmarkSmoother();
 
   bool _isReady = false;
   bool _isProcessing = false;
   String? _error;
 
-  // Setup check state.
+  // Phase state machine.
   WorkoutPhase _phase = WorkoutPhase.setupCheck;
+
+  // SETUP_CHECK state.
   int _setupOkFrames = 0;
   Map<int, Color> _landmarkColors = {};
+
+  // COUNTDOWN state.
+  int _countdownValue = kCountdownSeconds;
+  Timer? _countdownTimer;
+
+  // ACTIVE state.
+  DateTime? _absenceStart;
+  DateTime? _activeStart;
 
   // Per-frame display state.
   List<PoseLandmark> _landmarks = [];
@@ -48,6 +62,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     super.initState();
     _pose = MlKitPoseService();
     _repCounter = RepCounter();
+    _tts = TtsService();
     _init();
   }
 
@@ -55,6 +70,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     try {
       await _pose.init();
       await _camera.init();
+      await _tts.init();
       _camera.startStream(_onFrame);
       if (mounted) setState(() => _isReady = true);
     } catch (e) {
@@ -91,23 +107,22 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       )).toList();
       final smoothed = _smoother.smooth(mirrored);
 
-      if (_phase == WorkoutPhase.setupCheck) {
-        _updateSetupCheck(result, smoothed);
-      } else {
-        // Run rep counter on raw landmarks.
-        final snapshot = _repCounter.update(result);
-        if (mounted) {
-          setState(() {
-            _landmarks = smoothed;
-            _snapshot = snapshot;
-            _landmarkColors = {};
-          });
-        }
+      switch (_phase) {
+        case WorkoutPhase.setupCheck:
+          _updateSetupCheck(result, smoothed);
+        case WorkoutPhase.countdown:
+          _updateCountdownFrame(result, smoothed);
+        case WorkoutPhase.active:
+          _updateActive(result, smoothed);
+        case WorkoutPhase.completed:
+          break; // session over — ignore incoming frames
       }
     } catch (_) {
       // Silently drop bad frames — don't crash the stream.
     }
   }
+
+  // ── SETUP_CHECK ────────────────────────────────────────
 
   void _updateSetupCheck(dynamic result, List<PoseLandmark> smoothed) {
     final requirements = ExerciseRequirements.forExercise(widget.exercise);
@@ -129,10 +144,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       if (_setupOkFrames >= kSetupCheckFrames) {
         if (mounted) {
           setState(() {
-            _phase = WorkoutPhase.active;
+            _phase = WorkoutPhase.countdown;
             _landmarks = smoothed;
             _landmarkColors = {};
           });
+          _startCountdown();
         }
         return;
       }
@@ -148,12 +164,111 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     }
   }
 
+  // ── COUNTDOWN ──────────────────────────────────────────
+
+  void _startCountdown() {
+    _countdownValue = kCountdownSeconds;
+    _tts.speak('$_countdownValue');
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      _countdownValue--;
+      if (_countdownValue > 0) {
+        _tts.speak('$_countdownValue');
+        setState(() {});
+      } else {
+        timer.cancel();
+        _tts.speak('Go! Starting ${widget.exercise.label}');
+        setState(() {
+          _phase = WorkoutPhase.active;
+          _activeStart = DateTime.now();
+          _landmarkColors = {};
+        });
+      }
+    });
+  }
+
+  void _updateCountdownFrame(dynamic result, List<PoseLandmark> smoothed) {
+    final requirements = ExerciseRequirements.forExercise(widget.exercise);
+    final allVisible = requirements.landmarkIndices.every(
+      (idx) => result.landmark(idx, minConfidence: kMinLandmarkConfidence) != null,
+    );
+
+    if (!allVisible) {
+      // User left frame mid-countdown — cancel and reset to setup check.
+      _countdownTimer?.cancel();
+      _tts.stop();
+      if (mounted) {
+        setState(() {
+          _phase = WorkoutPhase.setupCheck;
+          _setupOkFrames = 0;
+          _countdownValue = kCountdownSeconds;
+          _landmarks = smoothed;
+        });
+      }
+    } else {
+      if (mounted) setState(() => _landmarks = smoothed);
+    }
+  }
+
+  // ── ACTIVE ─────────────────────────────────────────────
+
+  void _updateActive(dynamic result, List<PoseLandmark> smoothed) {
+    final requirements = ExerciseRequirements.forExercise(widget.exercise);
+    final allVisible = requirements.landmarkIndices.every(
+      (idx) => result.landmark(idx, minConfidence: kMinLandmarkConfidence) != null,
+    );
+
+    if (!allVisible) {
+      _absenceStart ??= DateTime.now();
+      final absentMs = DateTime.now().difference(_absenceStart!).inMilliseconds;
+      if (absentMs >= kAbsenceTimeoutSec * 1000) {
+        _triggerCompleted();
+      }
+    } else {
+      _absenceStart = null;
+      final snapshot = _repCounter.update(result);
+      if (mounted) {
+        setState(() {
+          _landmarks = smoothed;
+          _snapshot = snapshot;
+        });
+      }
+    }
+  }
+
+  // ── COMPLETED ──────────────────────────────────────────
+
+  void _triggerCompleted() {
+    if (_phase == WorkoutPhase.completed) return; // guard against double-fire
+    final duration = _activeStart != null
+        ? DateTime.now().difference(_activeStart!)
+        : Duration.zero;
+    setState(() => _phase = WorkoutPhase.completed);
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => SummaryScreen(
+        exercise: widget.exercise,
+        totalReps: _snapshot.reps,
+        totalSets: _snapshot.sets,
+        sessionDuration: duration,
+      ),
+    ));
+  }
+
+  // ── Lifecycle ──────────────────────────────────────────
+
   @override
   void dispose() {
+    _countdownTimer?.cancel();
+    _tts.dispose();
     _camera.dispose();
     _pose.dispose();
     super.dispose();
   }
+
+  // ── Build ──────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -235,7 +350,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             size: Size.infinite,
           ),
 
-        // Setup check banner — visible until all required landmarks are confirmed.
+        // SETUP_CHECK banner.
         if (_phase == WorkoutPhase.setupCheck)
           Positioned(
             top: 0,
@@ -254,7 +369,20 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             ),
           ),
 
-        // Rep counter overlay — bottom left, only during active phase.
+        // COUNTDOWN overlay — bold number centered on screen.
+        if (_phase == WorkoutPhase.countdown)
+          Center(
+            child: Text(
+              '$_countdownValue',
+              style: const TextStyle(
+                fontSize: 160,
+                fontWeight: FontWeight.w900,
+                color: Colors.white,
+              ),
+            ),
+          ),
+
+        // ACTIVE — rep counter overlay bottom left.
         if (_phase == WorkoutPhase.active)
           Positioned(
             left: 16,
