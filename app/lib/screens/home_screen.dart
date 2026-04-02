@@ -98,19 +98,22 @@ class _ExerciseCard extends StatelessWidget {
               children: [
                 Icon(icon, size: 36, color: const Color(0xFF00E676)),
                 const SizedBox(width: 20),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text(subtitle,
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 13)),
-                  ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: const TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text(subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 13)),
+                    ],
+                  ),
                 ),
-                const Spacer(),
                 if (enabled)
                   const Icon(Icons.chevron_right, color: Colors.white38),
               ],

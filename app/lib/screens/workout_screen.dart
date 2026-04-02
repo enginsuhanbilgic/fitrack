@@ -377,7 +377,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       appBar: AppBar(
         title: Text(widget.exercise.label),
         actions: [
-          if (_phase == WorkoutPhase.active)
+          if (_phase == WorkoutPhase.active) ...[
             IconButton(
               icon: const Icon(Icons.replay),
               tooltip: 'New set',
@@ -392,6 +392,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 });
               },
             ),
+            IconButton(
+              icon: const Icon(Icons.stop_circle_outlined, color: Colors.redAccent),
+              tooltip: 'Finish workout',
+              onPressed: _triggerCompleted,
+            ),
+          ],
         ],
       ),
       body: _buildBody(),
