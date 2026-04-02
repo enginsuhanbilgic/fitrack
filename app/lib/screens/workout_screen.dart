@@ -49,6 +49,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   DateTime? _absenceStart;
   DateTime? _activeStart;
 
+  // Mid-session occlusion (partial landmark loss within ACTIVE phase).
+  DateTime? _occlusionStart;
+  int _occlusionResumeFrames = 0;
+  bool _isOccluded = false;
+  DateTime? _lastOcclusionTts;
+
   // Per-frame display state.
   List<PoseLandmark> _landmarks = [];
   RepSnapshot _snapshot = const RepSnapshot(
@@ -217,18 +223,25 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
   void _updateActive(dynamic result, List<PoseLandmark> smoothed) {
     final requirements = ExerciseRequirements.forExercise(widget.exercise);
-    final allVisible = requirements.landmarkIndices.every(
-      (idx) => result.landmark(idx, minConfidence: kMinLandmarkConfidence) != null,
-    );
+    final total = requirements.landmarkIndices.length;
+    final visible = requirements.landmarkIndices
+        .where((idx) => result.landmark(idx, minConfidence: kMinLandmarkConfidence) != null)
+        .length;
 
-    if (!allVisible) {
-      _absenceStart ??= DateTime.now();
-      final absentMs = DateTime.now().difference(_absenceStart!).inMilliseconds;
-      if (absentMs >= kAbsenceTimeoutSec * 1000) {
-        _triggerCompleted();
-      }
-    } else {
+    if (visible == total) {
+      // ── All landmarks visible ──────────────────────────
       _absenceStart = null;
+      _occlusionStart = null;
+
+      if (_isOccluded) {
+        // Counting recovery frames before resuming.
+        _occlusionResumeFrames++;
+        if (_occlusionResumeFrames >= kOcclusionResumeFrames) {
+          setState(() => _isOccluded = false);
+          _occlusionResumeFrames = 0;
+        }
+      }
+
       final snapshot = _repCounter.update(result);
       if (mounted) {
         setState(() {
@@ -236,7 +249,40 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           _snapshot = snapshot;
         });
       }
+    } else if (visible > 0) {
+      // ── Partial occlusion — user still present ─────────
+      _absenceStart = null;  // never auto-terminate during partial occlusion
+      _occlusionResumeFrames = 0;
+      _occlusionStart ??= DateTime.now();
+
+      final occludedMs = DateTime.now().difference(_occlusionStart!).inMilliseconds;
+      if (occludedMs >= kOcclusionPromptSec * 1000 && !_isOccluded) {
+        setState(() => _isOccluded = true);
+        if (_canSpeakOcclusionPrompt()) {
+          _tts.speak('Move into frame — keep all joints visible');
+          _lastOcclusionTts = DateTime.now();
+        }
+      }
+
+      // FSM frozen — do not call _repCounter.update()
+      if (mounted) setState(() => _landmarks = smoothed);
+    } else {
+      // ── Full absence — no landmarks at all ────────────
+      _occlusionStart = null;
+      _occlusionResumeFrames = 0;
+      if (_isOccluded) setState(() => _isOccluded = false);
+
+      _absenceStart ??= DateTime.now();
+      final absentMs = DateTime.now().difference(_absenceStart!).inMilliseconds;
+      if (absentMs >= kAbsenceTimeoutSec * 1000) {
+        _triggerCompleted();
+      }
     }
+  }
+
+  bool _canSpeakOcclusionPrompt() {
+    if (_lastOcclusionTts == null) return true;
+    return DateTime.now().difference(_lastOcclusionTts!).inSeconds >= kFeedbackCooldownSec;
   }
 
   // ── COMPLETED ──────────────────────────────────────────
@@ -378,6 +424,27 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 fontSize: 160,
                 fontWeight: FontWeight.w900,
                 color: Colors.white,
+              ),
+            ),
+          ),
+
+        // ACTIVE — mid-session occlusion banner (orange, top).
+        if (_phase == WorkoutPhase.active && _isOccluded)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              color: Colors.orange.withValues(alpha: 0.85),
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+              child: const Text(
+                'Move into frame — keep all joints visible',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
           ),

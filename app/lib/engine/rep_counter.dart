@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../core/constants.dart';
 import '../core/types.dart';
 import '../models/landmark_types.dart';
@@ -60,6 +62,12 @@ class RepCounter {
 
   // Squat: track previous hip Y to detect rising direction.
   double? _prevHipY;
+
+  // Long-femur detection (squat only)
+  final List<double> _repMinAngles = [];
+  bool _longFemurDetected = false;
+  double _effectiveSquatBottomAngle = kSquatBottomAngle;
+  double? _minAngleThisRep;
 
   RepCounter({this.exercise = ExerciseType.bicepsCurl, this.side = ExerciseSide.both});
 
@@ -147,13 +155,20 @@ class RepCounter {
   void _runSquatFsm(double smoothed, PoseResult result) {
     final hipY = _computeHipY(result);
 
+    // Track minimum knee angle during active descent for long-femur detection.
+    if (_state == RepState.descending || _state == RepState.bottom) {
+      if (_minAngleThisRep == null || smoothed < _minAngleThisRep!) {
+        _minAngleThisRep = smoothed;
+      }
+    }
+
     switch (_state) {
       case RepState.idle:
         if (smoothed < kSquatStartAngle) {
           _state = RepState.descending;
         }
       case RepState.descending:
-        if (smoothed < kSquatBottomAngle) {
+        if (smoothed < _effectiveSquatBottomAngle) {
           _state = RepState.bottom;
         } else if (smoothed > kSquatStartAngle) {
           // User stood back up before reaching bottom — abort
@@ -168,6 +183,20 @@ class RepCounter {
       case RepState.ascending:
         if (smoothed >= kSquatEndAngle) {
           _reps++;
+          // Long-femur detection: after kLongFemurDetectReps reps, check if
+          // the user never reached 90° but consistently reached 95–100°.
+          if (!_longFemurDetected && _minAngleThisRep != null) {
+            _repMinAngles.add(_minAngleThisRep!);
+            if (_repMinAngles.length >= kLongFemurDetectReps) {
+              final allAbove90 = _repMinAngles.every((a) => a > kSquatBottomAngle);
+              final allReached100 = _repMinAngles.every((a) => a <= kLongFemurBottomAngle);
+              if (allAbove90 && allReached100) {
+                _longFemurDetected = true;
+                _effectiveSquatBottomAngle = kLongFemurBottomAngle;
+                debugPrint('[RepCounter] Long-femur detected — relaxing BOTTOM to $kLongFemurBottomAngle°');
+              }
+            }
+          }
           _resetToIdle();
           _lastErrors = const [];
         }
@@ -212,6 +241,7 @@ class RepCounter {
   void _resetToIdle() {
     _state = RepState.idle;
     _prevHipY = null;
+    _minAngleThisRep = null;
     _form.onRepEnd();
     _stateStartTime = null;
   }
@@ -222,6 +252,10 @@ class RepCounter {
     _reps = 0;
     _angleBuffer.clear();
     _prevHipY = null;
+    _minAngleThisRep = null;
+    _repMinAngles.clear();
+    _longFemurDetected = false;
+    _effectiveSquatBottomAngle = kSquatBottomAngle;
     _form.reset();
     _state = RepState.idle;
     _stateStartTime = null;
@@ -235,6 +269,10 @@ class RepCounter {
     _state = RepState.idle;
     _angleBuffer.clear();
     _prevHipY = null;
+    _minAngleThisRep = null;
+    _repMinAngles.clear();
+    _longFemurDetected = false;
+    _effectiveSquatBottomAngle = kSquatBottomAngle;
     _form.reset();
     _stateStartTime = null;
     _lastErrors = const [];

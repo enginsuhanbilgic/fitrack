@@ -72,6 +72,20 @@ const double kPushUpBottomAngle = 90.0;
 /// ASCENDING → IDLE when elbow angle returns above this → rep++.
 const double kPushUpEndAngle = 160.0;
 
+// ── Mid-session occlusion ────────────────────────────────
+/// Seconds of partial occlusion before showing adjustment prompt.
+const double kOcclusionPromptSec = 1.5;
+
+/// Consecutive good frames required to auto-resume after occlusion.
+const int kOcclusionResumeFrames = 5;
+
+// ── Long-femur squat adaptation ──────────────────────────
+/// Fallback BOTTOM angle for users whose anatomy prevents reaching 90°.
+const double kLongFemurBottomAngle = 100.0;
+
+/// Number of completed reps used to detect long-femur pattern.
+const int kLongFemurDetectReps = 3;
+
 // ── Countdown & Session ──────────────────────────────────
 /// Starting value for the hands-free countdown (counts down to 1 then fires GO).
 const int kCountdownSeconds = 3;
