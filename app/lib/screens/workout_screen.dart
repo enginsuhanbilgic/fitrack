@@ -61,7 +61,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   void initState() {
     super.initState();
     _pose = MlKitPoseService();
-    _repCounter = RepCounter();
+    _repCounter = RepCounter(exercise: widget.exercise);
     _tts = TtsService();
     _init();
   }
@@ -391,7 +391,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
               reps: _snapshot.reps,
               sets: _snapshot.sets,
               state: _snapshot.state,
-              elbowAngle: _snapshot.elbowAngle,
+              jointAngle: _snapshot.jointAngle,
               activeErrors: _snapshot.formErrors,
             ),
           ),

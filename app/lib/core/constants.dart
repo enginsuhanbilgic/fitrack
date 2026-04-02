@@ -52,6 +52,26 @@ const int kCameraFps = 30;
 /// gate before transitioning from SETUP_CHECK to COUNTDOWN.
 const int kSetupCheckFrames = 10;
 
+// ── Squat FSM thresholds (degrees) ──────────────────────
+/// IDLE → DESCENDING when knee angle drops below this.
+const double kSquatStartAngle = 160.0;
+
+/// DESCENDING → BOTTOM when knee angle drops below this.
+const double kSquatBottomAngle = 90.0;
+
+/// ASCENDING → IDLE when knee angle returns above this → rep++.
+const double kSquatEndAngle = 160.0;
+
+// ── Push-up FSM thresholds (degrees) ────────────────────
+/// IDLE → DESCENDING when elbow angle drops below this.
+const double kPushUpStartAngle = 160.0;
+
+/// DESCENDING → BOTTOM when elbow angle drops below this.
+const double kPushUpBottomAngle = 90.0;
+
+/// ASCENDING → IDLE when elbow angle returns above this → rep++.
+const double kPushUpEndAngle = 160.0;
+
 // ── Countdown & Session ──────────────────────────────────
 /// Starting value for the hands-free countdown (counts down to 1 then fires GO).
 const int kCountdownSeconds = 3;

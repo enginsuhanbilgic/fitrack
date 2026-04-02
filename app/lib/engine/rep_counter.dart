@@ -10,27 +10,37 @@ class RepSnapshot {
   final int reps;
   final int sets;
   final RepState state;
-  final double? elbowAngle;
+  final double? jointAngle;
   final List<FormError> formErrors;
 
   const RepSnapshot({
     required this.reps,
     required this.sets,
     required this.state,
-    this.elbowAngle,
+    this.jointAngle,
     this.formErrors = const [],
   });
 }
 
-/// 4-state FSM for biceps curl counting with form analysis.
+/// Multi-exercise rep counter. Drives a 4-state FSM for biceps curl
+/// and a 4-state FSM for squat / push-up.
 ///
-/// States per proposal (Figure 5):
-///   IDLE  ──[θ < 150°]──►  CONCENTRIC  ──[θ ≤ 40°]──►  PEAK
-///     ▲                                                   │
-///     │                                                   │ [θ > 50°]
-///     │                                                   ▼
-///     └───────────[θ ≥ 160°, rep++]──────  ECCENTRIC ◄────┘
+/// Biceps curl (elbow angle θ):
+///   IDLE ──[θ < 150°]──► CONCENTRIC ──[θ ≤ 40°]──► PEAK
+///     ▲                                                │ [θ > 50°]
+///     └───────────[θ ≥ 160°, rep++]──── ECCENTRIC ◄───┘
+///
+/// Squat (knee angle θ, + hip Y direction):
+///   IDLE ──[θ < 160°]──► DESCENDING ──[θ < 90°]──► BOTTOM
+///     ▲                                                │ [hipY decreasing]
+///     └───────────[θ > 160°, rep++]──── ASCENDING ◄───┘
+///
+/// Push-up (elbow angle θ):
+///   IDLE ──[θ < 160°]──► DESCENDING ──[θ < 90°]──► BOTTOM
+///     ▲                                                │ [θ > 90°]
+///     └───────────[θ > 160°, rep++]──── ASCENDING ◄───┘
 class RepCounter {
+  final ExerciseType exercise;
   final ExerciseSide side;
   final FormAnalyzer _form = FormAnalyzer();
 
@@ -40,7 +50,7 @@ class RepCounter {
   double? _lastAngle;
   List<FormError> _lastErrors = const [];
 
-  // Timing & Debounce (Index-1)
+  // Timing & Debounce
   DateTime? _lastTransitionTime;
   DateTime? _stateStartTime;
 
@@ -48,7 +58,10 @@ class RepCounter {
   final List<double> _angleBuffer = [];
   static const int _smoothWindow = 3;
 
-  RepCounter({this.side = ExerciseSide.both});
+  // Squat: track previous hip Y to detect rising direction.
+  double? _prevHipY;
+
+  RepCounter({this.exercise = ExerciseType.bicepsCurl, this.side = ExerciseSide.both});
 
   RepSnapshot update(PoseResult result) {
     final now = DateTime.now();
@@ -62,10 +75,9 @@ class RepCounter {
     // Simple moving-average smoothing on the angle.
     _angleBuffer.add(angle);
     if (_angleBuffer.length > _smoothWindow) _angleBuffer.removeAt(0);
-    final smoothed =
-        _angleBuffer.reduce((a, b) => a + b) / _angleBuffer.length;
+    final smoothed = _angleBuffer.reduce((a, b) => a + b) / _angleBuffer.length;
 
-    // Check Stuck-State Timer (Zombie detection)
+    // Stuck-State Timer (Zombie detection)
     if (_state != RepState.idle && _stateStartTime != null) {
       if (now.difference(_stateStartTime!) > kStuckStateLimit) {
         _resetToIdle();
@@ -73,45 +85,21 @@ class RepCounter {
       }
     }
 
-    // Check Transition Lockout (Debounce)
+    // Transition Lockout (Debounce)
     if (_lastTransitionTime != null &&
         now.difference(_lastTransitionTime!) < kStateDebounce) {
       return _snapshot();
     }
 
-    // ── FSM transitions ──
     final oldState = _state;
-    switch (_state) {
-      case RepState.idle:
-        if (smoothed < kCurlStartAngle) {
-          _state = RepState.concentric;
-          _form.onRepStart(result);
-        }
-        break;
 
-      case RepState.concentric:
-        _lastErrors = _form.evaluate(result);
-        if (smoothed <= kCurlPeakAngle) {
-          _state = RepState.peak;
-        } else if (smoothed > kCurlStartAngle) {
-          _resetToIdle();
-        }
-        break;
-
-      case RepState.peak:
-        if (smoothed > kCurlPeakExitAngle) {
-          _state = RepState.eccentric;
-        }
-        break;
-
-      case RepState.eccentric:
-        _lastErrors = _form.evaluate(result);
-        if (smoothed >= kCurlEndAngle) {
-          _reps++;
-          _resetToIdle();
-          _lastErrors = const [];
-        }
-        break;
+    switch (exercise) {
+      case ExerciseType.bicepsCurl:
+        _runCurlFsm(smoothed, result);
+      case ExerciseType.squat:
+        _runSquatFsm(smoothed, result);
+      case ExerciseType.pushUp:
+        _runPushUpFsm(smoothed, result);
     }
 
     if (_state != oldState) {
@@ -122,8 +110,108 @@ class RepCounter {
     return _snapshot();
   }
 
+  // ── Biceps Curl FSM ───────────────────────────────────
+
+  void _runCurlFsm(double smoothed, PoseResult result) {
+    switch (_state) {
+      case RepState.idle:
+        if (smoothed < kCurlStartAngle) {
+          _state = RepState.concentric;
+          _form.onRepStart(result);
+        }
+      case RepState.concentric:
+        _lastErrors = _form.evaluate(result);
+        if (smoothed <= kCurlPeakAngle) {
+          _state = RepState.peak;
+        } else if (smoothed > kCurlStartAngle) {
+          _resetToIdle();
+        }
+      case RepState.peak:
+        if (smoothed > kCurlPeakExitAngle) {
+          _state = RepState.eccentric;
+        }
+      case RepState.eccentric:
+        _lastErrors = _form.evaluate(result);
+        if (smoothed >= kCurlEndAngle) {
+          _reps++;
+          _resetToIdle();
+          _lastErrors = const [];
+        }
+      default:
+        break;
+    }
+  }
+
+  // ── Squat FSM ─────────────────────────────────────────
+
+  void _runSquatFsm(double smoothed, PoseResult result) {
+    final hipY = _computeHipY(result);
+
+    switch (_state) {
+      case RepState.idle:
+        if (smoothed < kSquatStartAngle) {
+          _state = RepState.descending;
+        }
+      case RepState.descending:
+        if (smoothed < kSquatBottomAngle) {
+          _state = RepState.bottom;
+        } else if (smoothed > kSquatStartAngle) {
+          // User stood back up before reaching bottom — abort
+          _resetToIdle();
+        }
+      case RepState.bottom:
+        // Transition to ascending only when hip is actually rising.
+        // In screen coordinates Y=0 is top, so rising = Y decreasing.
+        if (hipY != null && _prevHipY != null && hipY < _prevHipY!) {
+          _state = RepState.ascending;
+        }
+      case RepState.ascending:
+        if (smoothed >= kSquatEndAngle) {
+          _reps++;
+          _resetToIdle();
+          _lastErrors = const [];
+        }
+      default:
+        break;
+    }
+
+    _prevHipY = hipY;
+  }
+
+  // ── Push-up FSM ───────────────────────────────────────
+
+  void _runPushUpFsm(double smoothed, PoseResult result) {
+    switch (_state) {
+      case RepState.idle:
+        if (smoothed < kPushUpStartAngle) {
+          _state = RepState.descending;
+        }
+      case RepState.descending:
+        if (smoothed < kPushUpBottomAngle) {
+          _state = RepState.bottom;
+        } else if (smoothed > kPushUpStartAngle) {
+          _resetToIdle();
+        }
+      case RepState.bottom:
+        if (smoothed > kPushUpBottomAngle) {
+          _state = RepState.ascending;
+        }
+      case RepState.ascending:
+        if (smoothed >= kPushUpEndAngle) {
+          _reps++;
+          _resetToIdle();
+          _lastErrors = const [];
+        }
+      default:
+        break;
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────
+
   void _resetToIdle() {
     _state = RepState.idle;
+    _prevHipY = null;
     _form.onRepEnd();
     _stateStartTime = null;
   }
@@ -133,6 +221,7 @@ class RepCounter {
     _sets++;
     _reps = 0;
     _angleBuffer.clear();
+    _prevHipY = null;
     _form.reset();
     _state = RepState.idle;
     _stateStartTime = null;
@@ -145,45 +234,78 @@ class RepCounter {
     _sets = 1;
     _state = RepState.idle;
     _angleBuffer.clear();
+    _prevHipY = null;
     _form.reset();
     _stateStartTime = null;
     _lastErrors = const [];
     _lastAngle = null;
   }
 
-  // ── Private helpers ──
-
   double? _computeAngle(PoseResult r) {
-    // Compute both arms, pick based on [side].
-    final leftAngle = angleDeg(
-      r.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
-      r.landmark(LM.leftElbow, minConfidence: kMinLandmarkConfidence),
-      r.landmark(LM.leftWrist, minConfidence: kMinLandmarkConfidence),
-    );
-    final rightAngle = angleDeg(
-      r.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
-      r.landmark(LM.rightElbow, minConfidence: kMinLandmarkConfidence),
-      r.landmark(LM.rightWrist, minConfidence: kMinLandmarkConfidence),
-    );
-
-    switch (side) {
-      case ExerciseSide.left:
-        return leftAngle;
-      case ExerciseSide.right:
-        return rightAngle;
-      case ExerciseSide.both:
-        if (leftAngle != null && rightAngle != null) {
-          return (leftAngle + rightAngle) / 2.0;
+    switch (exercise) {
+      case ExerciseType.bicepsCurl:
+        final leftAngle = angleDeg(
+          r.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftElbow, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftWrist, minConfidence: kMinLandmarkConfidence),
+        );
+        final rightAngle = angleDeg(
+          r.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightElbow, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightWrist, minConfidence: kMinLandmarkConfidence),
+        );
+        switch (side) {
+          case ExerciseSide.left:
+            return leftAngle;
+          case ExerciseSide.right:
+            return rightAngle;
+          case ExerciseSide.both:
+            if (leftAngle != null && rightAngle != null) return (leftAngle + rightAngle) / 2.0;
+            return leftAngle ?? rightAngle;
         }
+
+      case ExerciseType.squat:
+        final leftAngle = angleDeg(
+          r.landmark(LM.leftHip, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftKnee, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftAnkle, minConfidence: kMinLandmarkConfidence),
+        );
+        final rightAngle = angleDeg(
+          r.landmark(LM.rightHip, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightKnee, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightAnkle, minConfidence: kMinLandmarkConfidence),
+        );
+        if (leftAngle != null && rightAngle != null) return (leftAngle + rightAngle) / 2.0;
+        return leftAngle ?? rightAngle;
+
+      case ExerciseType.pushUp:
+        final leftAngle = angleDeg(
+          r.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftElbow, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftWrist, minConfidence: kMinLandmarkConfidence),
+        );
+        final rightAngle = angleDeg(
+          r.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightElbow, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightWrist, minConfidence: kMinLandmarkConfidence),
+        );
+        if (leftAngle != null && rightAngle != null) return (leftAngle + rightAngle) / 2.0;
         return leftAngle ?? rightAngle;
     }
+  }
+
+  double? _computeHipY(PoseResult r) {
+    final left = r.landmark(LM.leftHip, minConfidence: kMinLandmarkConfidence);
+    final right = r.landmark(LM.rightHip, minConfidence: kMinLandmarkConfidence);
+    if (left != null && right != null) return (left.y + right.y) / 2.0;
+    return left?.y ?? right?.y;
   }
 
   RepSnapshot _snapshot() => RepSnapshot(
         reps: _reps,
         sets: _sets,
         state: _state,
-        elbowAngle: _lastAngle,
+        jointAngle: _lastAngle,
         formErrors: _lastErrors,
       );
 }

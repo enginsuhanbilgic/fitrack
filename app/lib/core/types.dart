@@ -14,12 +14,17 @@ enum ExerciseType {
 /// Which side the user is training (affects which arm/leg we track).
 enum ExerciseSide { left, right, both }
 
-/// 4-state rep FSM per the proposal (Section 2.1, Figure 5).
+/// Rep FSM states — curl uses concentric/peak/eccentric; squat+push-up use descending/bottom/ascending.
 enum RepState {
-  idle,        // arm extended, waiting
+  idle,
+  // Biceps curl phases
   concentric,  // lifting phase
   peak,        // top of curl
   eccentric,   // lowering phase
+  // Squat + push-up phases
+  descending,  // moving down
+  bottom,      // lowest point reached
+  ascending,   // moving back up
 }
 
 /// Types of form errors we can detect.

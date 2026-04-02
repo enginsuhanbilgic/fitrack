@@ -6,7 +6,7 @@ class RepCounterDisplay extends StatelessWidget {
   final int reps;
   final int sets;
   final RepState state;
-  final double? elbowAngle;
+  final double? jointAngle;
   final List<FormError> activeErrors;
 
   const RepCounterDisplay({
@@ -14,7 +14,7 @@ class RepCounterDisplay extends StatelessWidget {
     required this.reps,
     required this.sets,
     required this.state,
-    this.elbowAngle,
+    this.jointAngle,
     this.activeErrors = const [],
   });
 
@@ -59,7 +59,7 @@ class RepCounterDisplay extends StatelessWidget {
           // State + angle.
           Text(
             '${state.name.toUpperCase()}'
-            '${elbowAngle != null ? '  ${elbowAngle!.toInt()}°' : ''}',
+            '${jointAngle != null ? '  ${jointAngle!.toInt()}°' : ''}',
             style: const TextStyle(color: Colors.white54, fontSize: 12),
           ),
           // Form errors.
