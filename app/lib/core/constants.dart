@@ -46,3 +46,8 @@ const double kOneEuroDCutoff = 1.0;
 
 // ── Camera ──────────────────────────────────────────────
 const int kCameraFps = 30;
+
+// ── Setup Check ─────────────────────────────────────────
+/// Number of consecutive frames all required landmarks must pass the confidence
+/// gate before transitioning from SETUP_CHECK to ACTIVE.
+const int kSetupCheckFrames = 10;

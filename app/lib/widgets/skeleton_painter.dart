@@ -7,19 +7,22 @@ class SkeletonPainter extends CustomPainter {
   final List<PoseLandmark> landmarks;
   final bool mirror;
 
-  SkeletonPainter({required this.landmarks, this.mirror = true});
+  /// Optional per-landmark color override keyed by ML Kit landmark index.
+  /// When provided, joints use the mapped color instead of the default cyan.
+  /// Bone connections use the override color only if both endpoints share the
+  /// same override color; otherwise the default green is used.
+  final Map<int, Color>? landmarkColors;
+
+  SkeletonPainter({
+    required this.landmarks,
+    this.mirror = true,
+    this.landmarkColors,
+  });
 
   static const double _minScore = 0.3;
 
-  final _bonePaint = Paint()
-    ..color = const Color(0xFF00E676)
-    ..strokeWidth = 3.0
-    ..style = PaintingStyle.stroke
-    ..strokeCap = StrokeCap.round;
-
-  final _jointPaint = Paint()
-    ..color = const Color(0xFF00BCD4)
-    ..style = PaintingStyle.fill;
+  static const Color _defaultBoneColor = Color(0xFF00E676);
+  static const Color _defaultJointColor = Color(0xFF00BCD4);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -37,17 +40,32 @@ class SkeletonPainter extends CustomPainter {
       if (a == null || b == null) continue;
       if (a.confidence < _minScore || b.confidence < _minScore) continue;
 
+      final colorA = landmarkColors?[startIdx];
+      final colorB = landmarkColors?[endIdx];
+      final boneColor = (colorA != null && colorA == colorB)
+          ? colorA
+          : _defaultBoneColor;
+
       canvas.drawLine(
         _toOffset(a, size),
         _toOffset(b, size),
-        _bonePaint,
+        Paint()
+          ..color = boneColor
+          ..strokeWidth = 3.0
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round,
       );
     }
 
     // Draw joints.
     for (final lm in landmarks) {
       if (lm.confidence < _minScore) continue;
-      canvas.drawCircle(_toOffset(lm, size), 5, _jointPaint);
+      final jointColor = landmarkColors?[lm.type] ?? _defaultJointColor;
+      canvas.drawCircle(
+        _toOffset(lm, size),
+        5,
+        Paint()..color = jointColor..style = PaintingStyle.fill,
+      );
     }
   }
 

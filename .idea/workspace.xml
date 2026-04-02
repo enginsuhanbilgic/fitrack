@@ -4,11 +4,17 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="first branch alihan">
+    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="docs: formalize exercise guidelines for biceps curl, squat, push-up&#10;Define rep counting FSM per exercise, camera placement specs, required ML Kit landmarks, and failure case detection rules.&#10;Add data collection checklist. Closes #6&#10;By the 01_EXERCISE_GUIDELINES.md and 01_RESEARCH_Biometrics_Refinement.md">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/ios/Flutter/Debug.xcconfig" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Flutter/Debug.xcconfig" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/ios/Flutter/Release.xcconfig" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Flutter/Release.xcconfig" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/core/constants.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/constants.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/engine/form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/form_analyzer.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/types.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/types.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/widgets/skeleton_painter.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/skeleton_painter.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pubspec.lock" beforeDir="false" afterPath="$PROJECT_DIR$/app/pubspec.lock" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -114,7 +120,15 @@
       <option name="project" value="LOCAL" />
       <updated>1775081247343</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="docs: formalize exercise guidelines for biceps curl, squat, push-up&#10;Define rep counting FSM per exercise, camera placement specs, required ML Kit landmarks, and failure case detection rules.&#10;Add data collection checklist. Closes #6&#10;By the 01_EXERCISE_GUIDELINES.md and 01_RESEARCH_Biometrics_Refinement.md">
+      <option name="closed" value="true" />
+      <created>1775085847860</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1775085847860</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -132,7 +146,8 @@
     <MESSAGE value="feat: enhance bicep curl detection with multiple exercise types and add landmark smoothing" />
     <MESSAGE value="fix" />
     <MESSAGE value="first branch alihan" />
-    <option name="LAST_COMMIT_MESSAGE" value="first branch alihan" />
+    <MESSAGE value="docs: formalize exercise guidelines for biceps curl, squat, push-up&#10;Define rep counting FSM per exercise, camera placement specs, required ML Kit landmarks, and failure case detection rules.&#10;Add data collection checklist. Closes #6&#10;By the 01_EXERCISE_GUIDELINES.md and 01_RESEARCH_Biometrics_Refinement.md" />
+    <option name="LAST_COMMIT_MESSAGE" value="docs: formalize exercise guidelines for biceps curl, squat, push-up&#10;Define rep counting FSM per exercise, camera placement specs, required ML Kit landmarks, and failure case detection rules.&#10;Add data collection checklist. Closes #6&#10;By the 01_EXERCISE_GUIDELINES.md and 01_RESEARCH_Biometrics_Refinement.md" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

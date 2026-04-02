@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import '../core/constants.dart';
 import '../core/types.dart';
 import '../engine/landmark_smoother.dart';
 import '../engine/rep_counter.dart';
@@ -28,6 +29,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   bool _isReady = false;
   bool _isProcessing = false;
   String? _error;
+
+  // Setup check state.
+  WorkoutPhase _phase = WorkoutPhase.setupCheck;
+  int _setupOkFrames = 0;
+  Map<int, Color> _landmarkColors = {};
 
   // Per-frame display state.
   List<PoseLandmark> _landmarks = [];
@@ -76,9 +82,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
       if (result.isEmpty || !mounted) return;
 
-      // Run rep counter on raw landmarks.
-      final snapshot = _repCounter.update(result);
-
       // Smooth + mirror for display only.
       final mirrored = result.landmarks.map((lm) => PoseLandmark(
         type: lm.type,
@@ -88,14 +91,60 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       )).toList();
       final smoothed = _smoother.smooth(mirrored);
 
-      if (mounted) {
-        setState(() {
-          _landmarks = smoothed;
-          _snapshot = snapshot;
-        });
+      if (_phase == WorkoutPhase.setupCheck) {
+        _updateSetupCheck(result, smoothed);
+      } else {
+        // Run rep counter on raw landmarks.
+        final snapshot = _repCounter.update(result);
+        if (mounted) {
+          setState(() {
+            _landmarks = smoothed;
+            _snapshot = snapshot;
+            _landmarkColors = {};
+          });
+        }
       }
     } catch (_) {
       // Silently drop bad frames — don't crash the stream.
+    }
+  }
+
+  void _updateSetupCheck(dynamic result, List<PoseLandmark> smoothed) {
+    final requirements = ExerciseRequirements.forExercise(widget.exercise);
+    final colors = <int, Color>{};
+    var allVisible = true;
+
+    for (final idx in requirements.landmarkIndices) {
+      final lm = result.landmark(idx, minConfidence: kMinLandmarkConfidence);
+      if (lm != null) {
+        colors[idx] = const Color(0xFF00E676); // green — visible
+      } else {
+        colors[idx] = Colors.redAccent; // red — not visible
+        allVisible = false;
+      }
+    }
+
+    if (allVisible) {
+      _setupOkFrames++;
+      if (_setupOkFrames >= kSetupCheckFrames) {
+        if (mounted) {
+          setState(() {
+            _phase = WorkoutPhase.active;
+            _landmarks = smoothed;
+            _landmarkColors = {};
+          });
+        }
+        return;
+      }
+    } else {
+      _setupOkFrames = 0;
+    }
+
+    if (mounted) {
+      setState(() {
+        _landmarks = smoothed;
+        _landmarkColors = colors;
+      });
     }
   }
 
@@ -113,20 +162,21 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       appBar: AppBar(
         title: Text(widget.exercise.label),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.replay),
-            tooltip: 'New set',
-            onPressed: () {
-              _repCounter.nextSet();
-              setState(() {
-                _snapshot = RepSnapshot(
-                  reps: 0,
-                  sets: _snapshot.sets + 1,
-                  state: RepState.idle,
-                );
-              });
-            },
-          ),
+          if (_phase == WorkoutPhase.active)
+            IconButton(
+              icon: const Icon(Icons.replay),
+              tooltip: 'New set',
+              onPressed: () {
+                _repCounter.nextSet();
+                setState(() {
+                  _snapshot = RepSnapshot(
+                    reps: 0,
+                    sets: _snapshot.sets + 1,
+                    state: RepState.idle,
+                  );
+                });
+              },
+            ),
         ],
       ),
       body: _buildBody(),
@@ -180,22 +230,43 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             painter: SkeletonPainter(
               landmarks: _landmarks,
               mirror: false, // already mirrored above
+              landmarkColors: _landmarkColors.isNotEmpty ? _landmarkColors : null,
             ),
             size: Size.infinite,
           ),
 
-        // Rep counter overlay — bottom left.
-        Positioned(
-          left: 16,
-          bottom: 32,
-          child: RepCounterDisplay(
-            reps: _snapshot.reps,
-            sets: _snapshot.sets,
-            state: _snapshot.state,
-            elbowAngle: _snapshot.elbowAngle,
-            activeErrors: _snapshot.formErrors,
+        // Setup check banner — visible until all required landmarks are confirmed.
+        if (_phase == WorkoutPhase.setupCheck)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              color: Colors.black87,
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+              child: Text(
+                _setupOkFrames > 0
+                    ? 'Almost there… ($_setupOkFrames / $kSetupCheckFrames)'
+                    : 'Step back until your full body is visible',
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
+            ),
           ),
-        ),
+
+        // Rep counter overlay — bottom left, only during active phase.
+        if (_phase == WorkoutPhase.active)
+          Positioned(
+            left: 16,
+            bottom: 32,
+            child: RepCounterDisplay(
+              reps: _snapshot.reps,
+              sets: _snapshot.sets,
+              state: _snapshot.state,
+              elbowAngle: _snapshot.elbowAngle,
+              activeErrors: _snapshot.formErrors,
+            ),
+          ),
       ],
     );
   }

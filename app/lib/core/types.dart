@@ -28,3 +28,23 @@ enum FormError {
   elbowDrift,  // elbow moving forward/backward
   shortRom,    // half-rep / insufficient range of motion
 }
+
+/// Top-level session lifecycle state.
+enum WorkoutPhase { setupCheck, active }
+
+/// Required ML Kit landmark indices per exercise.
+class ExerciseRequirements {
+  final List<int> landmarkIndices;
+  const ExerciseRequirements(this.landmarkIndices);
+
+  static ExerciseRequirements forExercise(ExerciseType type) {
+    switch (type) {
+      case ExerciseType.bicepsCurl:
+        return const ExerciseRequirements([11, 12, 13, 14, 15, 16, 23, 24]);
+      case ExerciseType.squat:
+        return const ExerciseRequirements([23, 24, 25, 26, 27, 28]);
+      case ExerciseType.pushUp:
+        return const ExerciseRequirements([11, 12, 13, 14, 15, 16, 23, 24, 25, 26]);
+    }
+  }
+}
