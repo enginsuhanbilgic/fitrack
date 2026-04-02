@@ -1,0 +1,54 @@
+# ─── macOS ───────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ─── IntelliJ / Android Studio ──────────────────────────
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/dictionaries/
+.idea/shelf/
+.idea/caches/
+.idea/copilot.data.migration.ask2agent.xml
+.idea/markdown.xml
+.idea/vcs.xml
+*.iml
+*.ipr
+*.iws
+
+# ─── AI Agent Tooling ────────────────────────────────────
+# Never commit AI tool internals or session state
+.idea
+.claude/
+.agent/
+.gemini/
+CLAUDE.md
+GEMINI.md
+AGENT_DIRECTIVES.md
+.agent_brain
+plans_of_claude
+.idea
+
+
+
+# ─── Logs & Temp ─────────────────────────────────────────
+*.log
+*.tmp
+*.swp
+*.bak
+
+# ─── Android build artifacts ─────────────────────────────
+/app/android/app/debug/
+/app/android/app/profile/
+/app/android/app/release/
+/benchmark/kotlin/**/build/
+/benchmark/kotlin/**/.gradle/
+/benchmark/kotlin/**/local.properties
+
+# ─── Flutter / Dart (root level) ─────────────────────────
+# app/ has its own .gitignore; these cover any root-level drift
+.dart_tool/
+.pub-cache/
+.pub/
+/build/

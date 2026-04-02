@@ -31,7 +31,7 @@ class HomeScreen extends StatelessWidget {
               _ExerciseCard(
                 icon: Icons.fitness_center,
                 title: ExerciseType.bicepsCurl.label,
-                subtitle: 'Front camera · standing',
+                subtitle: 'Front camera · stand 2 m away, side profile',
                 enabled: true,
                 onTap: () => _startWorkout(context, ExerciseType.bicepsCurl),
               ),
@@ -39,17 +39,17 @@ class HomeScreen extends StatelessWidget {
               _ExerciseCard(
                 icon: Icons.airline_seat_legroom_extra,
                 title: ExerciseType.squat.label,
-                subtitle: 'Coming soon',
-                enabled: false,
-                onTap: () {},
+                subtitle: 'Front camera · stand 2 m away, full body visible',
+                enabled: true,
+                onTap: () => _startWorkout(context, ExerciseType.squat),
               ),
               const SizedBox(height: 16),
               _ExerciseCard(
                 icon: Icons.sports_gymnastics,
                 title: ExerciseType.pushUp.label,
-                subtitle: 'Coming soon',
-                enabled: false,
-                onTap: () {},
+                subtitle: 'Side camera · place phone at floor level, 1.5 m away',
+                enabled: true,
+                onTap: () => _startWorkout(context, ExerciseType.pushUp),
               ),
             ],
           ),
@@ -98,19 +98,22 @@ class _ExerciseCard extends StatelessWidget {
               children: [
                 Icon(icon, size: 36, color: const Color(0xFF00E676)),
                 const SizedBox(width: 20),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text(subtitle,
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 13)),
-                  ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: const TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text(subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 13)),
+                    ],
+                  ),
                 ),
-                const Spacer(),
                 if (enabled)
                   const Icon(Icons.chevron_right, color: Colors.white38),
               ],

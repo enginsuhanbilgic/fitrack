@@ -6,7 +6,7 @@ class RepCounterDisplay extends StatelessWidget {
   final int reps;
   final int sets;
   final RepState state;
-  final double? elbowAngle;
+  final double? jointAngle;
   final List<FormError> activeErrors;
 
   const RepCounterDisplay({
@@ -14,7 +14,7 @@ class RepCounterDisplay extends StatelessWidget {
     required this.reps,
     required this.sets,
     required this.state,
-    this.elbowAngle,
+    this.jointAngle,
     this.activeErrors = const [],
   });
 
@@ -59,7 +59,7 @@ class RepCounterDisplay extends StatelessWidget {
           // State + angle.
           Text(
             '${state.name.toUpperCase()}'
-            '${elbowAngle != null ? '  ${elbowAngle!.toInt()}°' : ''}',
+            '${jointAngle != null ? '  ${jointAngle!.toInt()}°' : ''}',
             style: const TextStyle(color: Colors.white54, fontSize: 12),
           ),
           // Form errors.
@@ -79,14 +79,13 @@ class RepCounterDisplay extends StatelessWidget {
     );
   }
 
-  String _errorLabel(FormError err) {
-    switch (err) {
-      case FormError.torsoSwing:
-        return 'Keep your torso still';
-      case FormError.elbowDrift:
-        return 'Keep your elbow still';
-      case FormError.shortRom:
-        return 'Full range of motion';
-    }
-  }
+  String _errorLabel(FormError err) => switch (err) {
+    FormError.torsoSwing     => 'Keep your torso still',
+    FormError.elbowDrift     => 'Keep your elbow still',
+    FormError.shortRom       => 'Full range of motion',
+    FormError.squatDepth     => 'Go deeper',
+    FormError.trunkTibia     => 'Keep your chest up',
+    FormError.hipSag         => 'Keep your body straight',
+    FormError.pushUpShortRom => 'Go lower',
+  };
 }

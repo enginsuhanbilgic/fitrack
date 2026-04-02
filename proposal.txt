@@ -1,0 +1,453 @@
+% !TEX program = pdflatex
+\documentclass[11pt]{article}
+
+% ---------- Packages ----------
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage[font=small]{caption}
+\usepackage{eurosym}
+\usepackage{amsmath}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue
+}
+
+% ---------- Helpers ----------
+\newcommand{\placeholderbox}[1]{%
+  \fbox{\parbox[c][2.3in][c]{0.92\linewidth}{\centering \textit{#1}}}%
+}
+
+\newcommand{\safeincludegraphics}[3]{%
+  % #1 = width, #2 = filename, #3 = placeholder text
+  \IfFileExists{#2}{\includegraphics[width=#1]{#2}}{\placeholderbox{#3}}%
+}
+
+\setlist[itemize]{noitemsep, topsep=3pt}
+
+% ---------- Document ----------
+\begin{document}
+
+% ===================== Title Page =====================
+\begin{center}
+{\Large \textbf{Ko\c{c} University -- COMP 491 Computer Engineering Design}}\\[6pt]
+{\large \textbf{Project Proposal}}\\[18pt]
+
+{\LARGE \textbf{FiTrack}}\\[6pt]
+{\large Spring 2026}\\[18pt]
+\end{center}
+
+\noindent\textbf{Participant Information:}
+
+\vspace{6pt}
+\begin{tabularx}{\textwidth}{@{}l l X l@{}}
+\toprule
+\textbf{Name} & \textbf{ID} & \textbf{Email} & \textbf{Phone}\\
+\midrule
+Abdulkadir Bilge & 76471 & abilge20@ku.edu.tr & 0545 956 9274\\
+Abdullah Tun\c{c}er & 75640 & atuncer20@ku.edu.tr & 0546 597 6590\\
+Ali Han K\i l\i n\c{c} & 75841 & akilinc20@ku.edu.tr & 0553 134 3927\\
+Engin S\"uhan Bilgi\c{c} & 75771 & ebilgic20@ku.edu.tr & 0551 980 5446\\
+Onuralp Keskin & 72725 & onuralpkeskin19@ku.edu.tr & 0532 139 9659\\
+\bottomrule
+\end{tabularx}
+
+\vspace{10pt}
+\noindent\textbf{Project Advisor:} Hakan Ayral
+
+\vspace{18pt}
+
+% ===================== Abstract =====================
+\begin{abstract}
+Many people train alone at home or in the gym without a coach. While online videos demonstrate correct technique, they cannot correct the user while the movement is being performed. As a result, users may repeatedly train with poor form, reducing training efficiency and sometimes increasing the risk of pain or injury. We think a smartphone assistant could provide a low-cost alternative for basic guidance.
+
+FiTrack is a mobile application that uses real-time, camera based pose detection to (1) visualize a skeleton overlay, (2) count repetitions and track sets, (3) provide basic, actionable form feedback, (4) keep a workout log with sets, reps, and weight, and (5) deliver hands-free guidance via a voice assistant. For the foundation, our goal is to build a system that supports three base exercises: \textit{biceps curl, squat, and push-up}. Throughout the proposal, we will use biceps curl as the example because it is relatively constrained and easier to validate, but the pipeline is intended to generalize to the other two base exercises.
+
+We plan to prioritize inference on the device for low latency and privacy. We will benchmark mobile ready pose estimation solutions such as MoveNet (TensorFlow Lite), MediaPipe Pose, and ML Kit Pose Detection, and then decide which model provides the best balance of speed, landmark stability, and integration effort. The expected outcome is a working Android prototype that runs in real time under specified camera placement conditions, provides measurable performance (FPS/latency) and accuracy metrics (rep counting and feedback triggers), and offers a foundation for future extensions such as reference based scoring.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ===================== SECTION 1 =====================
+\section{Introduction}
+
+\subsection{Concept}
+FiTrack is a mobile fitness assistant that provides real-time coaching signals using only a smartphone camera. The target users are individuals who train alone and want immediate feedback without buying extra hardware. The app tracks body landmarks from a live camera feed and draws a skeleton overlay. From these landmarks, FiTrack computes time-series features such as joint angles and normalized distances, then uses them for repetition counting and form feedback.
+
+A key motivation is usability during workouts: users are usually a few meters away from the phone. For this reason, we plan to add hands-free interaction to start and run sessions. We will explore a simple \textit{visual/audio trigger} to start an exercise session, such as an audible countdown with on-screen confirmation, and (if feasible) a lightweight automatic start mechanism based on detecting motion patterns. We will decide the exact interaction after early prototyping.
+
+The project is prioritized on Android first. We would like to consider iOS in future iterations, but we do not currently have a Mac device, so iOS development is not planned as a core deliverable. Still, we will try to keep the design modular so that the same pipeline could be adapted later.
+
+\subsection{Objectives}
+By the end of Spring 2026 (Week 14), we aim to deliver an Android prototype that provides real-time pose tracking, rep/set tracking, basic form feedback, voice guidance, and workout logging under clearly defined usage conditions.
+
+\begin{itemize}
+\item \textbf{O1: Real-time pose tracking and visualization.} Run at interactive speed on a mid-range Android device (target: $\geq 15$ FPS with overlay), with a nominal per-frame processing budget of approximately 66\,ms and end-to-end feedback latency not exceeding 200\,ms under recommended camera setup.
+\item \textbf{O2: Rep counting and set tracking for three base exercises.} Support rep counting for \textit{biceps curl, squat, and push-up}. We target $\geq 90\%$ session level rep counting accuracy for biceps curl and aim for comparable performance for squat/push-up under recommended camera placement (exact thresholds may be refined after data collection).
+\item \textbf{O3: Basic form feedback.} Provide conservative, interpretable feedback cues. For the biceps curl MVP, we will implement three core mistake types: torso swing, elbow drift, and short range of motion (ROM). For squat and push-up, we aim to implement at least a small initial set of cues (e.g., depth/hip angle cues for squat and hip sag/ROM cues for push-up).
+\item \textbf{O4: Hands-free interaction and voice guidance.} Provide rep announcements and short corrective cues, plus a hands-free start mechanism (e.g., countdown + audio; optional motion based auto start). Use a cooldown policy to avoid spamming.
+\item \textbf{O5: Workout logging and history.} Persist workout data locally (exercise, sets, reps, weight, timestamp) and display history across app restarts.
+\item \textbf{O6: Documentation and evaluation.} Produce a report with runtime measurements (FPS/latency) and accuracy metrics (rep counting and feedback trigger behavior), and clearly document limitations (camera placement, occlusion, lighting).
+\end{itemize}
+
+\subsection{Background}
+Camera-based human pose estimation has matured to the point where it can run on mobile devices with acceptable latency. MoveNet provides a fast 17-keypoint model with Lightning and Thunder variants intended for different latency/accuracy trade-offs \cite{movenet}. ML Kit Pose Detection provides 33 full-body landmarks with a base vs.\ accurate option, and documentation emphasizes that full body visibility and sufficient resolution are important for stable results \cite{mlkit_android}. MediaPipe Pose provides both normalized image landmarks and (in some versions) world landmarks in meters, which may be useful for certain viewpoint robust measurements \cite{mediapipe_pose}.
+
+Many fitness assistant pipelines build on pose estimation by computing joint angles and normalized geometric features, then applying rule-based logic or similarity scoring to detect reps and form errors. A practical challenge is that 2D projections vary with camera viewpoint, occlusions, lighting, and clothing. For our senior design project which is one semester, we think it is more realistic to define recommended camera placements per exercise and evaluate within those constraints rather than claiming full viewpoint invariance. Real-world gym datasets (e.g., M3GYM) highlight how complex gym settings can be, including occlusions and varying lighting \cite{m3gym}.
+
+For movement comparison and scoring, Dynamic Time Warping (DTW) is a common approach to align sequences performed at different speeds. DTW-based scoring has been used to compare user motion against a coach/reference sequence and convert distances into meaningful performance scores \cite{dtw_sensors}. In addition, Pose Trainer proposes a pose estimation based posture correction framework for exercise coaching \cite{pose_trainer}. We plan to treat reference based scoring as an optional extension; the primary deliverable remains a reliable on-device pipeline for rep counting and conservative feedback.
+
+\begin{figure}[H] \centering \safeincludegraphics{0.88\linewidth}{figures/mlkit_landmarks.png} {Figure placeholder: ML Kit's 33 pose landmarks (screenshot from ML Kit docs \cite{mlkit_android}).\\ Add an image file at \texttt{figures/mlkit\_landmarks.png}.} \caption{Pose landmarks visualization example \cite{mlkit_android}} \label{fig:mlkit_landmarks} \end{figure}
+
+\subsection{Minimum Viable Product (MVP) Definition}
+To ensure project success within the 12-week timeline, we define our MVP as a fully functional \textbf{Biceps Curl Assistant}. While the pipeline is designed to eventually support multiple exercises, the MVP phase prioritizes robust feedback and rep-counting specifically for the Biceps Curl.
+
+To be considered ``Done,'' the MVP must successfully handle the following:
+\begin{itemize}
+\item \textbf{Real-time Pose Tracking:} Stable keypoint detection at $\geq 15$ FPS.
+\item \textbf{Rep Counting logic:} A logic-based state machine (IDLE $\rightarrow$ CONCENTRIC $\rightarrow$ PEAK $\rightarrow$ ECCENTRIC $\rightarrow$ IDLE) to track sets and reps accurately.
+\item \textbf{Form Feedback (The MVP Rulebook):}
+    \begin{enumerate}
+        \item \textbf{Torso Swing Detection:} Measuring shoulder-to-hip horizontal displacement to detect momentum abuse.
+        \item \textbf{Elbow Stability Check:} Monitoring elbow landmark drift to ensure the shoulder isn't taking over the movement.
+        \item \textbf{ROM (Range of Motion) Check:} Identifying ``half-reps'' by monitoring joint angle thresholds.
+    \end{enumerate}
+\item \textbf{Primary Feedback Loop:} Visual skeleton overlay and voice-guided corrective cues.
+\end{itemize}
+Post-MVP goals include Squat and Push-up integration, and advanced history visualization. By strictly defining the MVP, we ensure the core architecture is rigorously tested and mathematically measurable.
+
+% ===================== SECTION 2 =====================
+\section{S/T Methodology and Associated Work Plan}
+
+\subsection{Methodology}
+FiTrack follows a modular pipeline from camera input to coaching output. We aim to keep the core loop lightweight enough for on-device real-time processing.
+
+\paragraph{Pose inference (on-device).}
+We will prototype three candidate solutions and decide based on early benchmarking:
+\begin{itemize}
+\item MoveNet (TensorFlow Lite) \cite{movenet}
+\item ML Kit Pose Detection on Android \cite{mlkit_android}
+\item MediaPipe Pose \cite{mediapipe_pose}
+\end{itemize}
+We will decide the final model after our experiments on frame rate, latency and landmark stability.
+
+\paragraph{System Architecture.}
+Figure~\ref{fig:detailed_arch_breakdown} organizes FiTrack into four main processing layers plus local persistence. \textbf{CameraX API} captures the live YUV frame stream from the phone camera. The \textbf{Inference Pipeline}, which runs on a background thread, performs pose estimation, jitter reduction using the 1\euro{} Filter, and feature extraction. The \textbf{Domain Logic} layer contains the rep state machine, form rulebook, and feedback coordinator responsible for cooldown and priority management. The \textbf{Presentation Layer} contains the Android UI, TTS engine, and Workout ViewModel, which render feedback and manage session state on the main thread. Workout data is stored locally through \textbf{Room Database}.
+
+\begin{figure}[H]
+\centering
+\safeincludegraphics{0.88\linewidth}{figures/detailed_arch_breakdown.png}
+{Figure placeholder}
+\caption{FiTrack high-level architecture. CameraX API provides the YUV frame stream; the Inference Pipeline performs pose estimation, smoothing, and feature extraction on a background thread; Domain Logic evaluates repetition state and form rules; and the Presentation Layer renders UI/TTS feedback and manages session state on the main thread. Workout data is stored locally through Room Database.}
+\label{fig:detailed_arch_breakdown}
+\end{figure}
+
+\paragraph{The Pipeline Breakdown (Life of a Frame).}
+To maintain interactive operation at $\geq 15$ FPS, the system targets a nominal per-frame processing budget of approximately ${\sim}66$\,ms. This frame-level budget is distinct from the overall end-to-end latency target of at most 200\,ms from frame capture to visible or audio feedback. The processing flow follows the same four-layer structure shown in Figure~\ref{fig:detailed_arch_breakdown}:
+\begin{enumerate}
+    \item \textbf{CameraX API ($< 10$\,ms target):} CameraX captures the YUV image frame and forwards it to the analysis pipeline.
+    \item \textbf{Inference Pipeline ($< 35$\,ms target):} The pose estimator predicts body landmarks with confidence scores, the 1\euro{} Filter smooths landmark trajectories, and feature extraction computes quantities such as $\theta_{elbow}$ and normalized distances like $\Delta X_{shoulder} / L_{torso}$. As an initial confidence gate, frames in which the required landmarks for the active exercise fall below $c = 0.4$ are ignored for rep counting and corrective feedback.
+    \item \textbf{Domain Logic ($< 10$\,ms target):} The rep state machine updates the current exercise phase, the form rulebook evaluates torso swing, elbow drift, and ROM conditions, and the feedback coordinator applies cooldown and priority rules before issuing feedback events.
+    \item \textbf{Presentation Layer ($< 10$\,ms target):} The Android UI renders the skeleton overlay and counters, the TTS engine delivers rep announcements or corrective cues, and the Workout ViewModel updates session state and persists logs through Room Database when needed.
+\end{enumerate}
+This layered design keeps the heavier inference stages off the main thread while still targeting user-visible feedback within the overall end-to-end latency budget of 200\,ms.
+
+\begin{figure}[H]
+\centering
+\safeincludegraphics{0.88\linewidth}{figures/pipeline_figure.png}
+{Figure placeholder}
+\caption{Layered FiTrack processing flow from camera input to user feedback. CameraX API supplies the YUV frame stream; the Inference Pipeline performs pose estimation, smoothing, and feature extraction; Domain Logic evaluates rep state and form rules; and the Presentation Layer renders UI/TTS feedback and manages session state. The system targets interactive performance at $\geq 15$ FPS (nominal ${\sim}66$\,ms per processed frame) and end-to-end feedback latency of at most 200\,ms.}
+\label{fig:pipeline_figure}
+\end{figure}
+
+\paragraph{Biomechanical Models and Landmark Tracking.}
+For clarity, the MVP description assumes a 33-landmark schema such as ML Kit / MediaPipe, where shoulders, elbows, wrists, and hips correspond to landmarks 11--16 and 23--24. If MoveNet is selected, the same logic will be implemented using the corresponding 17-keypoint mapping.
+
+\begin{figure}[H]
+\centering
+\safeincludegraphics{0.88\linewidth}{figures/biceps_curl_logic.png}
+{Figure placeholder}
+\caption{MVP Biomechanical Model for Biceps Curls. The elbow angle $\theta$ drives the rep state machine, while horizontal deviation $\Delta X$ identifies form errors.}
+\label{fig:biceps_curl_logic}
+\end{figure}
+
+The mathematical models driving the MVP include:
+\begin{itemize}
+    \item \textbf{Rep Counting (Elbow Angle $\theta$):} Calculated using the dot product of vectors from the elbow to the shoulder ($\vec{BA}$) and wrist ($\vec{BC}$).
+    \item \textbf{Torso Swing (Momentum Error):} We detect back swinging by measuring the horizontal displacement of the shoulder ($\Delta X_{shoulder}$), normalized by the torso length ($L_{torso} = |y_{23} - y_{11}|$). If $Swing_{score} > 0.15$, a "Don't swing" alert is triggered.
+    \item \textbf{Elbow Drift (Isolation Error):} We measure forward/backward elbow movement ($\Delta X_{elbow}$) normalized by $L_{torso}$. If $Drift_{score} > 0.10$, a ``Keep your elbow still'' alert is triggered.
+\end{itemize}
+
+\paragraph{Finite State Machine (FSM) Logic.}
+To prevent false-positive rep counts caused by minor camera jitter (e.g., hovering around a threshold), the logic engine employs an FSM with hysteresis thresholds.
+
+\begin{figure}[H]
+\centering
+\safeincludegraphics{0.88\linewidth}{figures/uml_states_transition.png}
+{Figure placeholder}
+\caption{Biceps Curl UML State Machine. Hysteresis thresholds ($150^\circ$, $40^\circ$, $50^\circ$, $160^\circ$) prevent noise-induced false rep counts. Form evaluation triggers user feedback exclusively during CONCENTRIC and ECCENTRIC states.}
+\label{fig:uml_states_transition}
+\end{figure}
+
+The state transitions are defined as follows:
+\begin{enumerate}
+    \item \textbf{IDLE $\rightarrow$ CONCENTRIC:} Triggered when $\theta < 150^\circ$. Form Rulebook activates to check for swinging.
+    \item \textbf{CONCENTRIC $\rightarrow$ PEAK:} Triggered when $\theta \leq 40^\circ$.
+    \item \textbf{PEAK $\rightarrow$ ECCENTRIC:} Triggered when $\theta > 50^\circ$ (a $10^\circ$ hysteresis gap prevents bouncing false alarms). Form Rulebook activates to check for elbow drift.
+    \item \textbf{ECCENTRIC $\rightarrow$ IDLE:} Triggered when $\theta \geq 160^\circ$. Rep complete; \texttt{count++}.
+\end{enumerate}
+
+\paragraph{The Hands-Free Journey and End-to-End Feedback.}
+Because the user operates the system from a distance, interactions are driven mostly by state changes and TTS audio. The session journey is structured into four phases:
+\begin{enumerate}
+\item \textbf{Setup:} The user selects the exercise and steps back.
+\item \textbf{Validation:} The system ensures that the required body parts for the selected exercise are visible and initiates an audio countdown.
+\item \textbf{Execution:} The core loop tracks reps ("One... Two...") and injects corrective cues only when rulebook thresholds are breached.
+\item \textbf{Termination:} Detecting absence of the user, the app auto-saves the log and exits.
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\safeincludegraphics{0.88\linewidth}{figures/user_journey.png}
+{Figure placeholder}
+\caption{FiTrack User Journey Map detailing Setup, Validation, Execution, and Termination phases. The system uses confidence thresholds ($c > 0.4$) to auto-start, monitors biomechanics ($\Delta X_{\mathrm{shoulder}} > 15\%$) for real-time audio feedback, and auto-terminates and saves when the user exits the frame.}
+\label{fig:user_journey}
+\end{figure}
+
+\paragraph{Workout logging.}
+We will store workout entries locally (exercise, sets, reps, weight, timestamps) and show a basic history view. We prefer on-device storage for offline use and privacy for now.
+
+\paragraph{Optional extension: reference-based scoring.}
+If time permits, we will explore comparing user movement sequences against reference recordings (e.g., trainer recordings). DTW can align sequences performed at different speeds \cite{dtw_sensors}. Pose Trainer provides inspiration for posture correction approaches \cite{pose_trainer}. This part is explicitly a stretch goal.
+
+\paragraph{Main on-device pipeline (MVP).}
+\begin{center}
+CameraX API $\rightarrow$ Inference Pipeline $\rightarrow$ Domain Logic $\rightarrow$ Presentation Layer $\rightarrow$ Room Database
+\end{center}
+
+% ===================== Work Packages =====================
+\subsection{Work Package Descriptions}
+The project work spans weeks 3-14 (12 weeks). As the first two weeks were gathering the group and deciding on the project, we start the timeline with third week.% While everyone will contribute across modules, we have some natural leanings:
+%\begin{itemize}
+%\item Abdullah Tun\c{c}er and Ali Han K\i l\i n\c{c}: more focused on mobile app pipeline/UI integration.
+%\item Engin S\"uhan Bilgi\c{c} and Abdulkadir Bilge: more focused on research, models, data, and algorithm implementation.
+%\item Onuralp Keskin: balanced role across integration, testing, and algorithm/app glue code.
+%\end{itemize}
+
+\subsubsection*{Work Package 1: Early research, benchmarking, and data plan (Weeks 3--4)}
+\textbf{Participants:} Engin (lead), Abdulkadir (lead); support: Abdullah, Ali Han, Onuralp \\
+\textbf{Objectives:} Identify candidate pose models; define the three base exercises and camera placement guidelines; design evaluation protocol; start data collection early. \\
+\textbf{Tasks:}
+\begin{itemize}
+\item \textbf{T1.1 (w3)} Read and summarize key references on mobile pose estimation and coaching pipelines \cite{movenet, mlkit_android, mediapipe_pose, pose_trainer}.
+\item \textbf{T1.2 (w3--w4)} Quick benchmark prototypes for candidate pose solutions (FPS/latency/jitter notes).
+\item \textbf{T1.3 (w4)} Define base exercises (curl/squat/push-up), recommended camera placements, and hands-free start approach (initial design).
+\item \textbf{T1.4 (w4)} Data plan: define what videos to record (good form + common mistakes) and how to label them.
+\end{itemize}
+\textbf{Deliverables:} D1.1 model comparison notes; D1.2 initial evaluation protocol; D1.3 data collection checklist. \\
+\textbf{Milestone:} M1.1 selected primary pose approach (or top-2 shortlist) and initial dataset plan.
+
+\subsubsection*{Work Package 2: Mobile app foundation + early data collection (Weeks 4--6)}
+\textbf{Participants:} Abdullah (lead), Ali Han (lead), Onuralp; support: Engin, Abdulkadir \\
+\textbf{Objectives:} Build the Android camera pipeline and overlay; implement exercise selection; implement hands-free start baseline; collect reference videos early. \\
+\textbf{Tasks:}
+\begin{itemize}
+\item \textbf{T2.1 (w4--w5)} Implement camera capture and frame preprocessing, skeleton overlay visualization.
+\item \textbf{T2.2 (w5--w6)} Add exercise selection UI and setup checks (framing/visibility).
+\item \textbf{T2.3 (w5--w6)} Add hands-free start baseline (countdown with audio + large UI).
+\item \textbf{T2.4 (w4--w6)} Record initial reference data (team members and, if possible, one trainer/experienced lifter) for the three base exercises.
+\end{itemize}
+\textbf{Deliverables:} D2.1 runnable Android demo (camera + overlay); D2.2 initial recorded dataset. \\
+\textbf{Milestone:} M2.1 stable end-to-end pose tracking demo on target phone.
+
+\subsubsection*{Work Package 3: Feature extraction + rep counting for three exercises (Weeks 6--9)}
+\textbf{Participants:} Abdulkadir (lead), Engin (lead), Onuralp; support: Abdullah/Ali Han(integration) \\
+\textbf{Objectives:} Implement smoothing and core feature library; implement rep counting for curl/squat/push-up. \\
+\textbf{Tasks:}
+\begin{itemize}
+\item \textbf{T3.1 (w6--w7)} Implement smoothing (1€ filter) and joint-angle computations \cite{oneeuro}.
+\item \textbf{T3.2 (w7--w8)} Implement rep counting state machines (curl as example; adapt to squat/push-up).
+\item \textbf{T3.3 (w8--w9)} Threshold tuning using early dataset; add confidence gating and ``setup adjustment'' prompts.
+\end{itemize}
+\textbf{Deliverables:} D3.1 rep counting modules for three exercises; D3.2 short internal test report. \\
+\textbf{Milestone:} M3.1 rep counting works reliably on initial tests under recommended setup.
+
+\subsubsection*{Work Package 4: Form feedback + voice guidance (Weeks 8--11)}
+\textbf{Participants:} Abdullah (lead), Onuralp (lead), Engin; support: Abdulkadir/Ali Han\\
+\textbf{Objectives:} Implement rule-based form feedback; integrate voice feedback; keep cues conservative and testable. \\
+\textbf{Tasks:}
+\begin{itemize}
+\item \textbf{T4.1 (w8--w9)} Define the MVP rulebook for biceps curl (torso swing, elbow drift, and partial ROM), and a smaller initial cue set for squat/push-up (at least 1--2 cues each).
+\item \textbf{T4.2 (w9--w10)} Implement feedback visualization and voice prompts; implement cooldown policy.
+\item \textbf{T4.3 (w10--w11)} Tune feedback triggers using early dataset and record additional clips if needed.
+\end{itemize}
+\textbf{Deliverables:} D4.1 rulebook document + implemented feedback; D4.2 voice enabled workout flow. \\
+\textbf{Milestone:} M4.1 feedback triggers are meaningfully different between good vs.\ bad trials in controlled tests.
+
+\subsubsection*{Work Package 5: Logging, integration, and optional reference scoring (Weeks 9--13)}
+\textbf{Participants:} Abdullah (lead), Ali Han, Onuralp; support: Engin, Abdulkadir \\
+\textbf{Objectives:} Add workout logging/history; integrate modules; optionally prototype reference scoring if time allows. \\
+\textbf{Tasks:}
+\begin{itemize}
+\item \textbf{T5.1 (w9--w11)} Implement local log and history UI (exercise, sets, reps, weight, timestamp).
+\item \textbf{T5.2 (w11--w12)} Integrate logging with events from rep counting and feedback.
+\item \textbf{T5.3 (w12--w13, optional)} Prototype DTW-based reference scoring using recorded reference clips \cite{dtw_sensors, pose_trainer}.
+\end{itemize}
+\textbf{Deliverables:} D5.1 logging + history screens; D5.2 integrated app build; (optional) D5.3 reference scoring prototype notes. \\
+\textbf{Milestone:} M5.1 End to end, feature complete MVP flow.
+
+\subsubsection*{Work Package 6: Evaluation, refinement, and final demonstration (Weeks 11--14)}
+\textbf{Participants:} All (Engin leads reporting/documentation) \\
+\textbf{Objectives:} Structured evaluation; refinement; final demo and final report. \\
+\textbf{Tasks:}
+\begin{itemize}
+\item \textbf{T6.1 (w11--w13)} Collect evaluation trials (good/bad form) for three exercises under recommended setups.
+\item \textbf{T6.2 (w12--w13)} Compute metrics (FPS/latency, rep accuracy, feedback trigger behavior).
+\item \textbf{T6.3 (w12--w14)} Polish UI/UX; finalize report; rehearse demo.
+\end{itemize}
+\textbf{Deliverables:} D6.1 evaluation report + limitations; D6.2 final APK + demo script/slides. \\
+\textbf{Milestone:} M6.1 final demonstration and submission.
+
+% ===================== Demonstration & Evaluation =====================
+\subsection{System Evaluation and Numeric Success Criteria}
+To ensure FiTrack meets the requirements of a reliable mobile fitness assistant, we established a quantitative evaluation framework.
+
+The final demonstration will present this end-to-end Android prototype running in real time, intentionally including a controlled ``mistake demo'' where a user performs common errors to visibly and audibly trigger the system's rulebook.
+
+\paragraph{1. Algorithmic Performance Metrics.}
+Our primary accuracy metric is the \textbf{Mean Absolute Error (MAE)}, which measures the difference between the system's predicted rep count ($\hat{y}$) and the manual ground truth ($y$) across $n$ test sessions:
+$$ MAE = \frac{1}{n} \sum_{i=1}^{n} |y_i - \hat{y}_i| $$
+To account for variable range-of-motion during fatigue, we set a strict target of \textbf{MAE $\leq$ 1.5}.
+
+To guarantee user trust, the system must minimize false-positive alerts. We evaluate the reliability of corrective cues using \textbf{Precision}:
+$$ Precision = \frac{TP}{TP + FP} $$
+Where $TP$ (True Positive) is a correctly identified form error and $FP$ (False Positive) is a false alarm during a correct rep. We target a \textbf{Precision $\geq$ 75\%}.
+
+\paragraph{2. System Performance \& Numeric Thresholds.}
+To directly address latency, false alarms, and architectural constraints, the following numeric thresholds dictate system success (see Table \ref{tab:eval_thresholds}):
+
+\begin{table}[H]
+\centering
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Metric} & \textbf{Success Threshold} & \textbf{Engineering Rationale}\\
+\midrule
+\textbf{Inference Speed} & $\geq$ 15 FPS & Minimum required for interactive, real-time feedback.\\
+\textbf{System Latency} & $\leq$ 200 ms & Prevents delayed or disjointed audio prompts.\\
+\textbf{MAE (Rep Count)} & $\leq$ 1.5 Reps & Forgiving for partial-ROM reps during fatigue.\\
+\textbf{Feedback Precision} & $\geq$ 75\% & Ensures coach reliability and user trust.\\
+\textbf{False Alarm Rate} & $\leq$ 25\% of good-form reps & Fraction of corrective cues triggered during manually labeled good-form repetitions. \\
+\textbf{Confidence Gating} & $c > 0.4$ & Guarantees robustness in sub-optimal lighting.\\
+\textbf{Audio Cooldown} & 3.0 Seconds & Prevents spamming repetitive cues.\\
+\bottomrule
+\end{tabularx}
+\caption{Quantitative evaluation criteria and system thresholds}
+\label{tab:eval_thresholds}
+\end{table}
+
+\paragraph{3. Heuristic Rulebook Thresholds (MVP).}
+The following mathematical thresholds will be used to trigger the MVP feedback loops, utilizing normalized distances based on torso length ($L_{torso}$) for scale invariance:
+\begin{itemize}
+    \item \textbf{Torso Swing Threshold:} $\Delta X_{shoulder} / L_{torso} > 0.15$
+    \item \textbf{Elbow Drift Threshold:} $\Delta X_{elbow} / L_{torso} > 0.10$
+    \item \textbf{Rep Start/End Guard:} $\theta_{elbow} > 150^\circ$
+    \item \textbf{Rep Peak Guard:} $\theta_{elbow} \leq 40^\circ$
+\end{itemize}
+
+% ===================== Impact =====================
+\subsection{Impact}
+We think FiTrack can make basic exercise coaching more accessible by turning a smartphone into a real-time gym assistant for people who train alone. Even simple rep counting, conservative form cues, and hands-free voice guidance may help users notice repeated mistakes, stay consistent, and track progress without requiring expensive equipment. In the longer term, the same approach could be extended to more exercises and improved robustness, but in this course project we will focus on building a reliable foundation and clearly documenting limitations.
+
+% ===================== Risk Analysis =====================
+\subsection{Risk Analysis}
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}X c c X@{}}
+\toprule
+\textbf{Risk} & \textbf{Likelihood} & \textbf{Impact} & \textbf{Mitigation}\\
+\midrule
+Pose tracking degrades (lighting, occlusion, clothing, camera angle). & M & H &
+Recommend camera placement per exercise; setup checks; confidence gating; smoothing; evaluate only under documented conditions.\\
+Real-time performance too slow on some Android devices. & M & H &
+Choose mobile optimized model/variant; reduce input resolution; optimize overlay rendering; benchmark early (WP1--2).\\
+Form feedback produces false/unsafe cues. & M & H &
+Use conservative, interpretable rules; apply confidence gating ($c > 0.4$); enforce a 3\,s audio cooldown; tune thresholds on early data; and clearly communicate limitations.\\
+Hands-free start is unreliable. & M & M &
+Keep a robust baseline (countdown + audio) even if auto start is removed; decide after early tests.\\
+Scope creep (too many exercises/features). & M & M &
+Lock base exercises to 3; treat DTW/reference scoring and hybrid uploads as stretch goals.\\
+Privacy concerns. & L & H &
+On-device processing by default; do not store raw video; keep only workout logs; any keypoint logging is optional.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% ===================== Gantt Chart =====================
+\subsection{Gantt Chart}
+\noindent Planned schedule over 14 weeks (X indicates active work). Weeks 1--2 are reserved for group formation and topic finalization; project work starts at Week 3.
+\begin{center}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccccccccccc}
+\toprule
+\textbf{WP} & \textbf{W1} & \textbf{W2} & \textbf{W3} & \textbf{W4} & \textbf{W5} & \textbf{W6} & \textbf{W7} & \textbf{W8} & \textbf{W9} & \textbf{W10} & \textbf{W11} & \textbf{W12} & \textbf{W13} & \textbf{W14}\\
+\midrule
+WP1 &  &  & X & X &  &  &  &  &  &  &  &  &  & \\
+WP2 &  &  &  & X & X & X &  &  &  &  &  &  &  & \\
+WP3 &  &  &  &  &  & X & X & X & X &  &  &  &  & \\
+WP4 &  &  &  &  &  &  &  & X & X & X & X &  &  & \\
+WP5 &  &  &  &  &  &  &  &  & X & X & X & X & X & \\
+WP6 &  &  &  &  &  &  &  &  &  &  & X & X & X & X\\
+\bottomrule
+\end{tabular}
+}
+\end{center}
+
+% ===================== SECTION 3 =====================
+\section{Economical and Ethical Issues}
+
+\subsection{Economical Issues}
+FiTrack is designed to run primarily on-device, which we think reduces operational costs because it does not require continuous server side video processing. The main costs are development time and testing on phones already owned by the team. If we explore an optional hybrid extension later, we would prefer uploading only compact pose keypoint time series or derived angles instead of raw video, which would reduce bandwidth and storage compared to full video upload. However, server usage would still add recurring costs and extra engineering overhead, so it is not required for the MVP.
+
+\subsection{Ethical Issues}
+FiTrack operates in a domain where incorrect guidance could cause harm if it is overstated or misleading. We will avoid medical claims and clearly present feedback as informational rather than professional coaching or medical advice. We will also aim to be transparent about limitations (camera placement, occlusion, lighting) and handle low confidence situations carefully.
+
+Privacy is also a major concern because the system uses a camera feed. For the MVP, we aim to process video on the device and will not store or transmit raw video by default. Only workout logs (sets, reps, weights, timestamps) will be stored locally. If we store any pose keypoints for testing purposes, we plan to make this optional and avoid collecting identifiable video frames.
+
+% ===================== SECTION 4 =====================
+\section{References}
+\begin{thebibliography}{9}
+
+\bibitem{movenet}
+TensorFlow Hub, ``MoveNet: Ultra fast and accurate pose detection model,'' \url{https://www.tensorflow.org/hub/tutorials/movenet}, accessed 2026-02-28.
+
+\bibitem{mlkit_android}
+Google Developers, ``Detect poses with ML Kit on Android,'' \url{https://developers.google.com/ml-kit/vision/pose-detection/android}, accessed 2026-02-28.
+
+\bibitem{mediapipe_pose}
+MediaPipe Documentation, ``Pose solution / pose\_world\_landmarks output,'' \url{https://mediapipe.readthedocs.io/en/latest/solutions/pose.html}, accessed 2026-02-28.
+
+\bibitem{oneeuro}
+G. Casiez, N. Roussel, and D. Vogel, ``1€ Filter: A Simple Speed-based Low-pass Filter for Noisy Input in Interactive Systems,'' \textit{CHI 2012}. Resource page: \url{https://gery.casiez.net/1euro/}, accessed 2026-02-28.
+
+\bibitem{pose_trainer}
+S. Chen and R. Yang, ``Pose Trainer: Correcting Exercise Posture using Pose Estimation,'' arXiv:2006.11718, 2020. \url{https://arxiv.org/abs/2006.11718}, accessed 2026-02-28.
+
+\bibitem{dtw_sensors}
+X. Yu and S. Xiong, ``A Dynamic Time Warping Based Algorithm to Evaluate Kinect-Enabled Home-Based Physical Rehabilitation Exercises for Older People,'' \textit{Sensors}, 19(13), 2882, 2019. \url{https://www.mdpi.com/1424-8220/19/13/2882}.
+
+\bibitem{m3gym}
+Q. Xu et al., ``M3GYM: A Large-Scale Multimodal Multi-view Multi-person Pose Dataset for Fitness Activity Understanding in Real-world Settings,'' \textit{CVPR 2025}. Open access: \url{https://openaccess.thecvf.com/content/CVPR2025/html/Xu_M3GYM_A_Large-Scale_Multimodal_Multi-view_Multi-person_Pose_Dataset_for_Fitness_CVPR_2025_paper.html}, accessed 2026-02-28.
+
+\end{thebibliography}
+
+\end{document}

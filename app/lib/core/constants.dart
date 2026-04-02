@@ -5,6 +5,16 @@ library;
 /// Minimum landmark confidence to use a frame for rep counting / feedback.
 const double kMinLandmarkConfidence = 0.4;
 
+// ── Biomechanical Logic (Index-1) ───────────────────────
+/// Mandatory lockout after state transition to prevent double-counting.
+const Duration kStateDebounce = Duration(milliseconds: 500);
+
+/// Reset to IDLE if stuck in active state for this long (Zombie user).
+const Duration kStuckStateLimit = Duration(seconds: 5);
+
+/// Minimum confidence for far-side limbs; if lower, use near-side as proxy.
+const double kFarSideConfidenceGate = 0.4;
+
 // ── Biceps Curl FSM thresholds (degrees) ────────────────
 /// IDLE → CONCENTRIC when elbow angle drops below this.
 const double kCurlStartAngle = 150.0;
@@ -36,3 +46,61 @@ const double kOneEuroDCutoff = 1.0;
 
 // ── Camera ──────────────────────────────────────────────
 const int kCameraFps = 30;
+
+// ── Setup Check ─────────────────────────────────────────
+/// Number of consecutive frames all required landmarks must pass the confidence
+/// gate before transitioning from SETUP_CHECK to COUNTDOWN.
+const int kSetupCheckFrames = 10;
+
+// ── Squat FSM thresholds (degrees) ──────────────────────
+/// IDLE → DESCENDING when knee angle drops below this.
+const double kSquatStartAngle = 160.0;
+
+/// DESCENDING → BOTTOM when knee angle drops below this.
+const double kSquatBottomAngle = 90.0;
+
+/// ASCENDING → IDLE when knee angle returns above this → rep++.
+const double kSquatEndAngle = 160.0;
+
+// ── Push-up FSM thresholds (degrees) ────────────────────
+/// IDLE → DESCENDING when elbow angle drops below this.
+const double kPushUpStartAngle = 160.0;
+
+/// DESCENDING → BOTTOM when elbow angle drops below this.
+const double kPushUpBottomAngle = 90.0;
+
+/// ASCENDING → IDLE when elbow angle returns above this → rep++.
+const double kPushUpEndAngle = 160.0;
+
+// ── Squat form thresholds ────────────────────────────────
+/// Max trunk-tibia deviation before flagging "chest up" cue (degrees).
+const double kTrunkTibiaDeviation = 15.0;
+
+// ── Push-up form thresholds ──────────────────────────────
+/// Max shoulder-hip-ankle collinearity deviation for hip sag (degrees).
+const double kHipSagDeviation = 15.0;
+
+// ── Visual feedback ──────────────────────────────────────
+/// Duration in ms to highlight offending landmarks after a form error.
+const int kHighlightDurationMs = 1500;
+
+// ── Mid-session occlusion ────────────────────────────────
+/// Seconds of partial occlusion before showing adjustment prompt.
+const double kOcclusionPromptSec = 1.5;
+
+/// Consecutive good frames required to auto-resume after occlusion.
+const int kOcclusionResumeFrames = 5;
+
+// ── Long-femur squat adaptation ──────────────────────────
+/// Fallback BOTTOM angle for users whose anatomy prevents reaching 90°.
+const double kLongFemurBottomAngle = 100.0;
+
+/// Number of completed reps used to detect long-femur pattern.
+const int kLongFemurDetectReps = 3;
+
+// ── Countdown & Session ──────────────────────────────────
+/// Starting value for the hands-free countdown (counts down to 1 then fires GO).
+const int kCountdownSeconds = 3;
+
+/// Seconds of continuous landmark absence in ACTIVE phase before auto-termination.
+const double kAbsenceTimeoutSec = 3.0;

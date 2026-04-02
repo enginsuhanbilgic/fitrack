@@ -36,6 +36,16 @@ double? verticalDist(PoseLandmark? a, PoseLandmark? b) {
   return (a.y - b.y).abs();
 }
 
+/// Angle of segment (a→b) relative to vertical, in degrees [0..90].
+/// Used for trunk-tibia parallelism check in squat form analysis.
+double? angleToVertical(PoseLandmark? a, PoseLandmark? b) {
+  if (a == null || b == null) return null;
+  final dx = (b.x - a.x).abs();
+  final dy = (b.y - a.y).abs();
+  if (dy == 0) return 90.0;
+  return atan2(dx, dy) * 180.0 / pi;
+}
+
 /// Horizontal displacement of a landmark between two results (for swing/drift).
 double? horizontalShift(PoseResult prev, PoseResult curr, int landmarkType) {
   final a = prev.landmark(landmarkType, minConfidence: kMinLandmarkConfidence);
