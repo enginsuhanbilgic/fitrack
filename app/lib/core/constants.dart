@@ -72,6 +72,18 @@ const double kPushUpBottomAngle = 90.0;
 /// ASCENDING → IDLE when elbow angle returns above this → rep++.
 const double kPushUpEndAngle = 160.0;
 
+// ── Squat form thresholds ────────────────────────────────
+/// Max trunk-tibia deviation before flagging "chest up" cue (degrees).
+const double kTrunkTibiaDeviation = 15.0;
+
+// ── Push-up form thresholds ──────────────────────────────
+/// Max shoulder-hip-ankle collinearity deviation for hip sag (degrees).
+const double kHipSagDeviation = 15.0;
+
+// ── Visual feedback ──────────────────────────────────────
+/// Duration in ms to highlight offending landmarks after a form error.
+const int kHighlightDurationMs = 1500;
+
 // ── Mid-session occlusion ────────────────────────────────
 /// Seconds of partial occlusion before showing adjustment prompt.
 const double kOcclusionPromptSec = 1.5;

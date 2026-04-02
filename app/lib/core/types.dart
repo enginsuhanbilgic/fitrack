@@ -29,9 +29,16 @@ enum RepState {
 
 /// Types of form errors we can detect.
 enum FormError {
-  torsoSwing,  // momentum abuse
-  elbowDrift,  // elbow moving forward/backward
-  shortRom,    // half-rep / insufficient range of motion
+  // Biceps curl
+  torsoSwing,      // momentum abuse
+  elbowDrift,      // elbow moving forward/backward
+  shortRom,        // abandoned rep — never reached peak
+  // Squat
+  squatDepth,      // rep completed without reaching bottom threshold
+  trunkTibia,      // trunk-tibia parallelism deviation > 15°
+  // Push-up
+  hipSag,          // shoulder-hip-ankle collinearity deviation > 15°
+  pushUpShortRom,  // rep completed without elbow reaching bottom threshold
 }
 
 /// Top-level session lifecycle state.

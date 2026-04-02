@@ -79,14 +79,13 @@ class RepCounterDisplay extends StatelessWidget {
     );
   }
 
-  String _errorLabel(FormError err) {
-    switch (err) {
-      case FormError.torsoSwing:
-        return 'Keep your torso still';
-      case FormError.elbowDrift:
-        return 'Keep your elbow still';
-      case FormError.shortRom:
-        return 'Full range of motion';
-    }
-  }
+  String _errorLabel(FormError err) => switch (err) {
+    FormError.torsoSwing     => 'Keep your torso still',
+    FormError.elbowDrift     => 'Keep your elbow still',
+    FormError.shortRom       => 'Full range of motion',
+    FormError.squatDepth     => 'Go deeper',
+    FormError.trunkTibia     => 'Keep your chest up',
+    FormError.hipSag         => 'Keep your body straight',
+    FormError.pushUpShortRom => 'Go lower',
+  };
 }

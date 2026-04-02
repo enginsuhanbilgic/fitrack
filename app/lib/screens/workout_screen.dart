@@ -6,6 +6,7 @@ import '../core/constants.dart';
 import '../core/types.dart';
 import '../engine/landmark_smoother.dart';
 import '../engine/rep_counter.dart';
+import '../models/landmark_types.dart';
 import '../models/pose_landmark.dart';
 import '../services/camera_service.dart';
 import '../services/pose/mlkit_pose_service.dart';
@@ -48,6 +49,20 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   // ACTIVE state.
   DateTime? _absenceStart;
   DateTime? _activeStart;
+
+  // Feedback coordinator (form errors → TTS cooldown per error type).
+  final Map<FormError, DateTime> _lastFeedbackTime = {};
+
+  // Visual highlight for curl form errors (landmark index → color).
+  Map<int, Color> _errorHighlight = {};
+  Timer? _highlightTimer;
+
+  // Per-error landmark indices for visual highlight (curl only).
+  static const Map<FormError, List<int>> _errorLandmarks = {
+    FormError.torsoSwing: [LM.leftShoulder, LM.rightShoulder],
+    FormError.elbowDrift: [LM.leftElbow, LM.rightElbow],
+    FormError.shortRom:   [LM.leftWrist, LM.rightWrist],
+  };
 
   // Mid-session occlusion (partial landmark loss within ACTIVE phase).
   DateTime? _occlusionStart;
@@ -243,6 +258,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       }
 
       final snapshot = _repCounter.update(result);
+      if (snapshot.formErrors.isNotEmpty) _onFormErrors(snapshot.formErrors);
       if (mounted) {
         setState(() {
           _landmarks = smoothed;
@@ -280,6 +296,43 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     }
   }
 
+  // ── Form Feedback Coordinator ──────────────────────────
+
+  void _onFormErrors(List<FormError> errors) {
+    final now = DateTime.now();
+    for (final err in errors) {
+      final last = _lastFeedbackTime[err];
+      if (last != null && now.difference(last).inSeconds < kFeedbackCooldownSec) continue;
+      _lastFeedbackTime[err] = now;
+      _tts.speak(_errorMessage(err));
+      _triggerHighlight(err);
+      break; // one cue per update — list order defines priority
+    }
+  }
+
+  String _errorMessage(FormError err) => switch (err) {
+    FormError.torsoSwing     => "Don't swing",
+    FormError.elbowDrift     => 'Keep your elbow still',
+    FormError.shortRom       => 'Full range of motion',
+    FormError.squatDepth     => 'Go deeper',
+    FormError.trunkTibia     => 'Keep your chest up',
+    FormError.hipSag         => 'Keep your body straight',
+    FormError.pushUpShortRom => 'Go lower',
+  };
+
+  void _triggerHighlight(FormError err) {
+    final landmarks = _errorLandmarks[err];
+    if (landmarks == null) return; // squat/push-up — TTS only
+    _highlightTimer?.cancel();
+    setState(() {
+      _errorHighlight = {for (final idx in landmarks) idx: Colors.redAccent};
+    });
+    _highlightTimer = Timer(
+      Duration(milliseconds: kHighlightDurationMs),
+      () { if (mounted) setState(() => _errorHighlight = {}); },
+    );
+  }
+
   bool _canSpeakOcclusionPrompt() {
     if (_lastOcclusionTts == null) return true;
     return DateTime.now().difference(_lastOcclusionTts!).inSeconds >= kFeedbackCooldownSec;
@@ -308,6 +361,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   @override
   void dispose() {
     _countdownTimer?.cancel();
+    _highlightTimer?.cancel();
     _tts.dispose();
     _camera.dispose();
     _pose.dispose();
@@ -391,7 +445,10 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             painter: SkeletonPainter(
               landmarks: _landmarks,
               mirror: false, // already mirrored above
-              landmarkColors: _landmarkColors.isNotEmpty ? _landmarkColors : null,
+              landmarkColors: () {
+                final merged = {..._landmarkColors, ..._errorHighlight};
+                return merged.isNotEmpty ? merged : null;
+              }(),
             ),
             size: Size.infinite,
           ),

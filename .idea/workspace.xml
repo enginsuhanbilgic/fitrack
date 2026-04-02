@@ -4,11 +4,14 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="feat: add squat and push-up rep-counting FSMs (#15)">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="feat: confidence gating, occlusion prompts, long-femur adaptation (#18)">
       <change beforePath="$PROJECT_DIR$/app/lib/core/constants.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/constants.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/types.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/types.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/angle_utils.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/angle_utils.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/form_analyzer.dart" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -146,7 +149,15 @@
       <option name="project" value="LOCAL" />
       <updated>1775143213731</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="feat: confidence gating, occlusion prompts, long-femur adaptation (#18)">
+      <option name="closed" value="true" />
+      <created>1775145224910</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1775145224910</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -168,7 +179,8 @@
     <MESSAGE value="feat(wp2): exercise selection UI and pose visibility setup check (#13)" />
     <MESSAGE value="feat(wp2): hands-free countdown, TTS audio cues, and session summary screen (#14)" />
     <MESSAGE value="feat: add squat and push-up rep-counting FSMs (#15)" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat: add squat and push-up rep-counting FSMs (#15)" />
+    <MESSAGE value="feat: confidence gating, occlusion prompts, long-femur adaptation (#18)" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat: confidence gating, occlusion prompts, long-femur adaptation (#18)" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

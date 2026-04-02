@@ -5,7 +5,9 @@ import '../core/types.dart';
 import '../models/landmark_types.dart';
 import '../models/pose_result.dart';
 import 'angle_utils.dart';
-import 'form_analyzer.dart';
+import 'curl/curl_form_analyzer.dart';
+import 'squat/squat_form_analyzer.dart';
+import 'push_up/push_up_form_analyzer.dart';
 
 /// Snapshot returned after every frame — everything the UI needs.
 class RepSnapshot {
@@ -25,7 +27,8 @@ class RepSnapshot {
 }
 
 /// Multi-exercise rep counter. Drives a 4-state FSM for biceps curl
-/// and a 4-state FSM for squat / push-up.
+/// and a 4-state FSM for squat / push-up. Each exercise has its own
+/// form analyzer for quality evaluation.
 ///
 /// Biceps curl (elbow angle θ):
 ///   IDLE ──[θ < 150°]──► CONCENTRIC ──[θ ≤ 40°]──► PEAK
@@ -44,7 +47,10 @@ class RepSnapshot {
 class RepCounter {
   final ExerciseType exercise;
   final ExerciseSide side;
-  final FormAnalyzer _form = FormAnalyzer();
+
+  final CurlFormAnalyzer _curlForm = CurlFormAnalyzer();
+  final SquatFormAnalyzer _squatForm = SquatFormAnalyzer();
+  final PushUpFormAnalyzer _pushUpForm = PushUpFormAnalyzer();
 
   RepState _state = RepState.idle;
   int _reps = 0;
@@ -68,6 +74,9 @@ class RepCounter {
   bool _longFemurDetected = false;
   double _effectiveSquatBottomAngle = kSquatBottomAngle;
   double? _minAngleThisRep;
+
+  // Curl: track whether PEAK was reached (for shortRom detection)
+  bool _curlReachedPeak = false;
 
   RepCounter({this.exercise = ExerciseType.bicepsCurl, this.side = ExerciseSide.both});
 
@@ -125,13 +134,18 @@ class RepCounter {
       case RepState.idle:
         if (smoothed < kCurlStartAngle) {
           _state = RepState.concentric;
-          _form.onRepStart(result);
+          _curlReachedPeak = false;
+          _curlForm.onRepStart(result);
         }
       case RepState.concentric:
-        _lastErrors = _form.evaluate(result);
+        _lastErrors = _curlForm.evaluate(result);
         if (smoothed <= kCurlPeakAngle) {
           _state = RepState.peak;
+          _curlReachedPeak = true;
         } else if (smoothed > kCurlStartAngle) {
+          // Abandoned rep — never reached peak
+          if (!_curlReachedPeak) _curlForm.onAbortedRep();
+          _lastErrors = [..._lastErrors, ..._curlForm.consumeCompletionErrors()];
           _resetToIdle();
         }
       case RepState.peak:
@@ -139,11 +153,13 @@ class RepCounter {
           _state = RepState.eccentric;
         }
       case RepState.eccentric:
-        _lastErrors = _form.evaluate(result);
+        _lastErrors = _curlForm.evaluate(result);
         if (smoothed >= kCurlEndAngle) {
           _reps++;
+          final completionErrors = _curlForm.consumeCompletionErrors();
+          _lastErrors = [..._lastErrors, ...completionErrors];
+          _curlForm.onRepEnd();
           _resetToIdle();
-          _lastErrors = const [];
         }
       default:
         break;
@@ -160,18 +176,19 @@ class RepCounter {
       if (_minAngleThisRep == null || smoothed < _minAngleThisRep!) {
         _minAngleThisRep = smoothed;
       }
+      _squatForm.trackAngle(smoothed);
     }
 
     switch (_state) {
       case RepState.idle:
         if (smoothed < kSquatStartAngle) {
           _state = RepState.descending;
+          _squatForm.onRepStart();
         }
       case RepState.descending:
         if (smoothed < _effectiveSquatBottomAngle) {
           _state = RepState.bottom;
         } else if (smoothed > kSquatStartAngle) {
-          // User stood back up before reaching bottom — abort
           _resetToIdle();
         }
       case RepState.bottom:
@@ -181,10 +198,13 @@ class RepCounter {
           _state = RepState.ascending;
         }
       case RepState.ascending:
+        _lastErrors = _squatForm.evaluate(result);
         if (smoothed >= kSquatEndAngle) {
           _reps++;
-          // Long-femur detection: after kLongFemurDetectReps reps, check if
-          // the user never reached 90° but consistently reached 95–100°.
+          final completionErrors = _squatForm.consumeCompletionErrors(_effectiveSquatBottomAngle);
+          _lastErrors = [..._lastErrors, ...completionErrors];
+
+          // Long-femur detection
           if (!_longFemurDetected && _minAngleThisRep != null) {
             _repMinAngles.add(_minAngleThisRep!);
             if (_repMinAngles.length >= kLongFemurDetectReps) {
@@ -198,7 +218,6 @@ class RepCounter {
             }
           }
           _resetToIdle();
-          _lastErrors = const [];
         }
       default:
         break;
@@ -210,10 +229,15 @@ class RepCounter {
   // ── Push-up FSM ───────────────────────────────────────
 
   void _runPushUpFsm(double smoothed, PoseResult result) {
+    if (_state == RepState.descending || _state == RepState.bottom) {
+      _pushUpForm.trackAngle(smoothed);
+    }
+
     switch (_state) {
       case RepState.idle:
         if (smoothed < kPushUpStartAngle) {
           _state = RepState.descending;
+          _pushUpForm.onRepStart();
         }
       case RepState.descending:
         if (smoothed < kPushUpBottomAngle) {
@@ -222,14 +246,17 @@ class RepCounter {
           _resetToIdle();
         }
       case RepState.bottom:
+        _lastErrors = _pushUpForm.evaluate(result);
         if (smoothed > kPushUpBottomAngle) {
           _state = RepState.ascending;
         }
       case RepState.ascending:
+        _lastErrors = _pushUpForm.evaluate(result);
         if (smoothed >= kPushUpEndAngle) {
           _reps++;
+          final completionErrors = _pushUpForm.consumeCompletionErrors();
+          _lastErrors = [..._lastErrors, ...completionErrors];
           _resetToIdle();
-          _lastErrors = const [];
         }
       default:
         break;
@@ -242,7 +269,7 @@ class RepCounter {
     _state = RepState.idle;
     _prevHipY = null;
     _minAngleThisRep = null;
-    _form.onRepEnd();
+    _curlReachedPeak = false;
     _stateStartTime = null;
   }
 
@@ -253,10 +280,13 @@ class RepCounter {
     _angleBuffer.clear();
     _prevHipY = null;
     _minAngleThisRep = null;
+    _curlReachedPeak = false;
     _repMinAngles.clear();
     _longFemurDetected = false;
     _effectiveSquatBottomAngle = kSquatBottomAngle;
-    _form.reset();
+    _curlForm.reset();
+    _squatForm.reset();
+    _pushUpForm.reset();
     _state = RepState.idle;
     _stateStartTime = null;
     _lastErrors = const [];
@@ -270,10 +300,13 @@ class RepCounter {
     _angleBuffer.clear();
     _prevHipY = null;
     _minAngleThisRep = null;
+    _curlReachedPeak = false;
     _repMinAngles.clear();
     _longFemurDetected = false;
     _effectiveSquatBottomAngle = kSquatBottomAngle;
-    _form.reset();
+    _curlForm.reset();
+    _squatForm.reset();
+    _pushUpForm.reset();
     _stateStartTime = null;
     _lastErrors = const [];
     _lastAngle = null;
