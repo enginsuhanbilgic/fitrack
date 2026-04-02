@@ -1,14 +1,32 @@
 import 'package:flutter/material.dart';
 import '../core/types.dart';
+import '../models/app_user.dart';
+import 'account_screen.dart';
 import 'workout_screen.dart';
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({
+    super.key,
+    required this.currentUser,
+    required this.onSessionChanged,
+  });
+
+  final AppUser currentUser;
+  final VoidCallback onSessionChanged;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('FiTrack')),
+      appBar: AppBar(
+        title: const Text('FiTrack'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.manage_accounts),
+            tooltip: 'Account',
+            onPressed: () => _openAccount(context),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -56,6 +74,18 @@ class HomeScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _openAccount(BuildContext context) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => AccountScreen(currentUser: currentUser),
+      ),
+    );
+
+    if (changed == true) {
+      onSessionChanged();
+    }
   }
 
   void _startWorkout(BuildContext context, ExerciseType exercise) {

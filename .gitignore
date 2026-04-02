@@ -1,0 +1,10 @@
+# IDE/workspace files
+.idea/
+*.iml
+
+# Local Flutter SDK clone (toolchain), should not be committed
+flutter/
+
+# Build/cache artifacts
+**/.gradle/
+**/.kotlin/

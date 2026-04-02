@@ -5,51 +5,11 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="fix">
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/benchmarks/benchmark_frames_mediapipe_pose_lite_19700101_183741.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/benchmarks/benchmark_frames_ml_kit_accurate_19700101_183223.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/benchmarks/benchmark_frames_ml_kit_fast_19700101_183110.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/benchmarks/benchmark_frames_movenet_lightning_19700101_183349.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/benchmarks/benchmark_frames_movenet_thunder_19700101_183630.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/benchmarks/benchmark_summary_mediapipe_pose_lite_19700101_183741.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/benchmarks/benchmark_summary_ml_kit_accurate_19700101_183223.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/benchmarks/benchmark_summary_ml_kit_fast_19700101_183110.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/benchmarks/benchmark_summary_movenet_lightning_19700101_183349.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/benchmarks/benchmark_summary_movenet_thunder_19700101_183630.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/README.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/build.gradle.kts" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/proguard-rules.pro" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/AndroidManifest.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/assets/movenet_singlepose_lightning_int8_4.tflite" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/assets/movenet_singlepose_thunder_int8_4.tflite" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/assets/pose_landmarker_lite.task" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/MainActivity.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/engine/MediaPipePoseEngine.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/engine/MlKitAccurateEngine.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/engine/MlKitFastEngine.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/engine/MoveNetEngine.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/engine/PoseEngine.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/engine/PoseEngineFactory.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/model/BenchmarkModels.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/model/BicepsCurlCounter.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/model/ModelType.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/model/PoseFrameResult.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/model/PosePoint.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/model/PoseSchema.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/ui/OverlayView.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/util/BitmapUtils.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/java/com/messi/fitrackbenchmark/util/RollingStats.kt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/res/layout/activity_main.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/res/values/colors.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/res/values/strings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/app/src/main/res/values/themes.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/build.gradle.kts" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/gradle.properties" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/gradle/gradle-daemon-jvm.properties" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/gradle/libs.versions.toml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/gradle/wrapper/gradle-wrapper.properties" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/benchmark/kotlin/fitrackbenchmark_android/settings.gradle.kts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/benchmark/flutter/app/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/benchmark/flutter/app/.gitignore" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/benchmark/flutter/app/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/benchmark/flutter/app/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/app.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/app.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/main.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/main.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pubspec.lock" beforeDir="false" afterPath="$PROJECT_DIR$/app/pubspec.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pubspec.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/app/pubspec.yaml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -98,14 +58,16 @@
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.cidr.known.project.marker": "true",
+    "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.readMode.enableVisualFormatting": "true",
     "cf.first.check.clang-format": "false",
     "cidr.known.project.marker": "true",
     "dart.analysis.tool.window.visible": "false",
-    "git-widget-placeholder": "Merging benchmark-alihan",
+    "git-widget-placeholder": "main",
+    "io.flutter.project.isFirstOpen": "true",
     "kotlin-language-version-configured": "true",
     "last_opened_file_path": "/Users/alihan/AndroidStudioProjects/fitrack",
-    "settings.editor.selected.configurable": "configurable.group.language",
+    "settings.editor.selected.configurable": "dart.settings",
     "show.migrate.to.gradle.popup": "false"
   }
 }]]></component>
@@ -113,6 +75,12 @@
     <key name="MoveFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/benchmark" />
     </key>
+  </component>
+  <component name="RunManager">
+    <configuration name="main.dart" type="FlutterRunConfigurationType" factoryName="Flutter">
+      <option name="filePath" value="$PROJECT_DIR$/lib/main.dart" />
+      <method v="2" />
+    </configuration>
   </component>
   <component name="TaskManager">
     <task active="true" id="Default" summary="Default task">
