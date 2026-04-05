@@ -42,6 +42,10 @@ class CurlViewDetector {
 
   // ── Internal ─────────────────────────────────────────
 
+  /// Classify a single frame without affecting vote state.
+  /// Used by RepCounter during ACTIVE phase for continuous re-detection.
+  CurlCameraView classifyFrame(PoseResult pose) => _classifyFrame(pose);
+
   CurlCameraView _classifyFrame(PoseResult pose) {
     // Raw access without confidence gate — we need raw confidence for asymmetry.
     final ls = pose.landmark(LM.leftShoulder);

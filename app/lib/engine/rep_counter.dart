@@ -96,6 +96,10 @@ class RepCounter {
   // Curl: track whether PEAK was reached (for shortRom detection)
   bool _curlReachedPeak = false;
 
+  // Curl: continuous view re-detection (active phase hysteresis)
+  CurlCameraView _pendingView = CurlCameraView.unknown;
+  int _pendingViewStreak = 0;
+
   RepCounter({this.exercise = ExerciseType.bicepsCurl, this.side = ExerciseSide.both});
 
   RepSnapshot update(PoseResult result) {
@@ -124,6 +128,11 @@ class RepCounter {
     if (_lastTransitionTime != null &&
         now.difference(_lastTransitionTime!) < kStateDebounce) {
       return _snapshot();
+    }
+
+    // Continuous view re-detection for curl (active phase).
+    if (exercise == ExerciseType.bicepsCurl && _lockedView != CurlCameraView.unknown) {
+      _updateActiveViewDetection(result);
     }
 
     final oldState = _state;
@@ -200,6 +209,40 @@ class RepCounter {
         }
       default:
         break;
+    }
+  }
+
+  // ── Curl Active-Phase View Re-Detection ───────────────
+
+  /// Runs every frame during ACTIVE phase (curl only).
+  /// Classifies the current frame and increments a streak counter when
+  /// consecutive frames agree on a view different from the locked one.
+  /// Only applies the switch when the FSM is idle — never mid-rep.
+  void _updateActiveViewDetection(PoseResult result) {
+    final candidate = _viewDetector.classifyFrame(result);
+
+    if (candidate == CurlCameraView.unknown || candidate == _lockedView) {
+      // No evidence for a different view — reset streak.
+      _pendingView = CurlCameraView.unknown;
+      _pendingViewStreak = 0;
+      return;
+    }
+
+    if (candidate == _pendingView) {
+      _pendingViewStreak++;
+    } else {
+      // New candidate — start fresh streak.
+      _pendingView = candidate;
+      _pendingViewStreak = 1;
+    }
+
+    // Only switch when hysteresis threshold met AND FSM is idle (never mid-rep).
+    if (_pendingViewStreak >= kViewRedetectHysteresisFrames &&
+        _state == RepState.idle) {
+      _lockedView = _pendingView;
+      _curlForm.setView(_lockedView);
+      _pendingView = CurlCameraView.unknown;
+      _pendingViewStreak = 0;
     }
   }
 
@@ -308,6 +351,14 @@ class RepCounter {
     _minAngleThisRep = null;
     _curlReachedPeak = false;
     _stateStartTime = null;
+    // Apply any deferred view switch now that we're back to idle.
+    if (_pendingViewStreak >= kViewRedetectHysteresisFrames &&
+        _pendingView != CurlCameraView.unknown) {
+      _lockedView = _pendingView;
+      _curlForm.setView(_lockedView);
+      _pendingView = CurlCameraView.unknown;
+      _pendingViewStreak = 0;
+    }
   }
 
   /// Start a new set — resets reps, keeps set count.
@@ -323,6 +374,8 @@ class RepCounter {
     _effectiveSquatBottomAngle = kSquatBottomAngle;
     _viewDetector.reset();
     _lockedView = CurlCameraView.unknown;
+    _pendingView = CurlCameraView.unknown;
+    _pendingViewStreak = 0;
     _curlForm.reset();
     _squatForm.reset();
     _pushUpForm.reset();
@@ -345,6 +398,8 @@ class RepCounter {
     _effectiveSquatBottomAngle = kSquatBottomAngle;
     _viewDetector.reset();
     _lockedView = CurlCameraView.unknown;
+    _pendingView = CurlCameraView.unknown;
+    _pendingViewStreak = 0;
     _curlForm.reset();
     _squatForm.reset();
     _pushUpForm.reset();
@@ -366,11 +421,12 @@ class RepCounter {
           r.landmark(LM.rightElbow,    minConfidence: kMinLandmarkConfidence),
           r.landmark(LM.rightWrist,    minConfidence: kMinLandmarkConfidence),
         );
-        // In side views, use only the near-side arm.
+        // In side views, prefer the near-side arm but fall back to the far-side
+        // arm if the near side becomes occluded (e.g. user rotates mid-session).
         // In front/unknown, respect the `side` parameter.
         switch (_lockedView) {
-          case CurlCameraView.sideLeft:  return leftAngle;
-          case CurlCameraView.sideRight: return rightAngle;
+          case CurlCameraView.sideLeft:  return leftAngle ?? rightAngle;
+          case CurlCameraView.sideRight: return rightAngle ?? leftAngle;
           case CurlCameraView.front:
           case CurlCameraView.unknown:
             switch (side) {

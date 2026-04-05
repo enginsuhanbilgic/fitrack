@@ -135,6 +135,11 @@ const double kQualityShortRomDeduction = 0.30;
 /// Deduction for bilateral asymmetry.
 const double kQualityAsymmetryDeduction = 0.10;
 
+// ── Curl Active-Phase View Re-Detection ──────────────────
+/// Consecutive frames that must agree on a NEW view before switching mid-session.
+/// At 30 fps this is ~0.33 s — stable enough to ignore brief wobbles.
+const int kViewRedetectHysteresisFrames = 10;
+
 // ── Curl Camera-View Detection ───────────────────────────
 /// Shoulder separation ratio below this → likely side view.
 const double kSideViewShoulderSepThreshold = 0.10;
