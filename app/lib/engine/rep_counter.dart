@@ -20,6 +20,10 @@ class RepSnapshot {
   final CurlCameraView detectedView;
   final double? lastRepQuality;
   final double? averageQuality;
+  final List<double> repQualities;
+  final bool fatigueDetected;
+  final int eccentricTooFastCount;
+  final Set<FormError> errorsTriggered;
 
   const RepSnapshot({
     required this.reps,
@@ -30,6 +34,10 @@ class RepSnapshot {
     this.detectedView = CurlCameraView.unknown,
     this.lastRepQuality,
     this.averageQuality,
+    this.repQualities = const [],
+    this.fatigueDetected = false,
+    this.eccentricTooFastCount = 0,
+    this.errorsTriggered = const {},
   });
 }
 
@@ -435,5 +443,9 @@ class RepCounter {
         detectedView: _lockedView,
         lastRepQuality: exercise == ExerciseType.bicepsCurl ? _curlForm.lastRepQuality : null,
         averageQuality: exercise == ExerciseType.bicepsCurl ? _curlForm.averageQuality : null,
+        repQualities: exercise == ExerciseType.bicepsCurl ? _curlForm.repQualities : const [],
+        fatigueDetected: exercise == ExerciseType.bicepsCurl ? _curlForm.fatigueDetected : false,
+        eccentricTooFastCount: exercise == ExerciseType.bicepsCurl ? _curlForm.eccentricTooFastCount : 0,
+        errorsTriggered: const {},
       );
 }

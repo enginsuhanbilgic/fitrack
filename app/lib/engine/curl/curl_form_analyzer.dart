@@ -35,6 +35,9 @@ class CurlFormAnalyzer {
   final List<double> _asymmetryDeltas = [];
   int _consecutiveAsymmetricReps = 0;
 
+  // ── Tempo tracking ──────────────────────────────────────
+  int _eccentricTooFastCount = 0;
+
   // ── Per-rep quality score ───────────────────────────────
   double _maxSwingRatio = 0.0;
   double _maxDriftRatio = 0.0;
@@ -85,6 +88,12 @@ class CurlFormAnalyzer {
     // Compute eccentric duration.
     if (_eccentricStart != null) {
       _lastEccentricDuration = DateTime.now().difference(_eccentricStart!);
+    }
+
+    // Track eccentric too fast.
+    if (_lastEccentricDuration != null &&
+        _lastEccentricDuration!.inMilliseconds < kMinEccentricSec * 1000) {
+      _eccentricTooFastCount++;
     }
 
     // Compute quality score.
@@ -182,6 +191,15 @@ class CurlFormAnalyzer {
     return _repQualities.reduce((a, b) => a + b) / _repQualities.length;
   }
 
+  /// Per-rep quality scores for all completed reps (0.0–1.0 each).
+  List<double> get repQualities => List.unmodifiable(_repQualities);
+
+  /// Whether fatigue was detected at any point in this session.
+  bool get fatigueDetected => _fatigueFired;
+
+  /// Number of reps where the eccentric (lowering) phase was too fast.
+  int get eccentricTooFastCount => _eccentricTooFastCount;
+
   void reset() {
     _repStartSnapshot = null;
     _shortRomPending = false;
@@ -197,6 +215,7 @@ class CurlFormAnalyzer {
     _maxDriftRatio = 0.0;
     _lastRepQuality = 1.0;
     _repQualities.clear();
+    _eccentricTooFastCount = 0;
   }
 
   // ── Helpers ──────────────────────────────────────────

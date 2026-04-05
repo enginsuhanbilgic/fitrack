@@ -371,6 +371,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         totalSets: _snapshot.sets,
         sessionDuration: duration,
         averageQuality: _snapshot.averageQuality,
+        detectedView: _snapshot.detectedView,
+        repQualities: _snapshot.repQualities,
+        fatigueDetected: _snapshot.fatigueDetected,
+        asymmetryDetected: _lastFeedbackTime.containsKey(FormError.lateralAsymmetry),
+        eccentricTooFastCount: _snapshot.eccentricTooFastCount,
+        errorsTriggered: _lastFeedbackTime.keys.toSet(),
       ),
     ));
   }
