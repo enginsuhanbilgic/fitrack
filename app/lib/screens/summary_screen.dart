@@ -6,6 +6,7 @@ class SummaryScreen extends StatelessWidget {
   final int totalReps;
   final int totalSets;
   final Duration sessionDuration;
+  final double? averageQuality;
 
   const SummaryScreen({
     super.key,
@@ -13,6 +14,7 @@ class SummaryScreen extends StatelessWidget {
     required this.totalReps,
     required this.totalSets,
     required this.sessionDuration,
+    this.averageQuality,
   });
 
   String _formatDuration(Duration d) {
@@ -54,6 +56,13 @@ class SummaryScreen extends StatelessWidget {
               _StatRow(label: 'Sets', value: '$totalSets'),
               const SizedBox(height: 16),
               _StatRow(label: 'Duration', value: _formatDuration(sessionDuration)),
+              if (averageQuality != null) ...[
+                const SizedBox(height: 16),
+                _StatRow(
+                  label: 'Rep Quality',
+                  value: '${(averageQuality! * 100).round()}%',
+                ),
+              ],
               const Spacer(),
               ElevatedButton(
                 onPressed: () =>

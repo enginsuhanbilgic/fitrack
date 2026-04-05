@@ -70,6 +70,9 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   bool _isOccluded = false;
   DateTime? _lastOcclusionTts;
 
+  // Curl view detection state.
+  CurlCameraView _detectedCurlView = CurlCameraView.unknown;
+
   // Per-frame display state.
   List<PoseLandmark> _landmarks = [];
   RepSnapshot _snapshot = const RepSnapshot(
@@ -146,6 +149,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   // ── SETUP_CHECK ────────────────────────────────────────
 
   void _updateSetupCheck(dynamic result, List<PoseLandmark> smoothed) {
+    // Drive view detector for curl during setup.
+    if (widget.exercise == ExerciseType.bicepsCurl) {
+      final view = _repCounter.updateSetupView(result);
+      if (view != _detectedCurlView) setState(() => _detectedCurlView = view);
+    }
+
     final requirements = ExerciseRequirements.forExercise(widget.exercise);
     final colors = <int, Color>{};
     var allVisible = true;
@@ -212,6 +221,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }
 
   void _updateCountdownFrame(dynamic result, List<PoseLandmark> smoothed) {
+    // Continue view detection during countdown in case not yet locked.
+    if (widget.exercise == ExerciseType.bicepsCurl) {
+      final view = _repCounter.updateSetupView(result);
+      if (view != _detectedCurlView) setState(() => _detectedCurlView = view);
+    }
+
     final requirements = ExerciseRequirements.forExercise(widget.exercise);
     final allVisible = requirements.landmarkIndices.every(
       (idx) => result.landmark(idx, minConfidence: kMinLandmarkConfidence) != null,
@@ -311,13 +326,16 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }
 
   String _errorMessage(FormError err) => switch (err) {
-    FormError.torsoSwing     => "Don't swing",
-    FormError.elbowDrift     => 'Keep your elbow still',
-    FormError.shortRom       => 'Full range of motion',
-    FormError.squatDepth     => 'Go deeper',
-    FormError.trunkTibia     => 'Keep your chest up',
-    FormError.hipSag         => 'Keep your body straight',
-    FormError.pushUpShortRom => 'Go lower',
+    FormError.torsoSwing      => "Don't swing",
+    FormError.elbowDrift      => 'Keep your elbow still',
+    FormError.shortRom        => 'Full range of motion',
+    FormError.squatDepth      => 'Go deeper',
+    FormError.trunkTibia      => 'Keep your chest up',
+    FormError.hipSag          => 'Keep your body straight',
+    FormError.pushUpShortRom  => 'Go lower',
+    FormError.eccentricTooFast => 'Lower slowly',
+    FormError.lateralAsymmetry => 'Even out both arms',
+    FormError.fatigue          => "You're slowing down, stay strong",
   };
 
   void _triggerHighlight(FormError err) {
@@ -352,6 +370,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         totalReps: _snapshot.reps,
         totalSets: _snapshot.sets,
         sessionDuration: duration,
+        averageQuality: _snapshot.averageQuality,
       ),
     ));
   }
@@ -367,6 +386,13 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     _pose.dispose();
     super.dispose();
   }
+
+  String _viewLabel(CurlCameraView v) => switch (v) {
+    CurlCameraView.front     => 'Front view',
+    CurlCameraView.sideLeft  => 'Side view · Left',
+    CurlCameraView.sideRight => 'Side view · Right',
+    CurlCameraView.unknown   => 'Detecting…',
+  };
 
   // ── Build ──────────────────────────────────────────────
 
@@ -508,6 +534,33 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                   fontWeight: FontWeight.w600,
                 ),
                 textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+
+        // Curl view indicator chip — bottom right, setup/countdown only.
+        if (widget.exercise == ExerciseType.bicepsCurl &&
+            (_phase == WorkoutPhase.setupCheck || _phase == WorkoutPhase.countdown) &&
+            _detectedCurlView != CurlCameraView.unknown)
+          Positioned(
+            bottom: 32,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.videocam, color: Color(0xFF00E676), size: 16),
+                  const SizedBox(width: 6),
+                  Text(
+                    _viewLabel(_detectedCurlView),
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                ],
               ),
             ),
           ),
