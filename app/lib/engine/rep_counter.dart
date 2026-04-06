@@ -6,6 +6,7 @@ import '../models/landmark_types.dart';
 import '../models/pose_result.dart';
 import 'angle_utils.dart';
 import 'curl/curl_form_analyzer.dart';
+import 'curl/curl_view_detector.dart';
 import 'squat/squat_form_analyzer.dart';
 import 'push_up/push_up_form_analyzer.dart';
 
@@ -16,6 +17,13 @@ class RepSnapshot {
   final RepState state;
   final double? jointAngle;
   final List<FormError> formErrors;
+  final CurlCameraView detectedView;
+  final double? lastRepQuality;
+  final double? averageQuality;
+  final List<double> repQualities;
+  final bool fatigueDetected;
+  final int eccentricTooFastCount;
+  final Set<FormError> errorsTriggered;
 
   const RepSnapshot({
     required this.reps,
@@ -23,6 +31,13 @@ class RepSnapshot {
     required this.state,
     this.jointAngle,
     this.formErrors = const [],
+    this.detectedView = CurlCameraView.unknown,
+    this.lastRepQuality,
+    this.averageQuality,
+    this.repQualities = const [],
+    this.fatigueDetected = false,
+    this.eccentricTooFastCount = 0,
+    this.errorsTriggered = const {},
   });
 }
 
@@ -49,6 +64,9 @@ class RepCounter {
   final ExerciseSide side;
 
   final CurlFormAnalyzer _curlForm = CurlFormAnalyzer();
+  final CurlViewDetector _viewDetector = CurlViewDetector();
+  CurlCameraView _lockedView = CurlCameraView.unknown;
+
   final SquatFormAnalyzer _squatForm = SquatFormAnalyzer();
   final PushUpFormAnalyzer _pushUpForm = PushUpFormAnalyzer();
 
@@ -77,6 +95,10 @@ class RepCounter {
 
   // Curl: track whether PEAK was reached (for shortRom detection)
   bool _curlReachedPeak = false;
+
+  // Curl: continuous view re-detection (active phase hysteresis)
+  CurlCameraView _pendingView = CurlCameraView.unknown;
+  int _pendingViewStreak = 0;
 
   RepCounter({this.exercise = ExerciseType.bicepsCurl, this.side = ExerciseSide.both});
 
@@ -108,6 +130,11 @@ class RepCounter {
       return _snapshot();
     }
 
+    // Continuous view re-detection for curl (active phase).
+    if (exercise == ExerciseType.bicepsCurl && _lockedView != CurlCameraView.unknown) {
+      _updateActiveViewDetection(result);
+    }
+
     final oldState = _state;
 
     switch (exercise) {
@@ -127,6 +154,18 @@ class RepCounter {
     return _snapshot();
   }
 
+  /// Call once per frame during SETUP_CHECK and COUNTDOWN (biceps curl only).
+  /// Returns the current detected view; [CurlCameraView.unknown] until locked.
+  CurlCameraView updateSetupView(PoseResult pose) {
+    if (exercise != ExerciseType.bicepsCurl) return CurlCameraView.unknown;
+    final view = _viewDetector.update(pose);
+    if (_viewDetector.isLocked && _lockedView == CurlCameraView.unknown) {
+      _lockedView = view;
+      _curlForm.setView(_lockedView);
+    }
+    return _lockedView;
+  }
+
   // ── Biceps Curl FSM ───────────────────────────────────
 
   void _runCurlFsm(double smoothed, PoseResult result) {
@@ -142,6 +181,7 @@ class RepCounter {
         if (smoothed <= kCurlPeakAngle) {
           _state = RepState.peak;
           _curlReachedPeak = true;
+          _curlForm.onPeakReached();
         } else if (smoothed > kCurlStartAngle) {
           // Abandoned rep — never reached peak
           if (!_curlReachedPeak) _curlForm.onAbortedRep();
@@ -151,11 +191,17 @@ class RepCounter {
       case RepState.peak:
         if (smoothed > kCurlPeakExitAngle) {
           _state = RepState.eccentric;
+          _curlForm.onEccentricStart();
         }
       case RepState.eccentric:
         _lastErrors = _curlForm.evaluate(result);
         if (smoothed >= kCurlEndAngle) {
           _reps++;
+          // Record bilateral angles for asymmetry detection (front view).
+          _curlForm.recordBilateralAngles(
+            _computeBilateralAngle(result, left: true),
+            _computeBilateralAngle(result, left: false),
+          );
           final completionErrors = _curlForm.consumeCompletionErrors();
           _lastErrors = [..._lastErrors, ...completionErrors];
           _curlForm.onRepEnd();
@@ -163,6 +209,40 @@ class RepCounter {
         }
       default:
         break;
+    }
+  }
+
+  // ── Curl Active-Phase View Re-Detection ───────────────
+
+  /// Runs every frame during ACTIVE phase (curl only).
+  /// Classifies the current frame and increments a streak counter when
+  /// consecutive frames agree on a view different from the locked one.
+  /// Only applies the switch when the FSM is idle — never mid-rep.
+  void _updateActiveViewDetection(PoseResult result) {
+    final candidate = _viewDetector.classifyFrame(result);
+
+    if (candidate == CurlCameraView.unknown || candidate == _lockedView) {
+      // No evidence for a different view — reset streak.
+      _pendingView = CurlCameraView.unknown;
+      _pendingViewStreak = 0;
+      return;
+    }
+
+    if (candidate == _pendingView) {
+      _pendingViewStreak++;
+    } else {
+      // New candidate — start fresh streak.
+      _pendingView = candidate;
+      _pendingViewStreak = 1;
+    }
+
+    // Only switch when hysteresis threshold met AND FSM is idle (never mid-rep).
+    if (_pendingViewStreak >= kViewRedetectHysteresisFrames &&
+        _state == RepState.idle) {
+      _lockedView = _pendingView;
+      _curlForm.setView(_lockedView);
+      _pendingView = CurlCameraView.unknown;
+      _pendingViewStreak = 0;
     }
   }
 
@@ -271,6 +351,14 @@ class RepCounter {
     _minAngleThisRep = null;
     _curlReachedPeak = false;
     _stateStartTime = null;
+    // Apply any deferred view switch now that we're back to idle.
+    if (_pendingViewStreak >= kViewRedetectHysteresisFrames &&
+        _pendingView != CurlCameraView.unknown) {
+      _lockedView = _pendingView;
+      _curlForm.setView(_lockedView);
+      _pendingView = CurlCameraView.unknown;
+      _pendingViewStreak = 0;
+    }
   }
 
   /// Start a new set — resets reps, keeps set count.
@@ -284,6 +372,10 @@ class RepCounter {
     _repMinAngles.clear();
     _longFemurDetected = false;
     _effectiveSquatBottomAngle = kSquatBottomAngle;
+    _viewDetector.reset();
+    _lockedView = CurlCameraView.unknown;
+    _pendingView = CurlCameraView.unknown;
+    _pendingViewStreak = 0;
     _curlForm.reset();
     _squatForm.reset();
     _pushUpForm.reset();
@@ -304,6 +396,10 @@ class RepCounter {
     _repMinAngles.clear();
     _longFemurDetected = false;
     _effectiveSquatBottomAngle = kSquatBottomAngle;
+    _viewDetector.reset();
+    _lockedView = CurlCameraView.unknown;
+    _pendingView = CurlCameraView.unknown;
+    _pendingViewStreak = 0;
     _curlForm.reset();
     _squatForm.reset();
     _pushUpForm.reset();
@@ -317,22 +413,29 @@ class RepCounter {
       case ExerciseType.bicepsCurl:
         final leftAngle = angleDeg(
           r.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.leftElbow, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.leftWrist, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftElbow,    minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftWrist,    minConfidence: kMinLandmarkConfidence),
         );
         final rightAngle = angleDeg(
           r.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.rightElbow, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.rightWrist, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightElbow,    minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightWrist,    minConfidence: kMinLandmarkConfidence),
         );
-        switch (side) {
-          case ExerciseSide.left:
-            return leftAngle;
-          case ExerciseSide.right:
-            return rightAngle;
-          case ExerciseSide.both:
-            if (leftAngle != null && rightAngle != null) return (leftAngle + rightAngle) / 2.0;
-            return leftAngle ?? rightAngle;
+        // In side views, prefer the near-side arm but fall back to the far-side
+        // arm if the near side becomes occluded (e.g. user rotates mid-session).
+        // In front/unknown, respect the `side` parameter.
+        switch (_lockedView) {
+          case CurlCameraView.sideLeft:  return leftAngle ?? rightAngle;
+          case CurlCameraView.sideRight: return rightAngle ?? leftAngle;
+          case CurlCameraView.front:
+          case CurlCameraView.unknown:
+            switch (side) {
+              case ExerciseSide.left:  return leftAngle;
+              case ExerciseSide.right: return rightAngle;
+              case ExerciseSide.both:
+                if (leftAngle != null && rightAngle != null) return (leftAngle + rightAngle) / 2.0;
+                return leftAngle ?? rightAngle;
+            }
         }
 
       case ExerciseType.squat:
@@ -365,6 +468,21 @@ class RepCounter {
     }
   }
 
+  double? _computeBilateralAngle(PoseResult r, {required bool left}) {
+    if (left) {
+      return angleDeg(
+        r.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
+        r.landmark(LM.leftElbow,    minConfidence: kMinLandmarkConfidence),
+        r.landmark(LM.leftWrist,    minConfidence: kMinLandmarkConfidence),
+      );
+    }
+    return angleDeg(
+      r.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
+      r.landmark(LM.rightElbow,    minConfidence: kMinLandmarkConfidence),
+      r.landmark(LM.rightWrist,    minConfidence: kMinLandmarkConfidence),
+    );
+  }
+
   double? _computeHipY(PoseResult r) {
     final left = r.landmark(LM.leftHip, minConfidence: kMinLandmarkConfidence);
     final right = r.landmark(LM.rightHip, minConfidence: kMinLandmarkConfidence);
@@ -378,5 +496,12 @@ class RepCounter {
         state: _state,
         jointAngle: _lastAngle,
         formErrors: _lastErrors,
+        detectedView: _lockedView,
+        lastRepQuality: exercise == ExerciseType.bicepsCurl ? _curlForm.lastRepQuality : null,
+        averageQuality: exercise == ExerciseType.bicepsCurl ? _curlForm.averageQuality : null,
+        repQualities: exercise == ExerciseType.bicepsCurl ? _curlForm.repQualities : const [],
+        fatigueDetected: exercise == ExerciseType.bicepsCurl ? _curlForm.fatigueDetected : false,
+        eccentricTooFastCount: exercise == ExerciseType.bicepsCurl ? _curlForm.eccentricTooFastCount : 0,
+        errorsTriggered: const {},
       );
 }

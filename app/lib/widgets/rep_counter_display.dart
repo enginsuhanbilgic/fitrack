@@ -80,12 +80,15 @@ class RepCounterDisplay extends StatelessWidget {
   }
 
   String _errorLabel(FormError err) => switch (err) {
-    FormError.torsoSwing     => 'Keep your torso still',
-    FormError.elbowDrift     => 'Keep your elbow still',
-    FormError.shortRom       => 'Full range of motion',
-    FormError.squatDepth     => 'Go deeper',
-    FormError.trunkTibia     => 'Keep your chest up',
-    FormError.hipSag         => 'Keep your body straight',
-    FormError.pushUpShortRom => 'Go lower',
+    FormError.torsoSwing      => 'Keep your torso still',
+    FormError.elbowDrift      => 'Keep your elbow still',
+    FormError.shortRom        => 'Full range of motion',
+    FormError.squatDepth      => 'Go deeper',
+    FormError.trunkTibia      => 'Keep your chest up',
+    FormError.hipSag          => 'Keep your body straight',
+    FormError.pushUpShortRom  => 'Go lower',
+    FormError.eccentricTooFast => 'Lower slowly',
+    FormError.lateralAsymmetry => 'Even out both arms',
+    FormError.fatigue          => 'Fatigue detected',
   };
 }

@@ -4,10 +4,11 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="feat: MVP form feedback rulebook for curl, squat, push-up (#17)">
+    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="feat: design-quality biceps curl summary screen with per-rep quality chart, form analysis, and coaching insights">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/constants.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/constants.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_view_detector.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_view_detector.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -43,12 +44,22 @@
     &quot;assignee&quot;: &quot;Aleyhan&quot;
   }
 }</component>
-  <component name="GithubPullRequestsUISettings">{
-  &quot;selectedUrlAndAccountId&quot;: {
-    &quot;url&quot;: &quot;https://github.com/enginsuhanbilgic/fitrack.git&quot;,
-    &quot;accountId&quot;: &quot;39d89001-6e79-414a-a270-2898b881392a&quot;
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/enginsuhanbilgic/fitrack.git",
+    "accountId": "39d89001-6e79-414a-a270-2898b881392a"
+  },
+  "recentNewPullRequestHead": {
+    "server": {
+      "useHttp": false,
+      "host": "github.com",
+      "port": null,
+      "suffix": null
+    },
+    "owner": "enginsuhanbilgic",
+    "repository": "fitrack"
   }
-}</component>
+}]]></component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 7
 }</component>
@@ -161,7 +172,31 @@
       <option name="project" value="LOCAL" />
       <updated>1775146387783</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="feat: enhance home screen layout with subtitle truncation and add finish workout button">
+      <option name="closed" value="true" />
+      <created>1775147401079</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1775147401079</updated>
+    </task>
+    <task id="LOCAL-00011" summary="feat: implement curl view detection and enhance form analysis with rep tempo, quality score, bilateral asymmetry, fatigue detection">
+      <option name="closed" value="true" />
+      <created>1775427919353</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1775427919353</updated>
+    </task>
+    <task id="LOCAL-00012" summary="feat: design-quality biceps curl summary screen with per-rep quality chart, form analysis, and coaching insights">
+      <option name="closed" value="true" />
+      <created>1775429114964</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1775429114964</updated>
+    </task>
+    <option name="localTasksCounter" value="13" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -185,7 +220,10 @@
     <MESSAGE value="feat: add squat and push-up rep-counting FSMs (#15)" />
     <MESSAGE value="feat: confidence gating, occlusion prompts, long-femur adaptation (#18)" />
     <MESSAGE value="feat: MVP form feedback rulebook for curl, squat, push-up (#17)" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat: MVP form feedback rulebook for curl, squat, push-up (#17)" />
+    <MESSAGE value="feat: enhance home screen layout with subtitle truncation and add finish workout button" />
+    <MESSAGE value="feat: implement curl view detection and enhance form analysis with rep tempo, quality score, bilateral asymmetry, fatigue detection" />
+    <MESSAGE value="feat: design-quality biceps curl summary screen with per-rep quality chart, form analysis, and coaching insights" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat: design-quality biceps curl summary screen with per-rep quality chart, form analysis, and coaching insights" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

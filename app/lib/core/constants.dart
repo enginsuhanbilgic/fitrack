@@ -104,3 +104,52 @@ const int kCountdownSeconds = 3;
 
 /// Seconds of continuous landmark absence in ACTIVE phase before auto-termination.
 const double kAbsenceTimeoutSec = 3.0;
+
+// ── Curl Tempo Tracking ──────────────────────────────────
+/// Minimum eccentric duration in seconds — below this fires eccentricTooFast.
+const double kMinEccentricSec = 1.5;
+
+// ── Curl Bilateral Asymmetry ─────────────────────────────
+/// Peak angle delta (degrees) between left and right arm to flag asymmetry.
+const double kAsymmetryAngleDelta = 15.0;
+/// Consecutive asymmetric reps required before firing lateralAsymmetry.
+const int kAsymmetryConsecutiveReps = 3;
+
+// ── Curl Fatigue Detection ───────────────────────────────
+/// Minimum reps before fatigue comparison is possible (first N vs last N).
+const int kFatigueMinReps = 6;
+/// Number of reps to average at start and end for comparison.
+const int kFatigueWindowSize = 3;
+/// Ratio threshold: if lastAvg / firstAvg > this, user is fatiguing.
+const double kFatigueSlowdownRatio = 1.4;
+
+// ── Curl Per-Rep Quality Score ───────────────────────────
+/// Maximum deduction for torso swing (proportional to magnitude).
+const double kQualitySwingMaxDeduction = 0.25;
+/// Maximum deduction for elbow drift (proportional to magnitude).
+const double kQualityDriftMaxDeduction = 0.20;
+/// Deduction for rushed eccentric.
+const double kQualityEccentricDeduction = 0.15;
+/// Deduction for short ROM (abandoned rep).
+const double kQualityShortRomDeduction = 0.30;
+/// Deduction for bilateral asymmetry.
+const double kQualityAsymmetryDeduction = 0.10;
+
+// ── Curl Active-Phase View Re-Detection ──────────────────
+/// Consecutive frames that must agree on a NEW view before switching mid-session.
+/// At 30 fps this is ~0.33 s — stable enough to ignore brief wobbles.
+const int kViewRedetectHysteresisFrames = 10;
+
+// ── Curl Camera-View Detection ───────────────────────────
+/// Shoulder separation ratio below this → likely side view.
+const double kSideViewShoulderSepThreshold = 0.10;
+/// Shoulder separation ratio above this → likely front view.
+const double kFrontViewShoulderSepThreshold = 0.15;
+/// Confidence asymmetry above this → corroborates side view.
+const double kViewShoulderConfidenceDeltaThreshold = 0.20;
+/// Nose offset from shoulder midpoint above this → corroborates side view.
+const double kViewNoseOffsetThreshold = 0.10;
+/// Frames to accumulate before attempting to lock the view.
+const int kViewDetectionFrames = 15;
+/// Frames that must agree on the same view to lock it.
+const int kViewDetectionConsensusFrames = 10;

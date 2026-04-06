@@ -39,10 +39,23 @@ enum FormError {
   // Push-up
   hipSag,          // shoulder-hip-ankle collinearity deviation > 15°
   pushUpShortRom,  // rep completed without elbow reaching bottom threshold
+  // Biceps curl — advanced
+  eccentricTooFast, // eccentric phase < kMinEccentricSec
+  lateralAsymmetry, // left vs right peak angle delta > threshold for N reps
+  fatigue,          // concentric velocity degrading across reps
 }
 
 /// Top-level session lifecycle state.
 enum WorkoutPhase { setupCheck, countdown, active, completed }
+
+/// Camera orientation detected automatically during SETUP_CHECK (biceps curl only).
+/// Locked once; never re-detected mid-session.
+enum CurlCameraView {
+  unknown,   // detection not yet complete
+  front,     // user faces camera — both shoulders broadly separated on X axis
+  sideLeft,  // user's left side faces camera — left shoulder is near-side
+  sideRight, // user's right side faces camera — right shoulder is near-side
+}
 
 /// Required ML Kit landmark indices per exercise.
 class ExerciseRequirements {
