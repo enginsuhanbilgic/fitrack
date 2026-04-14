@@ -1,0 +1,209 @@
+classDiagram
+direction LR
+
+class FiTrackApp {
+  +build(context)
+}
+
+class HomeScreen {
+  +build(context)
+  +startWorkout(exercise)
+}
+
+class WorkoutScreen {
+  +exercise: ExerciseType
+  +build(context)
+  +initState()
+  +dispose()
+}
+
+class SummaryScreen {
+  +exercise: ExerciseType
+  +totalReps: int
+  +totalSets: int
+  +sessionDuration: Duration
+  +build(context)
+}
+
+class CameraService {
+  <<Service>>
+  +controller: CameraController
+  +init()
+  +startStream(onFrame)
+  +stopStream()
+  +dispose()
+}
+
+class TtsService {
+  <<Service>>
+  +init()
+  +speak(text)
+  +stop()
+  +dispose()
+}
+
+class PoseService {
+  <<Interface>>
+  +init()
+  +estimatePoseFromFrame(frame) PoseResult
+  +dispose()
+}
+
+class MlKitPoseService {
+  <<Service>>
+  +name: String
+  +init()
+  +processNv21(bytes, width, height, sensorRotation) PoseResult
+  +dispose()
+}
+
+class LandmarkSmoother {
+  +smooth(rawLandmarks) List~PoseLandmark~
+  +reset()
+}
+
+class RepCounter {
+  <<Engine>>
+  +exercise: ExerciseType
+  +side: ExerciseSide
+  +update(result) RepSnapshot
+  +updateSetupView(pose) CurlCameraView
+  +nextSet()
+  +reset()
+}
+
+class CurlFormAnalyzer {
+  <<Engine>>
+  +setView(view)
+  +onRepStart(snapshot)
+  +evaluate(current) List~FormError~
+  +consumeCompletionErrors() List~FormError~
+  +onRepEnd()
+  +reset()
+}
+
+class SquatFormAnalyzer {
+  <<Engine>>
+  +onRepStart()
+  +trackAngle(kneeAngle)
+  +evaluate(current) List~FormError~
+  +consumeCompletionErrors(bottomAngle) List~FormError~
+  +reset()
+}
+
+class PushUpFormAnalyzer {
+  <<Engine>>
+  +onRepStart()
+  +trackAngle(elbowAngle)
+  +evaluate(current) List~FormError~
+  +consumeCompletionErrors() List~FormError~
+  +reset()
+}
+
+class CurlViewDetector {
+  <<Engine>>
+  +update(pose) CurlCameraView
+  +classifyFrame(pose) CurlCameraView
+  +reset()
+}
+
+class PoseResult {
+  <<Model>>
+  +landmarks: List~PoseLandmark~
+  +inferenceTime: Duration
+  +landmark(type, minConfidence) PoseLandmark
+  +isEmpty: bool
+}
+
+class PoseLandmark {
+  <<Model>>
+  +type: int
+  +x: double
+  +y: double
+  +confidence: double
+}
+
+class RepSnapshot {
+  <<Model>>
+  +reps: int
+  +sets: int
+  +state: RepState
+  +jointAngle: double
+  +formErrors: List~FormError~
+  +detectedView: CurlCameraView
+}
+
+class ExerciseType {
+  <<Enumeration>>
+  bicepsCurl
+  squat
+  pushUp
+}
+
+class ExerciseSide {
+  <<Enumeration>>
+  left
+  right
+  both
+}
+
+class RepState {
+  <<Enumeration>>
+  idle
+  concentric
+  eccentric
+  descending
+  ascending
+}
+
+class FormError {
+  <<Enumeration>>
+  torsoSwing
+  elbowDrift
+  shortRom
+  squatDepth
+  hipSag
+}
+
+class CurlCameraView {
+  <<Enumeration>>
+  unknown
+  front
+  sideLeft
+  sideRight
+}
+
+FiTrackApp --> HomeScreen : opens
+HomeScreen --> WorkoutScreen : navigates to
+WorkoutScreen --> SummaryScreen : navigates to
+
+WorkoutScreen --> CameraService : uses
+WorkoutScreen --> PoseService : uses
+WorkoutScreen --> TtsService : uses
+WorkoutScreen --> LandmarkSmoother : uses
+WorkoutScreen --> RepCounter : coordinates
+WorkoutScreen --> RepSnapshot : reads
+
+PoseService <|-- MlKitPoseService : implemented by
+
+RepCounter --> CurlFormAnalyzer : uses
+RepCounter --> SquatFormAnalyzer : uses
+RepCounter --> PushUpFormAnalyzer : uses
+RepCounter --> CurlViewDetector : uses
+RepCounter --> PoseResult : consumes
+RepCounter --> RepSnapshot : returns
+
+PoseResult "1" o-- "*" PoseLandmark : contains
+
+WorkoutScreen --> ExerciseType : selected exercise
+RepCounter --> ExerciseType : configured by
+RepCounter --> ExerciseSide : configured by
+RepSnapshot --> RepState : exposes
+RepSnapshot --> FormError : exposes
+RepSnapshot --> CurlCameraView : exposes
+
+note for WorkoutScreen "In the current implemented architecture, WorkoutScreen acts as the main session coordinator. Some controller/ViewModel responsibilities are still centralized here."
+
+note for PoseService "PoseService is an abstraction. The current prototype uses MlKitPoseService as its concrete on-device pose estimation backend."
+
+note for RepCounter "RepCounter contains the core finite-state-machine logic for repetition counting and delegates exercise-specific feedback to analyzer classes."

@@ -1,0 +1,319 @@
+% Compile with XeLaTeX or LuaLaTeX.
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setmainlanguage{english}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{setspace}
+\usepackage{caption}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.7em}
+\setlist[itemize]{noitemsep, topsep=0.4em}
+\onehalfspacing
+
+\title{FiTrack Mid-Semester Progress Report}
+\author{}
+\date{Spring 2026}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    {\Large Ko\c{c} University\par}
+    \vspace{0.4cm}
+    {\large COMP 491 Computer Engineering Design\par}
+    \vspace{1.6cm}
+
+    {\Huge \textbf{FiTrack}\par}
+    \vspace{0.4cm}
+    {\LARGE Mid-Semester Progress Report\par}
+    \vspace{1.2cm}
+
+    {\large Spring 2026\par}
+    \vspace{1.6cm}
+
+    \begin{tabular}{ll}
+        \textbf{Project Advisor:} & Hakan Ayral \\
+        \textbf{Course:} & COMP 491 Computer Engineering Design \\
+    \end{tabular}
+
+    \vspace{1.5cm}
+
+    {\large \textbf{Project Team}\par}
+    \vspace{0.6cm}
+
+    \renewcommand{\arraystretch}{1.25}
+    \begin{tabularx}{0.95\textwidth}{>{\raggedright\arraybackslash}X c >{\raggedright\arraybackslash}X}
+        \toprule
+        \textbf{Name} & \textbf{ID} & \textbf{Email} \\
+        \midrule
+        Abdulkadir Bilge & 76471 & abilge20@ku.edu.tr \\
+        Abdullah Tun\c{c}er & 75640 & atuncer20@ku.edu.tr \\
+        Ali Han K{\i}l{\i}n\c{c} & 75841 & akilinc20@ku.edu.tr \\
+        Engin S\"uhan Bilgi\c{c} & 75771 & ebilgic20@ku.edu.tr \\
+        Onuralp Keskin & 72725 & onuralpkeskin19@ku.edu.tr \\
+        \bottomrule
+    \end{tabularx}
+
+    \vfill
+    {\large April 15, 2026\par}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{Problem and Our Solution}
+
+Many people work out alone without a coach and therefore do not receive immediate feedback about whether they are performing an exercise correctly. Video tutorials can demonstrate correct form, but they cannot observe the user and react during the movement itself. In practice this creates two problems: repetitions may be counted inaccurately by the user, and form mistakes may be repeated without correction.
+
+Our project, \textbf{FiTrack}, addresses this problem with a mobile fitness assistant that uses the smartphone camera for on-device pose estimation. The system tracks body landmarks in real time, overlays a visual skeleton on the live camera feed, counts repetitions, and provides simple exercise-specific feedback cues. The current implemented architecture focuses on three base exercises: \textbf{biceps curl, squat, and push-up}. Among these, biceps curl currently has the richest analysis pipeline, while squat and push-up are already integrated at the prototype level.
+
+At this stage, our project is still a prototype under active development. Even though there are many core systems that work more or less, the architecture of the application, user experience and performance may not be up to standards. The main goal of the current phase has been to establish a reliable end-to-end mobile pipeline and validate that real-time coaching logic is feasible on-device.
+
+\section{Current Implemented Architecture}
+
+The current implemented architecture is a Flutter-based mobile application organized around four practical layers and those are Presentation, Service, Exercise Logic and Data/Model layer. These are open to changes.
+
+\subsection{Benchmarking}
+
+Before starting implementation on Flutter, we created two benchmark applications on Flutter and Kotlin using multiple models. Among those models, ML Kit Pose on Flutter seemed the most promising to us in terms of performance and applicability. These benchmark results were discussed in GitHub issue \texttt{\#1} and helped us decide which direction was most practical for the current term project implementation.
+
+\subsubsection{Flutter Benchmark Results}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}X c c c c c}
+\toprule
+\textbf{Model} & \textbf{Mean Latency} & \textbf{P50 (Median)} & \textbf{P95 Latency} & \textbf{Avg FPS} & \textbf{Detection Rate} \\
+\midrule
+\textbf{ML Kit Pose} & \textbf{19.38 ms} & \textbf{14.08 ms} & \textbf{37.43 ms} & \textbf{22.14} & 92.55\% \\
+ML Kit Full & 23.72 ms & 17.10 ms & 43.34 ms & 18.27 & 99.75\% \\
+MoveNet Lightning & 33.05 ms & 26.33 ms & 65.36 ms & 21.41 & 100.00\% \\
+YOLO26n-Pose & 126.64 ms & 111.63 ms & 239.41 ms & 6.86 & 96.83\% \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Key observations from the Flutter benchmark were:
+
+\begin{itemize}
+    \item \textbf{ML Kit Pose} achieved the best overall speed-efficiency balance, with the lowest mean latency and the highest average FPS.
+    \item \textbf{MoveNet Lightning} achieved the highest detection coverage, but ML Kit remained more practical for the Flutter-based real-time prototype.
+    \item \textbf{YOLO26n-Pose} was too slow in this setup to be a realistic real-time option.
+\end{itemize}
+
+For the Flutter branch of the project, these results strongly supported the decision to use \textbf{ML Kit Pose} as the primary backend in the current application.
+
+\subsubsection{Kotlin / Android Benchmark Results}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}X c c c c c}
+\toprule
+\textbf{Model} & \textbf{Mean Latency} & \textbf{P50 (Median)} & \textbf{P95 Latency} & \textbf{Avg FPS} & \textbf{Detection Rate} \\
+\midrule
+ML Kit Fast & 47.61 ms & 45.00 ms & 86.00 ms & 11.38 & 99.71\% \\
+ML Kit Accurate & 52.50 ms & 50.00 ms & 78.40 ms & 10.22 & 100.00\% \\
+\textbf{MoveNet Lightning} & \textbf{14.13 ms} & \textbf{14.00 ms} & \textbf{16.00 ms} & \textbf{24.79} & \textbf{100.00\%} \\
+MoveNet Thunder & 36.98 ms & 37.00 ms & 40.00 ms & 21.45 & 100.00\% \\
+MediaPipe Pose Lite & 48.47 ms & 49.00 ms & 65.00 ms & 15.93 & 100.00\% \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Key observations from the Kotlin benchmark were:
+
+\begin{itemize}
+    \item \textbf{MoveNet Lightning} achieved the best raw latency and FPS.
+    \item Several models, including \textbf{ML Kit Accurate}, \textbf{MoveNet Lightning}, \textbf{MoveNet Thunder}, and \textbf{MediaPipe Pose Lite}, reached 100\% detection coverage in that benchmark setup.
+    \item In practice, the Kotlin-side notes suggest that \textbf{MediaPipe Pose Lite} appeared visually more stable for full-body tracking, even when some alternatives were numerically faster.
+\end{itemize}
+
+These two benchmark tracks did not produce exactly the same ``best'' result, which is reasonable because they were built in different implementation environments. For the \textbf{current implemented Flutter application}, the Flutter benchmark is the more relevant decision signal. Therefore, the current prototype uses \textbf{ML Kit Pose} as the practical default backend, while the broader benchmarking work still documents potentially useful alternatives for future refinement.
+
+\subsection{Presentation Layer}
+
+The presentation layer contains the Flutter application entry point and the visible screens:
+
+\begin{itemize}
+    \item \texttt{FiTrackApp} initializes the application.
+    \item \texttt{HomeScreen} lets the user select an exercise.
+    \item \texttt{WorkoutScreen} manages the live session.
+    \item \texttt{SummaryScreen} shows the session outcome and quality-related feedback.
+\end{itemize}
+
+In the current implemented architecture, \texttt{WorkoutScreen} plays a larger orchestration role than originally envisioned in the proposal. In other words, some coordination logic that might later move into a dedicated controller or ViewModel is still managed directly inside this screen. This is to be cleaned up and structured better in the future but, as we are still prototyping, it is not a major problem.
+
+\subsection{Service Layer}
+
+The service layer abstracts hardware and platform-dependent functionality:
+
+\begin{itemize}
+    \item \texttt{CameraService} wraps camera initialization and streaming.
+    \item \texttt{PoseService} defines the abstract pose estimation interface.
+    \item \texttt{MlKitPoseService} is the current concrete pose estimation backend.
+    \item \texttt{TtsService} handles voice feedback.
+\end{itemize}
+
+This structure already provides a useful separation between UI code and low-level camera / inference operations. It also keeps the pose backend replaceable in principle, even though the current prototype is centered on ML Kit.
+
+\subsection{Exercise Logic Layer}
+
+The exercise logic layer performs the main interpretation of pose data:
+
+\begin{itemize}
+    \item \texttt{RepCounter} implements the finite-state-machine logic for curl, squat, and push-up.
+    \item \texttt{CurlFormAnalyzer} evaluates curl-specific form errors and quality signals.
+    \item \texttt{SquatFormAnalyzer} evaluates squat-specific cues.
+    \item \texttt{PushUpFormAnalyzer} evaluates push-up-specific cues.
+    \item \texttt{CurlViewDetector} detects whether the user is in front view or side view during curls.
+    \item \texttt{LandmarkSmoother}, \texttt{OneEuroFilter}, and \texttt{AngleUtils} support filtering and geometric calculations.
+\end{itemize}
+
+This is currently the strongest technical part of the system. The repository already includes:
+
+\begin{itemize}
+    \item setup visibility checks before starting a session,
+    \item a hands-free countdown,
+    \item repetition counting with exercise-specific FSM transitions,
+    \item conservative form feedback rules,
+    \item TTS-based cues,
+    \item a summary screen for completed sessions.
+\end{itemize}
+
+The curl pipeline is currently the most mature because it includes view detection, rep quality scoring, fatigue-related logic, and asymmetry checks. Squat and push-up are already supported, but their quality analysis is still intentionally simpler.
+
+\subsection{Data / Model Layer}
+
+The model layer includes \texttt{PoseResult}, \texttt{PoseLandmark}, \texttt{RepSnapshot}, and shared enums/constants such as \texttt{ExerciseType}, \texttt{RepState}, and \texttt{FormError}.
+
+One important limitation is that \textbf{persistent workout storage is not yet implemented in the current Flutter app}, even though it was part of the broader project plan. At the moment, session data is processed in memory and passed to the summary screen, but there is no completed local database/history module yet.
+
+\section{Class Diagram}
+
+This diagram reflects the \textbf{current implemented architecture}, not only the intended final design. That distinction is important because the project is still in progress and some responsibilities are currently centralized for faster iteration.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{class_diagram.png}
+    \caption{Class diagram of the current implemented architecture.}
+\end{figure}
+
+\section{Development Tools and Technologies}
+
+The current project stack is:
+
+\begin{itemize}
+    \item \textbf{Programming language:} Dart
+    \item \textbf{Application framework:} Flutter
+    \item \textbf{Pose estimation library:} Google ML Kit Pose Detection
+    \item \textbf{Camera integration:} Flutter \texttt{camera} package
+    \item \textbf{Voice feedback:} \texttt{flutter\_tts}
+    \item \textbf{Version control:} Git
+    \item \textbf{Collaboration platform:} GitHub (Issues, branching, pull requests are actively used for collaborative work management)
+    \item \textbf{Benchmarking / experimentation:} Separate Flutter and native Android benchmark prototypes in the repository
+\end{itemize}
+
+\section{Timeline and Planned Work Items}
+
+Below is a timeline based on the original proposal, updated to reflect the current repository state.
+
+\subsection{Weeks 3--4: Research, Benchmarking, and Model Selection}
+
+\textbf{Status: Completed}
+
+\begin{itemize}
+    \item Compared candidate pose-estimation approaches.
+    \item Built benchmark prototypes.
+    \item Collected benchmark results for ML Kit, MoveNet, YOLO-based pose, and MediaPipe variants.
+    \item Selected ML Kit as the current working backend because it offered the best speed / integration balance for the prototype.
+\end{itemize}
+
+\subsection{Weeks 4--6: Mobile App Foundation}
+
+\textbf{Status: Largely completed}
+
+\begin{itemize}
+    \item Built the initial Flutter mobile app.
+    \item Added camera preview and skeleton overlay.
+    \item Added exercise selection.
+    \item Added setup visibility checks before session start.
+    \item Added a countdown-based hands-free session start.
+\end{itemize}
+
+\subsection{Weeks 6--9: Rep Counting for Core Exercises}
+
+\textbf{Status: Implemented at prototype level}
+
+\begin{itemize}
+    \item Implemented FSM-based repetition counting.
+    \item Extended support from curl to squat and push-up.
+    \item Added smoothing and geometric feature computation.
+    \item Added confidence gating and occlusion-related handling.
+\end{itemize}
+
+\subsection{Weeks 8--11: Form Feedback and Coaching Cues}
+
+\textbf{Status: Partially completed / in progress}
+
+\begin{itemize}
+    \item Implemented curl form feedback rules such as torso swing, elbow drift, and short range of motion.
+    \item Added initial squat and push-up feedback rules.
+    \item Integrated TTS-based cues and session feedback.
+    \item Added a more detailed curl summary view.
+\end{itemize}
+
+This part is functional, but it still needs further threshold tuning and more systematic evaluation on recorded exercise trials.
+
+\subsection{Weeks 9--13: Integration, Logging, and Refinement}
+
+\textbf{Status: Partially completed}
+
+\begin{itemize}
+    \item Integrated the exercise selection, live session, and summary flow.
+    \item Improved the summary interface for biceps curl.
+    \item Continued refining curl-specific analysis with view detection and quality scoring.
+\end{itemize}
+
+The main incomplete item in this phase is \textbf{persistent logging / history storage}. This remains planned work rather than a completed feature.
+
+\subsection{Weeks 11--14: Evaluation, Tuning, and Final Demo Preparation}
+
+\textbf{Status: Current and upcoming work}
+
+Planned remaining items include:
+
+\begin{itemize}
+    \item collecting more structured exercise data,
+    \item tuning thresholds with recorded trials,
+    \item running more systematic evaluation for rep-counting accuracy and feedback behavior,
+    \item cleaning up parts of the architecture as needed,
+    \item finalizing the demo flow and presentation material.
+\end{itemize}
+
+\section{Current Status and Limitations}
+
+We think our project is in a good mid-semester state because the main technical risk has already been addressed: the repository contains a working real-time mobile prototype with pose inference, repetition counting, and feedback logic. This shows that the core idea is feasible on-device.
+
+However, several parts are still \textbf{in progress}:
+
+\begin{itemize}
+    \item the current implemented architecture is functional but still somewhat prototype-oriented,
+    \item curl analysis is more mature than squat and push-up analysis,
+    \item persistent workout history is not yet implemented but planned to be added,
+    \item systematic dataset-driven threshold tuning is still ongoing,
+    \item broader evaluation remains part of the remaining work.
+\end{itemize}
+
+\end{document}
