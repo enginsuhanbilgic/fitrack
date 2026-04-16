@@ -35,7 +35,7 @@ abstract class LM {
   static const int leftFootIndex = 31;
   static const int rightFootIndex = 32;
 
-  /// Pairs of landmark indices that form the skeleton for drawing.
+  /// Full skeleton connections.
   static const List<(int, int)> connections = [
     // Torso
     (leftShoulder, rightShoulder),
@@ -55,4 +55,27 @@ abstract class LM {
     (rightHip, rightKnee),
     (rightKnee, rightAnkle),
   ];
+
+  /// Upper body only — no legs. Used for biceps curl.
+  static const List<(int, int)> upperBodyConnections = [
+    (leftShoulder, rightShoulder),
+    (leftHip, rightHip),
+    (leftShoulder, leftHip),
+    (rightShoulder, rightHip),
+    (leftShoulder, leftElbow),
+    (leftElbow, leftWrist),
+    (rightShoulder, rightElbow),
+    (rightElbow, rightWrist),
+  ];
+
+  /// Upper body landmark indices (for filtering joints).
+  static const Set<int> upperBodyLandmarks = {
+    nose, leftEyeInner, leftEye, leftEyeOuter,
+    rightEyeInner, rightEye, rightEyeOuter,
+    leftEar, rightEar, leftMouth, rightMouth,
+    leftShoulder, rightShoulder, leftElbow, rightElbow,
+    leftWrist, rightWrist, leftPinky, rightPinky,
+    leftIndex, rightIndex, leftThumb, rightThumb,
+    leftHip, rightHip,
+  };
 }

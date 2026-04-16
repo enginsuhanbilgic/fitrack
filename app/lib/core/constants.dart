@@ -17,23 +17,23 @@ const double kFarSideConfidenceGate = 0.4;
 
 // ── Biceps Curl FSM thresholds (degrees) ────────────────
 /// IDLE → CONCENTRIC when elbow angle drops below this.
-const double kCurlStartAngle = 150.0;
+const double kCurlStartAngle = 160.0;
 
 /// CONCENTRIC → PEAK when elbow angle reaches this.
-const double kCurlPeakAngle = 40.0;
+const double kCurlPeakAngle = 70.0;
 
 /// PEAK → ECCENTRIC when elbow angle exceeds peak + hysteresis.
-const double kCurlPeakExitAngle = 50.0;
+const double kCurlPeakExitAngle = 85.0;
 
 /// ECCENTRIC → IDLE when elbow angle reaches this → rep++.
-const double kCurlEndAngle = 160.0;
+const double kCurlEndAngle = 140.0;
 
 // ── Form feedback thresholds ────────────────────────────
 /// Torso swing: ΔX_shoulder / L_torso.
-const double kSwingThreshold = 0.15;
+const double kSwingThreshold = 0.25;
 
 /// Elbow drift: ΔX_elbow / L_torso.
-const double kDriftThreshold = 0.10;
+const double kDriftThreshold = 0.20;
 
 // ── Timing ──────────────────────────────────────────────
 /// Minimum seconds between two audio cues of the same type.
@@ -107,7 +107,7 @@ const double kAbsenceTimeoutSec = 3.0;
 
 // ── Curl Tempo Tracking ──────────────────────────────────
 /// Minimum eccentric duration in seconds — below this fires eccentricTooFast.
-const double kMinEccentricSec = 1.5;
+const double kMinEccentricSec = 0.8;
 
 // ── Curl Bilateral Asymmetry ─────────────────────────────
 /// Peak angle delta (degrees) between left and right arm to flag asymmetry.

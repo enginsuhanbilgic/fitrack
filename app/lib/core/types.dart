@@ -65,7 +65,10 @@ class ExerciseRequirements {
   static ExerciseRequirements forExercise(ExerciseType type) {
     switch (type) {
       case ExerciseType.bicepsCurl:
-        return const ExerciseRequirements([11, 12, 13, 14, 15, 16, 23, 24]);
+        // Shoulders (11,12), elbows (13,14), wrists (15,16).
+        // Hips excluded — they flicker below confidence on close-up front cam
+        // and are not essential for curl rep counting or form analysis.
+        return const ExerciseRequirements([11, 12, 13, 14, 15, 16]);
       case ExerciseType.squat:
         return const ExerciseRequirements([23, 24, 25, 26, 27, 28]);
       case ExerciseType.pushUp:

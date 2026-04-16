@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/types.dart';
+import 'mlkit_test_screen.dart';
 import 'workout_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -28,6 +29,17 @@ class HomeScreen extends StatelessWidget {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 48),
+              TextButton(
+                onPressed: () => _launchMLKitTest(context),
+                child: const Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: Text(
+                    '🧪 ML Kit Test',
+                    style: TextStyle(color: Colors.orange),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
               _ExerciseCard(
                 icon: Icons.fitness_center,
                 title: ExerciseType.bicepsCurl.label,
@@ -62,6 +74,14 @@ class HomeScreen extends StatelessWidget {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => WorkoutScreen(exercise: exercise),
+      ),
+    );
+  }
+
+  void _launchMLKitTest(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const MLKitTestScreen(),
       ),
     );
   }

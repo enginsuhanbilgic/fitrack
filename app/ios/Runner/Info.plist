@@ -66,5 +66,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>FiTrack needs camera access to detect your exercise form and count reps.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>FiTrack uses microphone for voice coaching cues.</string>
 </dict>
 </plist>

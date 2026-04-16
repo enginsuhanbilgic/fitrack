@@ -411,32 +411,24 @@ class RepCounter {
   double? _computeAngle(PoseResult r) {
     switch (exercise) {
       case ExerciseType.bicepsCurl:
+        // Use a lower confidence gate for curl angle — allows tracking
+        // even when the user turns slightly and landmarks get noisier.
+        const curlConf = 0.2;
         final leftAngle = angleDeg(
-          r.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.leftElbow,    minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.leftWrist,    minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftShoulder, minConfidence: curlConf),
+          r.landmark(LM.leftElbow,    minConfidence: curlConf),
+          r.landmark(LM.leftWrist,    minConfidence: curlConf),
         );
         final rightAngle = angleDeg(
-          r.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.rightElbow,    minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.rightWrist,    minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightShoulder, minConfidence: curlConf),
+          r.landmark(LM.rightElbow,    minConfidence: curlConf),
+          r.landmark(LM.rightWrist,    minConfidence: curlConf),
         );
-        // In side views, prefer the near-side arm but fall back to the far-side
-        // arm if the near side becomes occluded (e.g. user rotates mid-session).
-        // In front/unknown, respect the `side` parameter.
-        switch (_lockedView) {
-          case CurlCameraView.sideLeft:  return leftAngle ?? rightAngle;
-          case CurlCameraView.sideRight: return rightAngle ?? leftAngle;
-          case CurlCameraView.front:
-          case CurlCameraView.unknown:
-            switch (side) {
-              case ExerciseSide.left:  return leftAngle;
-              case ExerciseSide.right: return rightAngle;
-              case ExerciseSide.both:
-                if (leftAngle != null && rightAngle != null) return (leftAngle + rightAngle) / 2.0;
-                return leftAngle ?? rightAngle;
-            }
-        }
+        // Always try both arms and use whichever is available.
+        // When both visible, average them; otherwise use whichever works.
+        // This ensures counting continues even when user turns to the side.
+        if (leftAngle != null && rightAngle != null) return (leftAngle + rightAngle) / 2.0;
+        return leftAngle ?? rightAngle;
 
       case ExerciseType.squat:
         final leftAngle = angleDeg(

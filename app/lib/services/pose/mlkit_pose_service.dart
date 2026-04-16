@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui';
+import 'package:camera/camera.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart'
     as mlkit;
 import '../../models/pose_landmark.dart';
@@ -15,12 +17,72 @@ class MlKitPoseService extends PoseService {
 
   @override
   Future<void> init() async {
-    _detector = mlkit.PoseDetector(
-      options: mlkit.PoseDetectorOptions(
-        model: mlkit.PoseDetectionModel.base,
-        mode: mlkit.PoseDetectionMode.stream,
-      ),
-    );
+    try {
+      print('DEBUG [ML Kit]: Initializing PoseDetector with base model, stream mode');
+      _detector = mlkit.PoseDetector(
+        options: mlkit.PoseDetectorOptions(
+          model: mlkit.PoseDetectionModel.base,
+          mode: mlkit.PoseDetectionMode.stream,
+        ),
+      );
+      print('DEBUG [ML Kit]: PoseDetector initialized successfully');
+    } catch (e) {
+      print('ERROR [ML Kit]: Failed to initialize: $e');
+      rethrow;
+    }
+  }
+
+  @override
+  Future<PoseResult> processCameraImage(
+    CameraImage image,
+    int sensorRotation,
+  ) async {
+    try {
+      // On iOS, use yuv420 format (NV12). On Android, use nv21.
+      final format = Platform.isAndroid
+          ? mlkit.InputImageFormat.nv21
+          : mlkit.InputImageFormat.yuv420;
+
+      final inputImage = mlkit.InputImage.fromBytes(
+        bytes: image.planes.first.bytes,
+        metadata: mlkit.InputImageMetadata(
+          size: Size(image.width.toDouble(), image.height.toDouble()),
+          rotation: _rotation(sensorRotation),
+          format: format,
+          bytesPerRow: image.planes.first.bytesPerRow,
+        ),
+      );
+
+      final sw = Stopwatch()..start();
+      final poses = await _detector.processImage(inputImage);
+      sw.stop();
+
+      if (poses.isEmpty) {
+        return PoseResult(landmarks: [], inferenceTime: sw.elapsed);
+      }
+
+      final pose = poses.first;
+
+      final landmarks = <PoseLandmark>[];
+      for (final entry in pose.landmarks.entries) {
+        final type = entry.key;
+        final lm = entry.value;
+
+        int typeIndex = type.index ?? 0;
+        if (typeIndex >= 0 && typeIndex <= 32) {
+          landmarks.add(PoseLandmark(
+            type: typeIndex,
+            x: (lm.x / image.width).clamp(0.0, 1.0),
+            y: (lm.y / image.height).clamp(0.0, 1.0),
+            confidence: lm.likelihood,
+          ));
+        }
+      }
+
+      return PoseResult(landmarks: landmarks, inferenceTime: sw.elapsed);
+    } catch (e) {
+      return PoseResult(landmarks: [], inferenceTime: Duration.zero);
+    }
   }
 
   @override
@@ -30,43 +92,10 @@ class MlKitPoseService extends PoseService {
     int height,
     int sensorRotation,
   ) async {
-    final inputImage = mlkit.InputImage.fromBytes(
-      bytes: bytes,
-      metadata: mlkit.InputImageMetadata(
-        size: Size(width.toDouble(), height.toDouble()),
-        rotation: _rotation(sensorRotation),
-        format: mlkit.InputImageFormat.nv21,
-        bytesPerRow: width,
-      ),
-    );
-
-    final sw = Stopwatch()..start();
-    final poses = await _detector.processImage(inputImage);
-    sw.stop();
-
-    if (poses.isEmpty) {
-      return PoseResult(landmarks: [], inferenceTime: sw.elapsed);
-    }
-
-    final pose = poses.first;
-
-    // ML Kit returns coordinates in the rotated output space.
-    final bool isRotated =
-        sensorRotation == 90 || sensorRotation == 270;
-    final double outW = isRotated ? height.toDouble() : width.toDouble();
-    final double outH = isRotated ? width.toDouble() : height.toDouble();
-
-    final landmarks = pose.landmarks.entries.map((e) {
-      final lm = e.value;
-      return PoseLandmark(
-        type: lm.type.index,
-        x: lm.x / outW,
-        y: lm.y / outH,
-        confidence: lm.likelihood,
-      );
-    }).toList();
-
-    return PoseResult(landmarks: landmarks, inferenceTime: sw.elapsed);
+    // On iOS, use processCameraImage instead
+    // This method is kept for Android compatibility
+    print('ERROR [ML Kit]: processNv21 called on iOS - this won\'t work! Use processCameraImage');
+    return PoseResult(landmarks: [], inferenceTime: Duration.zero);
   }
 
   @override

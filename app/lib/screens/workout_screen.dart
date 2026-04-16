@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import '../core/constants.dart';
@@ -102,34 +102,35 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     }
   }
 
-  void _onFrame(Uint8List nv21, int width, int height) {
+  void _onFrame(CameraImage image) {
     if (_isProcessing || !mounted) return;
     _isProcessing = true;
 
-    _processFrame(nv21, width, height).whenComplete(() {
+    _processFrame(image).whenComplete(() {
       _isProcessing = false;
     });
   }
 
-  Future<void> _processFrame(Uint8List nv21, int width, int height) async {
+  Future<void> _processFrame(CameraImage image) async {
     try {
-      final result = await _pose.processNv21(
-        nv21,
-        width,
-        height,
+      final result = await _pose.processCameraImage(
+        image,
         _camera.sensorRotation,
       );
 
       if (result.isEmpty || !mounted) return;
 
-      // Smooth + mirror for display only.
-      final mirrored = result.landmarks.map((lm) => PoseLandmark(
+      // On iOS, ML Kit returns coordinates that already match the mirrored
+      // CameraPreview (selfie mode), so no extra flip is needed.
+      // On Android front camera, ML Kit returns raw sensor coords — flip X.
+      final needsMirror = _camera.isFrontCamera && !Platform.isIOS;
+      final displayLandmarks = result.landmarks.map((lm) => PoseLandmark(
         type: lm.type,
-        x: _camera.isFrontCamera ? 1.0 - lm.x : lm.x,
+        x: needsMirror ? 1.0 - lm.x : lm.x,
         y: lm.y,
         confidence: lm.confidence,
       )).toList();
-      final smoothed = _smoother.smooth(mirrored);
+      final smoothed = _smoother.smooth(displayLandmarks);
 
       switch (_phase) {
         case WorkoutPhase.setupCheck:
@@ -273,6 +274,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       }
 
       final snapshot = _repCounter.update(result);
+      // DEBUG: Log FSM state + angle every 15 frames
       if (snapshot.formErrors.isNotEmpty) _onFormErrors(snapshot.formErrors);
       if (mounted) {
         setState(() {
@@ -464,7 +466,8 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Camera preview.
+        // Camera preview + skeleton overlay — both inside the same FittedBox
+        // so they share identical coordinate transforms (crop + scale).
         if (_camera.controller != null)
           ClipRect(
             child: FittedBox(
@@ -472,23 +475,32 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
               child: SizedBox(
                 width: _camera.controller!.value.previewSize!.height,
                 height: _camera.controller!.value.previewSize!.width,
-                child: CameraPreview(_camera.controller!),
+                child: Stack(
+                  children: [
+                    CameraPreview(_camera.controller!),
+                    if (_landmarks.isNotEmpty)
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: SkeletonPainter(
+                            landmarks: _landmarks,
+                            mirror: false, // already mirrored above
+                            landmarkColors: () {
+                              final merged = {..._landmarkColors, ..._errorHighlight};
+                              return merged.isNotEmpty ? merged : null;
+                            }(),
+                            boneConnections: widget.exercise == ExerciseType.bicepsCurl
+                                ? LM.upperBodyConnections
+                                : null,
+                            visibleLandmarks: widget.exercise == ExerciseType.bicepsCurl
+                                ? LM.upperBodyLandmarks
+                                : null,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
-
-        // Skeleton overlay.
-        if (_landmarks.isNotEmpty)
-          CustomPaint(
-            painter: SkeletonPainter(
-              landmarks: _landmarks,
-              mirror: false, // already mirrored above
-              landmarkColors: () {
-                final merged = {..._landmarkColors, ..._errorHighlight};
-                return merged.isNotEmpty ? merged : null;
-              }(),
-            ),
-            size: Size.infinite,
           ),
 
         // SETUP_CHECK banner.

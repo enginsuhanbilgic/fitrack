@@ -13,11 +13,19 @@ class SkeletonPainter extends CustomPainter {
   /// same override color; otherwise the default green is used.
   final Map<int, Color>? landmarkColors;
 
+  /// Which bone connections to draw. Defaults to full skeleton.
+  final List<(int, int)> boneConnections;
+
+  /// Optional set of landmark indices to draw. If null, draws all.
+  final Set<int>? visibleLandmarks;
+
   SkeletonPainter({
     required this.landmarks,
     this.mirror = true,
     this.landmarkColors,
-  });
+    List<(int, int)>? boneConnections,
+    this.visibleLandmarks,
+  }) : boneConnections = boneConnections ?? LM.connections;
 
   static const double _minScore = 0.3;
 
@@ -34,7 +42,7 @@ class SkeletonPainter extends CustomPainter {
     }
 
     // Draw bones.
-    for (final (startIdx, endIdx) in LM.connections) {
+    for (final (startIdx, endIdx) in boneConnections) {
       final a = byType[startIdx];
       final b = byType[endIdx];
       if (a == null || b == null) continue;
@@ -60,6 +68,7 @@ class SkeletonPainter extends CustomPainter {
     // Draw joints.
     for (final lm in landmarks) {
       if (lm.confidence < _minScore) continue;
+      if (visibleLandmarks != null && !visibleLandmarks!.contains(lm.type)) continue;
       final jointColor = landmarkColors?[lm.type] ?? _defaultJointColor;
       canvas.drawCircle(
         _toOffset(lm, size),
