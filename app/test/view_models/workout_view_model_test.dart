@@ -20,8 +20,8 @@ import 'package:camera/camera.dart';
 import 'package:fitrack/core/types.dart';
 import 'package:fitrack/models/pose_result.dart';
 import 'package:fitrack/services/camera_service.dart';
+import 'package:fitrack/services/db/profile_repository.dart';
 import 'package:fitrack/services/pose/pose_service.dart';
-import 'package:fitrack/services/rom_profile_store.dart';
 import 'package:fitrack/services/tts_service.dart';
 import 'package:fitrack/view_models/workout_view_model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -84,7 +84,7 @@ class _FakeTtsService extends TtsService {
 WorkoutViewModel buildVm({
   ExerciseType exercise = ExerciseType.bicepsCurl,
   bool forceCalibration = false,
-  RomProfileStore? profileStore,
+  ProfileRepository? profileRepository,
 }) {
   return WorkoutViewModel(
     exercise: exercise,
@@ -92,7 +92,7 @@ WorkoutViewModel buildVm({
     camera: _FakeCameraService(),
     pose: _FakePoseService(),
     tts: _FakeTtsService(),
-    profileStore: profileStore ?? InMemoryRomProfileStore(),
+    profileRepository: profileRepository ?? InMemoryProfileRepository(),
   );
 }
 

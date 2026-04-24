@@ -1,5 +1,11 @@
 /// Persists [CurlRomProfile] to a single JSON file in app documents.
 ///
+/// **DEPRECATED in WP5.1 (2026-04-XX).** Kept in-tree as a rollback anchor
+/// only — production code now uses `SqliteProfileRepository`. The PR1 migrator
+/// (`services/db/json_migrator.dart`) reads the legacy file directly without
+/// importing this class, so these types are dead code the compiler tree-shakes.
+/// Scheduled removal after 2026-05-31.
+///
 /// Atomic write: write to `.tmp`, flush+close, then rename. Rename within the
 /// same directory is atomic on both Android and iOS, so a crash mid-write
 /// can't leave a half-written profile in place.

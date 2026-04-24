@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../core/constants.dart';
 import '../core/types.dart';
 import '../models/landmark_types.dart';
+import '../services/app_services.dart';
 import '../view_models/workout_view_model.dart';
 import '../widgets/rep_counter_display.dart';
 import '../widgets/skeleton_painter.dart';
@@ -37,9 +38,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   @override
   void initState() {
     super.initState();
+    final services = AppServicesScope.read(context);
     _vm = WorkoutViewModel(
       exercise: widget.exercise,
       forceCalibration: widget.forceCalibration,
+      profileRepository: services.profileRepository,
     );
     _completionSub = _vm.completionEvents.listen(_onWorkoutCompleted);
     _vm.init();

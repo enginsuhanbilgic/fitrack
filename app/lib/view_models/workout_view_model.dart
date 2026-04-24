@@ -16,9 +16,9 @@ import '../models/landmark_types.dart';
 import '../models/pose_landmark.dart';
 import '../models/pose_result.dart';
 import '../services/camera_service.dart';
+import '../services/db/profile_repository.dart';
 import '../services/pose/mlkit_pose_service.dart';
 import '../services/pose/pose_service.dart';
-import '../services/rom_profile_store.dart';
 import '../services/telemetry_log.dart';
 import '../services/tts_service.dart';
 
@@ -78,7 +78,7 @@ class WorkoutViewModel extends ChangeNotifier {
   final CameraService _camera;
   final PoseService _pose;
   final TtsService _tts;
-  final RomProfileStore _profileStore;
+  final ProfileRepository _profileRepository;
   late final RepCounter _repCounter;
 
   // ── Engine ─────────────────────────────────────────────
@@ -166,15 +166,15 @@ class WorkoutViewModel extends ChangeNotifier {
 
   WorkoutViewModel({
     required this.exercise,
+    required ProfileRepository profileRepository,
     this.forceCalibration = false,
     CameraService? camera,
     PoseService? pose,
     TtsService? tts,
-    RomProfileStore? profileStore,
   }) : _camera = camera ?? CameraService(),
        _pose = pose ?? MlKitPoseService(),
        _tts = tts ?? TtsService(),
-       _profileStore = profileStore ?? FileRomProfileStore() {
+       _profileRepository = profileRepository {
     _repCounter = RepCounter(
       exercise: exercise,
       curlThresholdsProvider: _resolveThresholds,
@@ -213,7 +213,7 @@ class WorkoutViewModel extends ChangeNotifier {
       // Load profile first so the FSM provider sees correct buckets even
       // for the very first rep (no race with the camera stream).
       if (exercise == ExerciseType.bicepsCurl) {
-        _profile = await _profileStore.load() ?? CurlRomProfile();
+        _profile = await _profileRepository.loadCurl() ?? CurlRomProfile();
         // Personal calibration is opt-in only — Settings → Recalibrate sets
         // `forceCalibration`. We never launch it automatically.
         if (forceCalibration) {
@@ -322,7 +322,7 @@ class WorkoutViewModel extends ChangeNotifier {
   Future<void> _flushProfileIfDirty() async {
     if (!_profileDirty || _profile == null) return;
     try {
-      await _profileStore.save(_profile!);
+      await _profileRepository.saveCurl(_profile!);
       _profileDirty = false;
     } catch (e) {
       TelemetryLog.instance.log('profile.save_failed', e.toString());

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
-import '../services/rom_profile_store.dart';
+import '../services/app_services.dart';
+import '../services/db/profile_repository.dart';
 import 'mlkit_test_screen.dart';
 import 'settings_screen.dart';
 import 'workout_screen.dart';
@@ -14,7 +15,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final RomProfileStore _profileStore = FileRomProfileStore();
+  late ProfileRepository _profileRepository;
+  bool _servicesResolved = false;
 
   /// Hole #2 — gear-icon badge color (null = no badge).
   /// Red    → no buckets calibrated (cold start).
@@ -31,13 +33,20 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
 
   @override
-  void initState() {
-    super.initState();
-    _refreshBadge();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // AppServicesScope is app-lifetime; resolve once, then refresh the badge.
+    // `didChangeDependencies` is the earliest safe frame for an inherited
+    // lookup in a stateful widget.
+    if (!_servicesResolved) {
+      _profileRepository = AppServicesScope.of(context).profileRepository;
+      _servicesResolved = true;
+      _refreshBadge();
+    }
   }
 
   Future<void> _refreshBadge() async {
-    final p = await _profileStore.load();
+    final p = await _profileRepository.loadCurl();
     if (!mounted) return;
     setState(() => _badgeColor = _computeBadgeColor(p));
   }

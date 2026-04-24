@@ -14,7 +14,8 @@ import 'package:flutter/services.dart';
 import '../core/constants.dart';
 import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
-import '../services/rom_profile_store.dart';
+import '../services/app_services.dart';
+import '../services/db/profile_repository.dart';
 import '../services/telemetry_log.dart';
 import 'workout_screen.dart';
 
@@ -26,20 +27,25 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final RomProfileStore _store = FileRomProfileStore();
+  late ProfileRepository _repository;
+  bool _servicesResolved = false;
   CurlRomProfile? _profile;
   bool _loading = true;
   bool _showDetails = false;
 
   @override
-  void initState() {
-    super.initState();
-    _reload();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_servicesResolved) {
+      _repository = AppServicesScope.of(context).profileRepository;
+      _servicesResolved = true;
+      _reload();
+    }
   }
 
   Future<void> _reload() async {
     setState(() => _loading = true);
-    final p = await _store.load();
+    final p = await _repository.loadCurl();
     if (!mounted) return;
     setState(() {
       _profile = p;
@@ -70,7 +76,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (ok == true) {
-      await _store.reset();
+      await _repository.resetCurl();
       await _reload();
     }
   }

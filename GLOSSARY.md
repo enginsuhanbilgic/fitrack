@@ -407,6 +407,42 @@ v1 remains in the tree for regression testing / teaching. New runs should use v2
 
 ---
 
+## 13b. Local Persistence & History (WP5, 2026-04-25+)
+
+Introduced by WP5.1. The live surface is under `lib/services/db/` and `lib/services/app_services.dart`.
+
+### 13b.1 Persistence types
+
+- **DatabaseService** — App-lifetime singleton that opens and owns the single sqflite `Database` handle for `{docs}/fitrack.db`. Created once in `FiTrackApp.initState` after the DB bootstrap; closed in `dispose` (fire-and-forget). Repositories receive the `Database` via constructor injection; they never reach back into `DatabaseService`. Implementation: `SqfliteDatabaseService` (`services/db/database_service.dart`).
+
+- **ProfileRepository** — Abstract persistence interface for ROM profiles. Concrete impls: `SqliteProfileRepository` (production, backs the `profiles` table, key `curl_profile_v1`) and `InMemoryProfileRepository` (test double). Replaces the deprecated `RomProfileStore`; the four-method surface (`loadCurl`/`saveCurl`/`resetCurl`/`existsCurl`) is preserved 1:1. On corrupt blob / schema mismatch: logs `schema.migration_failed`, deletes the row, returns null — same recovery behavior as the JSON reader it replaces.
+
+- **SessionRepository** — Abstract persistence interface for completed workouts. PR1 ships **interface + `InMemorySessionRepository` stub only**; PR2 adds `SqliteSessionRepository` with `insertCompletedSession` (transactional: one `sessions` row + N `reps` + M `form_errors`). Read methods (`listSessions`, `getSession`, `recentConcentricDurations`) land in PR3/PR4. Shipping the interface in PR1 keeps PR2 additive — `AppServicesScope` doesn't change shape.
+
+- **JsonProfileMigrator** — One-shot idempotent migrator that copies `{docs}/profiles/biceps_curl.json` into the `profiles` row and renames the legacy file to `biceps_curl.json.migrated.backup` (uniquifies with `.N` suffix on collision). Outcomes: `noLegacyFile`, `migrated`, `skippedAlreadyMigrated`, `corruptLegacyFileDropped`. Reads the legacy file directly via `dart:io` — does NOT import the deprecated `rom_profile_store.dart`, so those types stay tree-shaken dead code.
+
+### 13b.2 Domain types (schema-ready; first rows land in PR2)
+
+- **Session** — A single completed workout, committed on `WorkoutPhase.completed`. Persisted as one row in `sessions` + N rows in `reps` + M rows in `form_errors` under a single DB transaction. Schema is exercise-agnostic; curl-only columns (`detected_view`, `side`, `view`, `threshold_source`, `bucket_updated`, `rejected_outlier`) are NULL for squat/push-up. Indefinite retention (user-controlled export/delete is out of WP5 v1 scope).
+
+- **Rep Record** — A single rep within a `Session`. Curl: populates all curl-specific columns (`side=ProfileSide.name`, `view=CurlCameraView.name`, `threshold_source=ThresholdSource.name`, `bucket_updated=0/1`, `rejected_outlier=0/1`). Squat/push-up: only `rep_index` + `quality` populated; curl columns NULL. PR2 writes rows; PR3 reads them back via `RepRow.toCurlRepRecord()` to rebuild `CurlRepRecord` lists for the reconstructed `SummaryScreen`.
+
+- **Fatigue Baseline** *(PR4 consumes; column ships in PR1)* — The reference duration the curl analyzer compares against when deciding whether to emit `FormError.fatigue`. Since WP5.4 (planned), the baseline is `max(in-session first-window avg, 30-day historical median)`. Historical list comes from `SessionRepository.recentConcentricDurations(exercise: bicepsCurl, window: Duration(days: 30))`. On a user's first-ever curl session the list is empty and the baseline collapses to today's in-session-only value (backward-compat).
+
+### 13b.3 Scope plumbing
+
+- **AppServicesScope** — `InheritedWidget` at the `MaterialApp` root (`app/lib/app.dart`) that exposes `DatabaseService` + `ProfileRepository` + `SessionRepository` to descendants. Resolve via `AppServicesScope.of(context)` (registers a dependency) or `AppServicesScope.read(context)` (one-shot read for callbacks / `initState`). Avoids a global `MultiProvider` while still being a single app-lifetime singleton — matches the existing "providers are per-screen" convention.
+
+### 13b.4 Schema & versioning
+
+- **`kDbSchemaVersion`** — 1 at ship. Shared across all four WP5 PRs. `reps.concentric_ms` ships NULL-tolerant so PR4 starts writing without an ALTER TABLE. Bump when adding tables or non-NULL-tolerant columns.
+
+- **`profiles.schema_version`** — Per-row wrapper tag (independent of `CurlRomProfile.schemaVersion` embedded in `profile_json`). Exists so the row-wrapper can evolve separately from the engine's JSON blob.
+
+- **`.migrated.backup`** — Suffix applied to legacy `biceps_curl.json` after successful migration. Collision-safe via `.N` uniquification. User can manually rename back to roll back PR1 on-device.
+
+---
+
 ## 14. Retired / Deprecated Terms
 
 When a term is retired, move its entry here with a `→ replacement` line and the retirement date. Do not delete outright — old commits still reference it.
