@@ -1,9 +1,9 @@
-import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart'
     as mlkit;
+import '../../core/platform_config.dart';
 import '../../models/pose_landmark.dart';
 import '../../models/pose_result.dart';
 import 'pose_service.dart';
@@ -18,7 +18,9 @@ class MlKitPoseService extends PoseService {
   @override
   Future<void> init() async {
     try {
-      print('DEBUG [ML Kit]: Initializing PoseDetector with base model, stream mode');
+      print(
+        'DEBUG [ML Kit]: Initializing PoseDetector with base model, stream mode',
+      );
       _detector = mlkit.PoseDetector(
         options: mlkit.PoseDetectorOptions(
           model: mlkit.PoseDetectionModel.base,
@@ -39,9 +41,7 @@ class MlKitPoseService extends PoseService {
   ) async {
     try {
       // On iOS, use yuv420 format (NV12). On Android, use nv21.
-      final format = Platform.isAndroid
-          ? mlkit.InputImageFormat.nv21
-          : mlkit.InputImageFormat.yuv420;
+      final format = PlatformConfig.instance.mlkitInputFormat;
 
       final inputImage = mlkit.InputImage.fromBytes(
         bytes: image.planes.first.bytes,
@@ -70,12 +70,14 @@ class MlKitPoseService extends PoseService {
 
         int typeIndex = type.index ?? 0;
         if (typeIndex >= 0 && typeIndex <= 32) {
-          landmarks.add(PoseLandmark(
-            type: typeIndex,
-            x: (lm.x / image.width).clamp(0.0, 1.0),
-            y: (lm.y / image.height).clamp(0.0, 1.0),
-            confidence: lm.likelihood,
-          ));
+          landmarks.add(
+            PoseLandmark(
+              type: typeIndex,
+              x: (lm.x / image.width).clamp(0.0, 1.0),
+              y: (lm.y / image.height).clamp(0.0, 1.0),
+              confidence: lm.likelihood,
+            ),
+          );
         }
       }
 
@@ -94,7 +96,9 @@ class MlKitPoseService extends PoseService {
   ) async {
     // On iOS, use processCameraImage instead
     // This method is kept for Android compatibility
-    print('ERROR [ML Kit]: processNv21 called on iOS - this won\'t work! Use processCameraImage');
+    print(
+      'ERROR [ML Kit]: processNv21 called on iOS - this won\'t work! Use processCameraImage',
+    );
     return PoseResult(landmarks: [], inferenceTime: Duration.zero);
   }
 

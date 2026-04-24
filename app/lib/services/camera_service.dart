@@ -1,7 +1,5 @@
-import 'dart:io';
-import 'dart:typed_data';
 import 'package:camera/camera.dart';
-import 'package:flutter/foundation.dart';
+import '../core/platform_config.dart';
 
 /// Thin wrapper around CameraController.
 /// Hides platform details so screens only see [onFrame] callbacks.
@@ -39,19 +37,14 @@ class CameraService {
       ResolutionPreset.medium, // 480 × 640 — good balance
       enableAudio: false,
       // Android: NV21 (single plane), iOS: yuv420 (3 planes)
-      imageFormatGroup: Platform.isAndroid
-          ? ImageFormatGroup.nv21
-          : ImageFormatGroup.yuv420,
+      imageFormatGroup: PlatformConfig.instance.cameraImageFormat,
     );
 
     await _ctrl!.initialize();
   }
 
-
   /// Start streaming frames. [onFrame] delivers the raw CameraImage.
-  void startStream(
-    void Function(CameraImage image) onFrame,
-  ) {
+  void startStream(void Function(CameraImage image) onFrame) {
     if (_streaming || _ctrl == null) return;
     _streaming = true;
 
@@ -59,7 +52,9 @@ class CameraService {
     _ctrl!.startImageStream((CameraImage image) {
       frameCount++;
       if (frameCount % 30 == 0) {
-        print('DEBUG [CameraService]: Frame #$frameCount - ${image.width}x${image.height}, planes: ${image.planes.length}');
+        print(
+          'DEBUG [CameraService]: Frame #$frameCount - ${image.width}x${image.height}, planes: ${image.planes.length}',
+        );
       }
 
       onFrame(image);

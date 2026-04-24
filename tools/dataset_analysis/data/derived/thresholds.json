@@ -1,0 +1,42 @@
+{
+  "curl": {
+    "end_angle": {
+      "ci_high_deg": 172.823,
+      "ci_low_deg": 141.55,
+      "n": 14,
+      "safety_margin_deg": 5.0,
+      "source_percentile": 20.0,
+      "value_deg": 144.82
+    },
+    "peak_angle": {
+      "ci_high_deg": 59.435,
+      "ci_low_deg": 19.184,
+      "n": 14,
+      "safety_margin_deg": 5.0,
+      "source_percentile": 75.0,
+      "value_deg": 55.651
+    },
+    "peak_exit_angle": {
+      "ci_high_deg": 74.435,
+      "ci_low_deg": 34.184,
+      "n": 14,
+      "safety_margin_deg": 5.0,
+      "source_percentile": 75.0,
+      "value_deg": 70.651
+    },
+    "peak_exit_gap_deg": 15.0,
+    "start_angle": {
+      "ci_high_deg": 172.751,
+      "ci_low_deg": 144.143,
+      "n": 14,
+      "safety_margin_deg": 5.0,
+      "source_percentile": 20.0,
+      "value_deg": 146.992
+    }
+  },
+  "dataset_summary": {
+    "clips": 6,
+    "good_rows": 14,
+    "total_rows": 63
+  }
+}

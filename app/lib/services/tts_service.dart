@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'package:flutter_tts/flutter_tts.dart';
+import '../core/platform_config.dart';
 
 /// Thin wrapper over FlutterTts.
 /// Exposes speak() and stop() only — cooldown and sequencing are
@@ -11,15 +11,7 @@ class TtsService {
     // iOS: the camera grabs the audio session for recording, which mutes
     // speech output. Set the category to playAndRecord with mixWithOthers
     // so TTS can play alongside the camera stream.
-    if (Platform.isIOS) {
-      await _tts.setIosAudioCategory(
-        IosTextToSpeechAudioCategory.playAndRecord,
-        [
-          IosTextToSpeechAudioCategoryOptions.defaultToSpeaker,
-          IosTextToSpeechAudioCategoryOptions.mixWithOthers,
-        ],
-      );
-    }
+    await PlatformConfig.instance.configureTtsAudioSession(_tts);
 
     await _tts.setLanguage('en-US');
     await _tts.setSpeechRate(0.5); // slightly slower — readable from 2 m

@@ -1,8 +1,11 @@
 import '../../core/constants.dart';
+import '../../core/rom_thresholds.dart';
 import '../../core/types.dart';
 import '../../models/landmark_types.dart';
 import '../../models/pose_result.dart';
 import '../angle_utils.dart';
+import '../form_analyzer_base.dart';
+import 'curl_form_analyzer_extras.dart';
 
 /// Form analyzer for biceps curl — view-aware.
 ///
@@ -17,10 +20,25 @@ import '../angle_utils.dart';
 ///   - Fatigue: concentric duration degrading across reps
 ///
 /// Per-rep quality score: 0.0–1.0, deductions proportional to error magnitude.
-class CurlFormAnalyzer {
+class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
   PoseResult? _repStartSnapshot;
-  bool _shortRomPending = false;
+
+  /// Directional short-ROM pending flags. Classification happens in
+  /// `onAbortedRep(...)` against the active thresholds set via
+  /// `setActiveThresholds(...)`. Only one of these is ever true at a time
+  /// (peak wins — a rep that didn't reach peak clearly missed the top half).
+  bool _shortRomStartPending = false;
+  bool _shortRomPeakPending = false;
+
   CurlCameraView _view = CurlCameraView.unknown;
+
+  /// FSM thresholds in use for the current rep. Pushed by `RepCounter` at the
+  /// IDLE → CONCENTRIC promotion site (same place the FSM promotes its own
+  /// source). Used by `onAbortedRep` to classify the shortfall direction.
+  ///
+  /// Defaults to `RomThresholds.global()` so the analyzer still functions if
+  /// the host forgets to call `setActiveThresholds` (tests, early boot).
+  RomThresholds _activeThresholds = RomThresholds.global();
 
   // ── Tempo tracking ──────────────────────────────────────
   DateTime? _concentricStart;
@@ -32,11 +50,26 @@ class CurlFormAnalyzer {
   bool _fatigueFired = false;
 
   // ── Bilateral asymmetry (front view only) ───────────────
-  final List<double> _asymmetryDeltas = [];
+  /// Per-rep bilateral peak-angle readings, front view only.
+  ///
+  /// Records both values (not the `|delta|`) so the sign of `left − right`
+  /// survives into classification — a lagging arm has a *higher* min angle
+  /// (it didn't flex as deeply). Keeping the abs delta would lose that
+  /// direction and force us back to a generic "even out both arms" cue.
+  final List<({double left, double right})> _asymmetryDeltas = [];
   int _consecutiveAsymmetricReps = 0;
 
   // ── Tempo tracking ──────────────────────────────────────
   int _eccentricTooFastCount = 0;
+  int _concentricTooFastCount = 0;
+  int _tempoInconsistentCount = 0;
+  Duration? _lastConcentricDuration;
+
+  // ── Tempo consistency (re-arm window, NOT permanent one-shot) ──
+  /// Remaining reps to suppress re-emission of `tempoInconsistent` after firing.
+  /// Unlike `_fatigueFired`, this decays — tempo drift is recoverable.
+  int _tempoReArmRepsRemaining = 0;
+  bool _lastRepTempoInconsistent = false;
 
   // ── Per-rep quality score ───────────────────────────────
   double _maxSwingRatio = 0.0;
@@ -45,12 +78,15 @@ class CurlFormAnalyzer {
   final List<double> _repQualities = [];
 
   /// Set once after view detection locks (called by RepCounter).
+  @override
   void setView(CurlCameraView view) => _view = view;
 
   /// Call at IDLE -> CONCENTRIC.
+  @override
   void onRepStart(PoseResult snapshot) {
     _repStartSnapshot = snapshot;
-    _shortRomPending = false;
+    _shortRomStartPending = false;
+    _shortRomPeakPending = false;
     _concentricStart = DateTime.now();
     _eccentricStart = null;
     _lastEccentricDuration = null;
@@ -59,31 +95,64 @@ class CurlFormAnalyzer {
   }
 
   /// Call at CONCENTRIC -> PEAK.
+  @override
   void onPeakReached() {
     // Concentric duration = now - concentricStart.
     if (_concentricStart != null) {
-      _concentricDurations.add(DateTime.now().difference(_concentricStart!));
+      final d = DateTime.now().difference(_concentricStart!);
+      _concentricDurations.add(d);
+      _lastConcentricDuration = d;
     }
   }
 
   /// Call at PEAK -> ECCENTRIC.
+  @override
   void onEccentricStart() {
     _eccentricStart = DateTime.now();
   }
 
+  /// Sets the FSM thresholds in use for the next / current rep. Called by
+  /// `RepCounter` at the IDLE → CONCENTRIC promotion site so short-ROM
+  /// classification in `onAbortedRep` uses the same thresholds the FSM is
+  /// gating against. If never called, falls back to `RomThresholds.global()`.
+  @override
+  void setActiveThresholds(RomThresholds thresholds) {
+    _activeThresholds = thresholds;
+  }
+
   /// Call when CONCENTRIC -> IDLE without reaching PEAK (abandoned rep).
-  void onAbortedRep() {
-    _shortRomPending = true;
+  ///
+  /// Classifies the shortfall direction against `_activeThresholds`:
+  /// - `shortRomPeak` when `minAngleReached > peakAngle + kShortRomTolerance`
+  ///   (user aborted before clearing the peak gate). Takes precedence — a
+  ///   rep that didn't reach peak necessarily also didn't reach full curl.
+  /// - `shortRomStart` when the peak test passes but
+  ///   `maxAngleAtStart < startAngle − kShortRomTolerance` (user began the
+  ///   rep from partial extension, not a full-arm reset).
+  /// - Neither when both extremes are within tolerance.
+  @override
+  void onAbortedRep({
+    required double maxAngleAtStart,
+    required double minAngleReached,
+  }) {
+    if (minAngleReached > _activeThresholds.peakAngle + kShortRomTolerance) {
+      _shortRomPeakPending = true;
+    } else if (maxAngleAtStart <
+        _activeThresholds.startAngle - kShortRomTolerance) {
+      _shortRomStartPending = true;
+    }
   }
 
   /// Record bilateral peak angles at rep completion (front view only).
+  @override
   void recordBilateralAngles(double? leftAngle, double? rightAngle) {
     if (_view != CurlCameraView.front) return;
     if (leftAngle == null || rightAngle == null) return;
-    _asymmetryDeltas.add((leftAngle - rightAngle).abs());
+    _asymmetryDeltas.add((left: leftAngle, right: rightAngle));
   }
 
   /// Call at the end of each completed rep to finalize quality and clear state.
+  @override
   void onRepEnd() {
     // Compute eccentric duration.
     if (_eccentricStart != null) {
@@ -96,32 +165,65 @@ class CurlFormAnalyzer {
       _eccentricTooFastCount++;
     }
 
+    // Track concentric too fast.
+    if (_lastConcentricDuration != null &&
+        _lastConcentricDuration!.inMilliseconds < kMinConcentricSec * 1000) {
+      _concentricTooFastCount++;
+    }
+
+    // Decide tempo inconsistency BEFORE quality score so the deduction can apply
+    // on the same rep. Re-arm countdown is consumed here (per rep), and emission
+    // is gated in consumeCompletionErrors by the resulting flag.
+    _lastRepTempoInconsistent = false;
+    if (_tempoReArmRepsRemaining > 0) {
+      _tempoReArmRepsRemaining--;
+    } else if (_concentricDurations.length >= kTempoConsistencyWindow) {
+      final window = _concentricDurations.sublist(
+        _concentricDurations.length - kTempoConsistencyWindow,
+      );
+      final ms = window.map((d) => d.inMilliseconds.toDouble()).toList();
+      final mean = ms.reduce((a, b) => a + b) / ms.length;
+      if (mean > 0) {
+        final spread =
+            ms.reduce((a, b) => a > b ? a : b) -
+            ms.reduce((a, b) => a < b ? a : b);
+        if (spread / mean > kTempoInconsistencyRatio) {
+          _lastRepTempoInconsistent = true;
+          _tempoInconsistentCount++;
+          _tempoReArmRepsRemaining = kTempoConsistencyReArmReps;
+        }
+      }
+    }
+
     // Compute quality score.
     _lastRepQuality = _computeQualityScore();
     _repQualities.add(_lastRepQuality);
 
     _repStartSnapshot = null;
-    _shortRomPending = false;
+    _shortRomStartPending = false;
+    _shortRomPeakPending = false;
     _concentricStart = null;
     _eccentricStart = null;
   }
 
   /// Frame-level evaluation — returns torsoSwing / elbowDrift if active.
   /// Also tracks max deduction magnitudes for quality scoring.
+  @override
   List<FormError> evaluate(PoseResult current) {
     final errors = <FormError>[];
     final ref = _repStartSnapshot;
     if (ref == null) return errors;
 
-    final useLeft  = _view != CurlCameraView.sideRight;
+    final useLeft = _view != CurlCameraView.sideRight;
     final useRight = _view != CurlCameraView.sideLeft;
 
     final torsoLen = _computeTorsoLen(current, useLeft, useRight);
     if (torsoLen == null || torsoLen < 0.01) return errors;
 
     // Torso swing.
-    final swing = (useLeft  ? horizontalShift(ref, current, LM.leftShoulder)  : null)
-               ?? (useRight ? horizontalShift(ref, current, LM.rightShoulder) : null);
+    final swing =
+        (useLeft ? horizontalShift(ref, current, LM.leftShoulder) : null) ??
+        (useRight ? horizontalShift(ref, current, LM.rightShoulder) : null);
     if (swing != null) {
       final ratio = swing / torsoLen;
       if (ratio > _maxSwingRatio) _maxSwingRatio = ratio;
@@ -129,8 +231,9 @@ class CurlFormAnalyzer {
     }
 
     // Elbow drift.
-    final drift = (useLeft  ? horizontalShift(ref, current, LM.leftElbow)  : null)
-               ?? (useRight ? horizontalShift(ref, current, LM.rightElbow) : null);
+    final drift =
+        (useLeft ? horizontalShift(ref, current, LM.leftElbow) : null) ??
+        (useRight ? horizontalShift(ref, current, LM.rightElbow) : null);
     if (drift != null) {
       final ratio = drift / torsoLen;
       if (ratio > _maxDriftRatio) _maxDriftRatio = ratio;
@@ -141,12 +244,16 @@ class CurlFormAnalyzer {
   }
 
   /// Rep-boundary evaluation — drains one-shot errors.
+  @override
   List<FormError> consumeCompletionErrors() {
     final errors = <FormError>[];
 
-    if (_shortRomPending) {
-      errors.add(FormError.shortRom);
-      _shortRomPending = false;
+    if (_shortRomPeakPending) {
+      errors.add(FormError.shortRomPeak);
+      _shortRomPeakPending = false;
+    } else if (_shortRomStartPending) {
+      errors.add(FormError.shortRomStart);
+      _shortRomStartPending = false;
     }
 
     // Eccentric too fast.
@@ -155,24 +262,50 @@ class CurlFormAnalyzer {
       errors.add(FormError.eccentricTooFast);
     }
 
+    // Concentric too fast.
+    if (_lastConcentricDuration != null &&
+        _lastConcentricDuration!.inMilliseconds < kMinConcentricSec * 1000) {
+      errors.add(FormError.concentricTooFast);
+    }
+
+    // Tempo inconsistency — flag computed in onRepEnd so the per-rep quality
+    // deduction lines up with the emission. Here we only surface it.
+    if (_lastRepTempoInconsistent) {
+      errors.add(FormError.tempoInconsistent);
+    }
+
     // Bilateral asymmetry (front view, rolling check).
+    //
+    // A lagging arm has a HIGHER min-angle (it didn't flex as deeply). We take
+    // the sign of (left − right) to decide which side to call out; abs delta
+    // gates the streak the same way as before.
     if (_asymmetryDeltas.isNotEmpty) {
-      final lastDelta = _asymmetryDeltas.last;
-      if (lastDelta > kAsymmetryAngleDelta) {
+      final last = _asymmetryDeltas.last;
+      final signedDelta = last.left - last.right;
+      if (signedDelta.abs() > kAsymmetryAngleDelta) {
         _consecutiveAsymmetricReps++;
       } else {
         _consecutiveAsymmetricReps = 0;
       }
       if (_consecutiveAsymmetricReps >= kAsymmetryConsecutiveReps) {
-        errors.add(FormError.lateralAsymmetry);
+        errors.add(
+          signedDelta > 0
+              ? FormError.asymmetryLeftLag
+              : FormError.asymmetryRightLag,
+        );
       }
     }
 
     // Fatigue detection.
     if (!_fatigueFired && _concentricDurations.length >= kFatigueMinReps) {
-      final firstAvg = _avgDuration(_concentricDurations.sublist(0, kFatigueWindowSize));
-      final lastAvg = _avgDuration(_concentricDurations.sublist(
-          _concentricDurations.length - kFatigueWindowSize));
+      final firstAvg = _avgDuration(
+        _concentricDurations.sublist(0, kFatigueWindowSize),
+      );
+      final lastAvg = _avgDuration(
+        _concentricDurations.sublist(
+          _concentricDurations.length - kFatigueWindowSize,
+        ),
+      );
       if (firstAvg > 0 && lastAvg / firstAvg > kFatigueSlowdownRatio) {
         errors.add(FormError.fatigue);
         _fatigueFired = true;
@@ -183,26 +316,42 @@ class CurlFormAnalyzer {
   }
 
   /// Last completed rep's quality score (0.0–1.0).
+  @override
   double get lastRepQuality => _lastRepQuality;
 
   /// Average quality across all completed reps.
+  @override
   double get averageQuality {
     if (_repQualities.isEmpty) return 1.0;
     return _repQualities.reduce((a, b) => a + b) / _repQualities.length;
   }
 
   /// Per-rep quality scores for all completed reps (0.0–1.0 each).
+  @override
   List<double> get repQualities => List.unmodifiable(_repQualities);
 
   /// Whether fatigue was detected at any point in this session.
+  @override
   bool get fatigueDetected => _fatigueFired;
 
   /// Number of reps where the eccentric (lowering) phase was too fast.
+  @override
   int get eccentricTooFastCount => _eccentricTooFastCount;
 
+  /// Number of reps where the concentric (lifting) phase was too fast.
+  @override
+  int get concentricTooFastCount => _concentricTooFastCount;
+
+  /// Number of reps where tempo inconsistency was flagged this session.
+  @override
+  int get tempoInconsistentCount => _tempoInconsistentCount;
+
+  @override
   void reset() {
     _repStartSnapshot = null;
-    _shortRomPending = false;
+    _shortRomStartPending = false;
+    _shortRomPeakPending = false;
+    _activeThresholds = RomThresholds.global();
     _view = CurlCameraView.unknown;
     _concentricStart = null;
     _eccentricStart = null;
@@ -216,6 +365,11 @@ class CurlFormAnalyzer {
     _lastRepQuality = 1.0;
     _repQualities.clear();
     _eccentricTooFastCount = 0;
+    _concentricTooFastCount = 0;
+    _tempoInconsistentCount = 0;
+    _tempoReArmRepsRemaining = 0;
+    _lastRepTempoInconsistent = false;
+    _lastConcentricDuration = null;
   }
 
   // ── Helpers ──────────────────────────────────────────
@@ -225,13 +379,15 @@ class CurlFormAnalyzer {
 
     // Proportional swing deduction: scale from threshold to 2x threshold.
     if (_maxSwingRatio > kSwingThreshold) {
-      final severity = ((_maxSwingRatio - kSwingThreshold) / kSwingThreshold).clamp(0.0, 1.0);
+      final severity = ((_maxSwingRatio - kSwingThreshold) / kSwingThreshold)
+          .clamp(0.0, 1.0);
       score -= severity * kQualitySwingMaxDeduction;
     }
 
     // Proportional drift deduction.
     if (_maxDriftRatio > kDriftThreshold) {
-      final severity = ((_maxDriftRatio - kDriftThreshold) / kDriftThreshold).clamp(0.0, 1.0);
+      final severity = ((_maxDriftRatio - kDriftThreshold) / kDriftThreshold)
+          .clamp(0.0, 1.0);
       score -= severity * kQualityDriftMaxDeduction;
     }
 
@@ -241,13 +397,27 @@ class CurlFormAnalyzer {
       score -= kQualityEccentricDeduction;
     }
 
-    // Short ROM.
-    if (_shortRomPending) {
+    // Rushed concentric (flinging the weight).
+    if (_lastConcentricDuration != null &&
+        _lastConcentricDuration!.inMilliseconds < kMinConcentricSec * 1000) {
+      score -= kQualityConcentricDeduction;
+    }
+
+    // Inconsistent concentric tempo over the last N reps.
+    if (_lastRepTempoInconsistent) {
+      score -= kQualityTempoInconsistencyDeduction;
+    }
+
+    // Short ROM — same deduction applies to both start and peak variants.
+    if (_shortRomStartPending || _shortRomPeakPending) {
       score -= kQualityShortRomDeduction;
     }
 
-    // Asymmetry (front view).
-    if (_asymmetryDeltas.isNotEmpty && _asymmetryDeltas.last > kAsymmetryAngleDelta) {
+    // Asymmetry (front view). Uses abs delta for deduction; direction is
+    // classification-only and doesn't change the quality penalty.
+    if (_asymmetryDeltas.isNotEmpty &&
+        (_asymmetryDeltas.last.left - _asymmetryDeltas.last.right).abs() >
+            kAsymmetryAngleDelta) {
       score -= kQualityAsymmetryDeduction;
     }
 
@@ -263,14 +433,23 @@ class CurlFormAnalyzer {
   double? _computeTorsoLen(PoseResult current, bool useLeft, bool useRight) {
     final l = useLeft
         ? verticalDist(
-            current.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
-            current.landmark(LM.leftHip,      minConfidence: kMinLandmarkConfidence),
+            current.landmark(
+              LM.leftShoulder,
+              minConfidence: kMinLandmarkConfidence,
+            ),
+            current.landmark(LM.leftHip, minConfidence: kMinLandmarkConfidence),
           )
         : null;
     final r = useRight
         ? verticalDist(
-            current.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
-            current.landmark(LM.rightHip,      minConfidence: kMinLandmarkConfidence),
+            current.landmark(
+              LM.rightShoulder,
+              minConfidence: kMinLandmarkConfidence,
+            ),
+            current.landmark(
+              LM.rightHip,
+              minConfidence: kMinLandmarkConfidence,
+            ),
           )
         : null;
     if (l != null && r != null) return (l + r) / 2.0;

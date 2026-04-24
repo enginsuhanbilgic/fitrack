@@ -4,22 +4,119 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="fix: continuous curl view re-detection with hysteresis and idle-state deferral">
+    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="feat: initialize project structure with essential configuration files and dependencies, Week 11: per-user ROM profile + T2.4 dataset pipeline + data-driven thresholds">
+      <change afterPath="$PROJECT_DIR$/GLOSSARY.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/T2.4_QUICK_START.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/T2.4_STATE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/T2.4_SUMMARY.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/core/default_rom_thresholds.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/core/platform_config.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/core/rom_thresholds.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_auto_calibrator.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer_extras.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_rom_profile.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_strategy.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/engine/curl/mad_outlier.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/engine/curl/rep_boundary_detector.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/engine/exercise_strategy.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/engine/form_analyzer_base.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/engine/push_up/push_up_strategy.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/engine/squat/squat_strategy.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/screens/calibration_overlay.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/services/rom_profile_store.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/services/telemetry_log.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/core/platform_config_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/core/rom_thresholds_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/curl/_pose_fixtures.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/curl/curl_auto_calibrator_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/curl/curl_form_analyzer_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/curl/curl_rom_profile_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/curl/curl_strategy_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/curl/curl_view_detector_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/curl/mad_outlier_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/curl/rep_boundary_detector_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/form_analyzer_base_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/push_up/push_up_strategy_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/rep_counter_curl_profile_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/squat/squat_strategy_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/services/rom_profile_store_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/view_models/workout_view_model_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/suggestions_for_biceps.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/dart_replay/.flutter-plugins-dependencies" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/dart_replay/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/dart_replay/analysis_options.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/dart_replay/bin/replay.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/dart_replay/pubspec.lock" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/dart_replay/pubspec.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/annotations/.gitkeep" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/annotations/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/annotations/reps.csv" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/annotations/videos.csv" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/derived/.gitkeep" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/derived/per_rep_stats.csv" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/derived/thresholds.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/derived/thresholds_v2.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/keypoints/.gitkeep" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/keypoints/clip_001_you_side_right_good.jsonl" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/keypoints/clip_002_you_side_right_swing.jsonl" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/keypoints/clip_003_you_side_right_speed.jsonl" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/keypoints/clip_004_you_front_both_good.jsonl" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/keypoints/clip_005_you_front_both_partial.jsonl" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/data/keypoints/clip_006_you_front_both_swing.jsonl" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/docs/00_overview.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/docs/01_architecture_and_rationale.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/docs/02_pipeline_runbook.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/docs/03_phase_B_extraction.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/docs/04_phase_E_replay.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/docs/05_phase_D_threshold_math.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/docs/06_testing_and_verification.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/docs/07_recording_guide.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/docs/08_troubleshooting.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/notebooks/01_explore_distributions.ipynb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/notebooks/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/pytest.ini" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/requirements.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/angle_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/compute_rep_stats.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_thresholds.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_thresholds_v2.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/extract_keypoints.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/generate_dart.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/generate_dart_v2.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/jsonl_io.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/landmark_indices.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/phase_b_auto_annotate.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/tests/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/tests/test_angle_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/tests/test_auto_annotate.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/tests/test_compute_rep_stats.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/tests/test_derive_thresholds.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/tests/test_extract_keypoints.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/tests/test_generate_dart.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/ios/Runner.xcodeproj/project.pbxproj" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Runner.xcodeproj/project.pbxproj" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/ios/Runner.xcworkspace/contents.xcworkspacedata" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Runner.xcworkspace/contents.xcworkspacedata" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/ios/Runner/Info.plist" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Runner/Info.plist" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/core/constants.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/constants.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/core/types.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/types.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_view_detector.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_view_detector.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/landmark_smoother.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/landmark_smoother.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/one_euro_filter.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/one_euro_filter.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/push_up/push_up_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/push_up/push_up_form_analyzer.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/models/landmark_types.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/models/landmark_types.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/squat/squat_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/squat/squat_form_analyzer.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/services/camera_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/camera_service.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/services/pose/mlkit_pose_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/pose/mlkit_pose_service.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/services/pose/pose_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/pose/pose_service.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/services/tts_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/tts_service.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/widgets/skeleton_painter.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/skeleton_painter.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pubspec.lock" beforeDir="false" afterPath="$PROJECT_DIR$/app/pubspec.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pubspec.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/app/pubspec.yaml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -80,25 +177,28 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.cidr.known.project.marker&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.readMode.enableVisualFormatting&quot;: &quot;true&quot;,
-    &quot;cf.first.check.clang-format&quot;: &quot;false&quot;,
-    &quot;cidr.known.project.marker&quot;: &quot;true&quot;,
-    &quot;dart.analysis.tool.window.visible&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;alihan&quot;,
-    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/alihan/AndroidStudioProjects/fitrack&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;configurable.group.language&quot;,
-    &quot;show.migrate.to.gradle.popup&quot;: &quot;false&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.cidr.known.project.marker": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.readMode.enableVisualFormatting": "true",
+    "cf.first.check.clang-format": "false",
+    "cidr.known.project.marker": "true",
+    "dart.analysis.tool.window.visible": "false",
+    "git-widget-placeholder": "alihan",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "/Users/alihan/AndroidStudioProjects/fitrack/tools/dataset_analysis/data/videos",
+    "settings.editor.selected.configurable": "configurable.group.language",
+    "show.migrate.to.gradle.popup": "false"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/tools/dataset_analysis/data/videos" />
+    </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$" />
       <recent name="$PROJECT_DIR$/benchmark" />
@@ -216,7 +316,15 @@
       <option name="project" value="LOCAL" />
       <updated>1775430138923</updated>
     </task>
-    <option name="localTasksCounter" value="14" />
+    <task id="LOCAL-00014" summary="feat: enhance camera and pose detection services with improved format handling and error logging">
+      <option name="closed" value="true" />
+      <created>1776311739667</created>
+      <option name="number" value="00014" />
+      <option name="presentableId" value="LOCAL-00014" />
+      <option name="project" value="LOCAL" />
+      <updated>1776311739667</updated>
+    </task>
+    <option name="localTasksCounter" value="15" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -244,7 +352,9 @@
     <MESSAGE value="feat: implement curl view detection and enhance form analysis with rep tempo, quality score, bilateral asymmetry, fatigue detection" />
     <MESSAGE value="feat: design-quality biceps curl summary screen with per-rep quality chart, form analysis, and coaching insights" />
     <MESSAGE value="fix: continuous curl view re-detection with hysteresis and idle-state deferral" />
-    <option name="LAST_COMMIT_MESSAGE" value="fix: continuous curl view re-detection with hysteresis and idle-state deferral" />
+    <MESSAGE value="feat: enhance camera and pose detection services with improved format handling and error logging" />
+    <MESSAGE value="feat: initialize project structure with essential configuration files and dependencies, Week 11: per-user ROM profile + T2.4 dataset pipeline + data-driven thresholds" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat: initialize project structure with essential configuration files and dependencies, Week 11: per-user ROM profile + T2.4 dataset pipeline + data-driven thresholds" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>
