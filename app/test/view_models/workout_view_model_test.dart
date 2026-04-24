@@ -21,7 +21,10 @@ import 'package:fitrack/core/types.dart';
 import 'package:fitrack/models/pose_result.dart';
 import 'package:fitrack/services/camera_service.dart';
 import 'package:fitrack/services/db/profile_repository.dart';
+import 'package:fitrack/services/db/session_dtos.dart';
+import 'package:fitrack/services/db/session_repository.dart';
 import 'package:fitrack/services/pose/pose_service.dart';
+import 'package:fitrack/services/telemetry_log.dart';
 import 'package:fitrack/services/tts_service.dart';
 import 'package:fitrack/view_models/workout_view_model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -85,6 +88,7 @@ WorkoutViewModel buildVm({
   ExerciseType exercise = ExerciseType.bicepsCurl,
   bool forceCalibration = false,
   ProfileRepository? profileRepository,
+  SessionRepository? sessionRepository,
 }) {
   return WorkoutViewModel(
     exercise: exercise,
@@ -93,7 +97,40 @@ WorkoutViewModel buildVm({
     pose: _FakePoseService(),
     tts: _FakeTtsService(),
     profileRepository: profileRepository ?? InMemoryProfileRepository(),
+    sessionRepository: sessionRepository ?? InMemorySessionRepository(),
   );
+}
+
+/// Repo that throws on insert — used to verify UI emission is not blocked
+/// by a persistence failure (the plan's "emit-then-persist" invariant).
+class _ThrowingSessionRepository implements SessionRepository {
+  @override
+  Future<int> insertCompletedSession(
+    WorkoutCompletedEvent event, {
+    required DateTime startedAt,
+  }) async {
+    throw StateError('simulated persistence failure');
+  }
+
+  @override
+  Future<List<SessionSummary>> listSessions({
+    ExerciseType? exercise,
+    int limit = 100,
+    int offset = 0,
+  }) async => const [];
+
+  @override
+  Future<SessionDetail?> getSession(int sessionId) async => null;
+
+  @override
+  Future<void> deleteSession(int sessionId) async {}
+
+  @override
+  Future<List<Duration>> recentConcentricDurations({
+    required ExerciseType exercise,
+    required Duration window,
+    int limitReps = 200,
+  }) async => const [];
 }
 
 void main() {
@@ -312,5 +349,55 @@ void main() {
       );
       vm.dispose();
     });
+  });
+
+  group('WorkoutViewModel — persistence (WP5.2)', () {
+    test(
+      'finishWorkout writes one session via the injected SessionRepository',
+      () async {
+        final repo = InMemorySessionRepository();
+        final vm = buildVm(sessionRepository: repo);
+
+        vm.finishWorkout();
+        // Allow the stream emit AND the fire-and-forget persist to settle.
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        final list = await repo.listSessions();
+        expect(list, hasLength(1));
+        expect(list.first.exercise, ExerciseType.bicepsCurl);
+        vm.dispose();
+      },
+    );
+
+    test(
+      'persistence failure does not block completion event emission',
+      () async {
+        TelemetryLog.instance.clear();
+        final vm = buildVm(sessionRepository: _ThrowingSessionRepository());
+        final events = <WorkoutCompletedEvent>[];
+        final sub = vm.completionEvents.listen(events.add);
+
+        vm.finishWorkout();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(
+          events,
+          hasLength(1),
+          reason: 'UI emit must not wait on persistence',
+        );
+        expect(
+          TelemetryLog.instance.entries.any(
+            (e) => e.tag == 'session.save_failed',
+          ),
+          isTrue,
+          reason: 'persistence failure must be logged to telemetry',
+        );
+
+        await sub.cancel();
+        vm.dispose();
+      },
+    );
   });
 }

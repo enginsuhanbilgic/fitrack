@@ -1,32 +1,48 @@
 /// Persistence for completed workout sessions.
 ///
-/// PR1 ships **interface only** plus an in-memory stub so [AppServices] has a
-/// non-null field. PR2 lands [SqliteSessionRepository] and the full DTO surface
-/// (`SessionSummary`, `SessionDetail`, `RepRow`); PR3 adds read paths for the
-/// History screen; PR4 wires `recentConcentricDurations` to real data.
+/// PR2 lands [SqliteSessionRepository] + the DTO surface
+/// (`SessionSummary`, `SessionDetail`, `RepRow`, `toCurlRepRecord`).
+/// PR3 consumes the read paths for the History screen; PR4 starts writing
+/// `reps.concentric_ms` and wires `recentConcentricDurations` to real data
+/// (column already exists from PR1 schema, NULL-tolerant).
 ///
-/// Keeping the interface stable from PR1 guarantees PR2's swap is additive:
-/// `AppServicesScope` doesn't change shape, widget-tree plumbing stays intact.
+/// Keeping the interface stable from PR1 kept that PR's `AppServicesScope`
+/// shape unchanged; PR2 just swaps `InMemorySessionRepository` for the Sqlite
+/// impl in the bootstrap.
 library;
+
+import 'package:sqflite/sqflite.dart';
 
 import '../../core/types.dart';
 import '../../view_models/workout_view_model.dart' show WorkoutCompletedEvent;
+import 'session_dtos.dart';
 
 abstract class SessionRepository {
   /// Writes one `sessions` row + N `reps` rows + M `form_errors` rows in a
   /// single transaction. Returns the new session id.
-  ///
-  /// PR1 stub: throws [UnimplementedError]. PR2: real transactional write.
   Future<int> insertCompletedSession(
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
   });
 
-  /// Recent concentric durations for fatigue-baseline computation.
-  ///
-  /// Returns `<Duration>[]` until PR4 starts populating `reps.concentric_ms`.
-  /// Call-sites MUST treat an empty list as "no baseline data" — never crash
-  /// on empty.
+  /// History list source. Newest first (`started_at DESC`). `exercise = null`
+  /// returns all exercises merged.
+  Future<List<SessionSummary>> listSessions({
+    ExerciseType? exercise,
+    int limit = 100,
+    int offset = 0,
+  });
+
+  /// Returns null when the session was deleted or never existed.
+  Future<SessionDetail?> getSession(int sessionId);
+
+  /// Cascades to `reps` + `form_errors` via FK `ON DELETE CASCADE` (relies on
+  /// `PRAGMA foreign_keys = ON` set by [onConfigure] in `schema.dart`).
+  Future<void> deleteSession(int sessionId);
+
+  /// Recent concentric durations for the fatigue-baseline feedback loop (PR4).
+  /// Returns `<Duration>[]` in PR2/PR3 because `reps.concentric_ms` is not yet
+  /// populated. Call-sites MUST treat empty as "no baseline data" — no crash.
   Future<List<Duration>> recentConcentricDurations({
     required ExerciseType exercise,
     required Duration window,
@@ -34,15 +50,212 @@ abstract class SessionRepository {
   });
 }
 
-/// In-memory double. Silently accepts writes and records them in order so
-/// tests can assert on them without a SQLite dependency.
-class InMemorySessionRepository implements SessionRepository {
-  final List<RecordedInsert> _inserts = <RecordedInsert>[];
-  int _nextId = 1;
+class SqliteSessionRepository implements SessionRepository {
+  SqliteSessionRepository(this._db);
 
-  /// Test-only view. Caller must not mutate.
-  List<RecordedInsert> get recordedInserts =>
-      List<RecordedInsert>.unmodifiable(_inserts);
+  final Database _db;
+
+  @override
+  Future<int> insertCompletedSession(
+    WorkoutCompletedEvent event, {
+    required DateTime startedAt,
+  }) async {
+    return _db.transaction<int>((txn) async {
+      final sessionId = await txn.insert('sessions', <String, Object?>{
+        'exercise': event.exercise.name,
+        'started_at': startedAt.millisecondsSinceEpoch,
+        'duration_ms': event.sessionDuration.inMilliseconds,
+        'total_reps': event.totalReps,
+        'total_sets': event.totalSets,
+        'average_quality': event.averageQuality,
+        'detected_view': _detectedViewFor(event),
+        'fatigue_detected': event.fatigueDetected ? 1 : 0,
+        'asymmetry_detected': event.asymmetryDetected ? 1 : 0,
+        'eccentric_too_fast_count': event.eccentricTooFastCount,
+        'schema_version': 1,
+      });
+
+      // Curl path: one row per CurlRepRecord with all curl columns populated.
+      // Non-curl: one row per repQualities entry with only rep_index+quality.
+      if (event.curlRepRecords.isNotEmpty) {
+        for (final r in event.curlRepRecords) {
+          final quality =
+              r.repIndex >= 1 && r.repIndex <= event.repQualities.length
+              ? event.repQualities[r.repIndex - 1]
+              : null;
+          await txn.insert('reps', <String, Object?>{
+            'session_id': sessionId,
+            'rep_index': r.repIndex,
+            'quality': quality,
+            'min_angle': r.minAngle,
+            'max_angle': r.maxAngle,
+            'side': r.side.name,
+            'view': r.view.name,
+            'threshold_source': r.source.name,
+            'bucket_updated': r.bucketUpdated ? 1 : 0,
+            'rejected_outlier': r.rejectedOutlier ? 1 : 0,
+            // concentric_ms intentionally omitted — PR4 adds it.
+          });
+        }
+      } else {
+        for (var i = 0; i < event.repQualities.length; i++) {
+          await txn.insert('reps', <String, Object?>{
+            'session_id': sessionId,
+            'rep_index': i + 1,
+            'quality': event.repQualities[i],
+          });
+        }
+      }
+
+      for (final err in event.errorsTriggered) {
+        await txn.insert('form_errors', <String, Object?>{
+          'session_id': sessionId,
+          'error': err.name,
+          'count': 1,
+        });
+      }
+
+      return sessionId;
+    });
+  }
+
+  /// Persist `detected_view` only when it's a real curl view. Non-curl sessions
+  /// always have `CurlCameraView.unknown`; store NULL for those so the column
+  /// carries real information.
+  String? _detectedViewFor(WorkoutCompletedEvent event) {
+    if (event.exercise != ExerciseType.bicepsCurl) return null;
+    if (event.detectedView == CurlCameraView.unknown) return null;
+    return event.detectedView.name;
+  }
+
+  @override
+  Future<List<SessionSummary>> listSessions({
+    ExerciseType? exercise,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final rows = await _db.query(
+      'sessions',
+      where: exercise == null ? null : 'exercise = ?',
+      whereArgs: exercise == null ? null : <Object?>[exercise.name],
+      orderBy: 'started_at DESC',
+      limit: limit,
+      offset: offset,
+    );
+    return rows.map(_summaryFromRow).toList(growable: false);
+  }
+
+  @override
+  Future<SessionDetail?> getSession(int sessionId) async {
+    final sessionRows = await _db.query(
+      'sessions',
+      where: 'id = ?',
+      whereArgs: <Object?>[sessionId],
+      limit: 1,
+    );
+    if (sessionRows.isEmpty) return null;
+    final sessionRow = sessionRows.first;
+
+    final repRows = await _db.query(
+      'reps',
+      where: 'session_id = ?',
+      whereArgs: <Object?>[sessionId],
+      orderBy: 'rep_index ASC',
+    );
+    final errorRows = await _db.query(
+      'form_errors',
+      where: 'session_id = ?',
+      whereArgs: <Object?>[sessionId],
+    );
+
+    final formErrors = <FormError, int>{};
+    for (final r in errorRows) {
+      final name = r['error'] as String;
+      final count = r['count'] as int;
+      final key = FormError.values.byName(name);
+      formErrors[key] = (formErrors[key] ?? 0) + count;
+    }
+
+    return SessionDetail(
+      summary: _summaryFromRow(sessionRow),
+      eccentricTooFastCount:
+          (sessionRow['eccentric_too_fast_count'] as int?) ?? 0,
+      reps: repRows.map(_repFromRow).toList(growable: false),
+      formErrors: formErrors,
+    );
+  }
+
+  @override
+  Future<void> deleteSession(int sessionId) async {
+    await _db.delete(
+      'sessions',
+      where: 'id = ?',
+      whereArgs: <Object?>[sessionId],
+    );
+  }
+
+  @override
+  Future<List<Duration>> recentConcentricDurations({
+    required ExerciseType exercise,
+    required Duration window,
+    int limitReps = 200,
+  }) async {
+    // PR4 lands the real query. PR2 must not crash on an empty column; return
+    // an empty list so call-sites can treat "no baseline" uniformly.
+    return const <Duration>[];
+  }
+
+  // ── Row mappers ─────────────────────────────────────────
+
+  static SessionSummary _summaryFromRow(Map<String, Object?> row) {
+    final detectedViewName = row['detected_view'] as String?;
+    return SessionSummary(
+      id: row['id'] as int,
+      exercise: ExerciseType.values.byName(row['exercise'] as String),
+      startedAt: DateTime.fromMillisecondsSinceEpoch(row['started_at'] as int),
+      duration: Duration(milliseconds: row['duration_ms'] as int),
+      totalReps: row['total_reps'] as int,
+      totalSets: row['total_sets'] as int,
+      averageQuality: (row['average_quality'] as num?)?.toDouble(),
+      detectedView: detectedViewName == null
+          ? null
+          : CurlCameraView.values.byName(detectedViewName),
+      fatigueDetected: (row['fatigue_detected'] as int) == 1,
+      asymmetryDetected: (row['asymmetry_detected'] as int) == 1,
+    );
+  }
+
+  static RepRow _repFromRow(Map<String, Object?> row) {
+    final sideName = row['side'] as String?;
+    final viewName = row['view'] as String?;
+    final sourceName = row['threshold_source'] as String?;
+    return RepRow(
+      repIndex: row['rep_index'] as int,
+      quality: (row['quality'] as num?)?.toDouble(),
+      minAngle: (row['min_angle'] as num?)?.toDouble(),
+      maxAngle: (row['max_angle'] as num?)?.toDouble(),
+      side: sideName == null ? null : ProfileSide.values.byName(sideName),
+      view: viewName == null ? null : CurlCameraView.values.byName(viewName),
+      source: sourceName == null
+          ? null
+          : ThresholdSource.values.byName(sourceName),
+      bucketUpdated: (row['bucket_updated'] as int?) == null
+          ? null
+          : (row['bucket_updated'] as int) == 1,
+      rejectedOutlier: (row['rejected_outlier'] as int?) == null
+          ? null
+          : (row['rejected_outlier'] as int) == 1,
+      concentricMs: row['concentric_ms'] as int?,
+    );
+  }
+}
+
+/// In-memory double. Accepts writes and serves reads back from the same list
+/// so unit tests can round-trip without a SQLite dependency. Matches the
+/// production semantics where needed (newest-first, exercise filter).
+class InMemorySessionRepository implements SessionRepository {
+  final List<_InMemorySession> _sessions = <_InMemorySession>[];
+  int _nextId = 1;
 
   @override
   Future<int> insertCompletedSession(
@@ -50,8 +263,72 @@ class InMemorySessionRepository implements SessionRepository {
     required DateTime startedAt,
   }) async {
     final id = _nextId++;
-    _inserts.add(RecordedInsert(id: id, event: event, startedAt: startedAt));
+    _sessions.add(_InMemorySession(id: id, event: event, startedAt: startedAt));
     return id;
+  }
+
+  @override
+  Future<List<SessionSummary>> listSessions({
+    ExerciseType? exercise,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final filtered =
+        _sessions
+            .where((s) => exercise == null || s.event.exercise == exercise)
+            .toList()
+          ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
+    return filtered
+        .skip(offset)
+        .take(limit)
+        .map(_toSummary)
+        .toList(growable: false);
+  }
+
+  @override
+  Future<SessionDetail?> getSession(int sessionId) async {
+    final idx = _sessions.indexWhere((s) => s.id == sessionId);
+    if (idx < 0) return null;
+    final s = _sessions[idx];
+    final formErrors = <FormError, int>{};
+    for (final e in s.event.errorsTriggered) {
+      formErrors[e] = (formErrors[e] ?? 0) + 1;
+    }
+    final reps = s.event.curlRepRecords.isNotEmpty
+        ? s.event.curlRepRecords
+              .map(
+                (r) => RepRow(
+                  repIndex: r.repIndex,
+                  quality:
+                      r.repIndex >= 1 &&
+                          r.repIndex <= s.event.repQualities.length
+                      ? s.event.repQualities[r.repIndex - 1]
+                      : null,
+                  minAngle: r.minAngle,
+                  maxAngle: r.maxAngle,
+                  side: r.side,
+                  view: r.view,
+                  source: r.source,
+                  bucketUpdated: r.bucketUpdated,
+                  rejectedOutlier: r.rejectedOutlier,
+                ),
+              )
+              .toList(growable: false)
+        : List<RepRow>.generate(
+            s.event.repQualities.length,
+            (i) => RepRow(repIndex: i + 1, quality: s.event.repQualities[i]),
+          );
+    return SessionDetail(
+      summary: _toSummary(s),
+      eccentricTooFastCount: s.event.eccentricTooFastCount,
+      reps: reps,
+      formErrors: formErrors,
+    );
+  }
+
+  @override
+  Future<void> deleteSession(int sessionId) async {
+    _sessions.removeWhere((s) => s.id == sessionId);
   }
 
   @override
@@ -62,8 +339,45 @@ class InMemorySessionRepository implements SessionRepository {
   }) async {
     return const <Duration>[];
   }
+
+  /// Test-only snapshot of raw inserts.
+  List<RecordedInsert> get recordedInserts => _sessions
+      .map(
+        (s) => RecordedInsert(id: s.id, event: s.event, startedAt: s.startedAt),
+      )
+      .toList(growable: false);
+
+  SessionSummary _toSummary(_InMemorySession s) => SessionSummary(
+    id: s.id,
+    exercise: s.event.exercise,
+    startedAt: s.startedAt,
+    duration: s.event.sessionDuration,
+    totalReps: s.event.totalReps,
+    totalSets: s.event.totalSets,
+    averageQuality: s.event.averageQuality,
+    detectedView:
+        s.event.exercise == ExerciseType.bicepsCurl &&
+            s.event.detectedView != CurlCameraView.unknown
+        ? s.event.detectedView
+        : null,
+    fatigueDetected: s.event.fatigueDetected,
+    asymmetryDetected: s.event.asymmetryDetected,
+  );
 }
 
+class _InMemorySession {
+  _InMemorySession({
+    required this.id,
+    required this.event,
+    required this.startedAt,
+  });
+  final int id;
+  final WorkoutCompletedEvent event;
+  final DateTime startedAt;
+}
+
+/// Back-compat shim for PR1 tests that observed inserts directly. PR2 prefers
+/// `listSessions`/`getSession` — those are the real interface.
 class RecordedInsert {
   const RecordedInsert({
     required this.id,

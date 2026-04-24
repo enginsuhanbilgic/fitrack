@@ -17,6 +17,7 @@ import '../models/pose_landmark.dart';
 import '../models/pose_result.dart';
 import '../services/camera_service.dart';
 import '../services/db/profile_repository.dart';
+import '../services/db/session_repository.dart';
 import '../services/pose/mlkit_pose_service.dart';
 import '../services/pose/pose_service.dart';
 import '../services/telemetry_log.dart';
@@ -79,6 +80,7 @@ class WorkoutViewModel extends ChangeNotifier {
   final PoseService _pose;
   final TtsService _tts;
   final ProfileRepository _profileRepository;
+  final SessionRepository _sessionRepository;
   late final RepCounter _repCounter;
 
   // ── Engine ─────────────────────────────────────────────
@@ -167,6 +169,7 @@ class WorkoutViewModel extends ChangeNotifier {
   WorkoutViewModel({
     required this.exercise,
     required ProfileRepository profileRepository,
+    required SessionRepository sessionRepository,
     this.forceCalibration = false,
     CameraService? camera,
     PoseService? pose,
@@ -174,7 +177,8 @@ class WorkoutViewModel extends ChangeNotifier {
   }) : _camera = camera ?? CameraService(),
        _pose = pose ?? MlKitPoseService(),
        _tts = tts ?? TtsService(),
-       _profileRepository = profileRepository {
+       _profileRepository = profileRepository,
+       _sessionRepository = sessionRepository {
     _repCounter = RepCounter(
       exercise: exercise,
       curlThresholdsProvider: _resolveThresholds,
@@ -853,23 +857,44 @@ class WorkoutViewModel extends ChangeNotifier {
         : Duration.zero;
     _phase = WorkoutPhase.completed;
     notifyListeners();
-    _completionCtrl.add(
-      WorkoutCompletedEvent(
-        exercise: exercise,
-        totalReps: _snapshot.reps,
-        totalSets: _snapshot.sets,
-        sessionDuration: duration,
-        averageQuality: _snapshot.averageQuality,
-        detectedView: _snapshot.detectedView,
-        repQualities: _snapshot.repQualities,
-        fatigueDetected: _snapshot.fatigueDetected,
-        asymmetryDetected: asymmetryDetected,
-        eccentricTooFastCount: _snapshot.eccentricTooFastCount,
-        errorsTriggered: _lastFeedbackTime.keys.toSet(),
-        curlRepRecords: List.unmodifiable(_curlRepRecords),
-        curlBucketSummaries: _snapshotBucketsForSummary(),
-      ),
+    final event = WorkoutCompletedEvent(
+      exercise: exercise,
+      totalReps: _snapshot.reps,
+      totalSets: _snapshot.sets,
+      sessionDuration: duration,
+      averageQuality: _snapshot.averageQuality,
+      detectedView: _snapshot.detectedView,
+      repQualities: _snapshot.repQualities,
+      fatigueDetected: _snapshot.fatigueDetected,
+      asymmetryDetected: asymmetryDetected,
+      eccentricTooFastCount: _snapshot.eccentricTooFastCount,
+      errorsTriggered: _lastFeedbackTime.keys.toSet(),
+      curlRepRecords: List.unmodifiable(_curlRepRecords),
+      curlBucketSummaries: _snapshotBucketsForSummary(),
     );
+    // Emit first — the UI's SummaryScreen push is latency-critical and must
+    // not wait for a SQLite round-trip. Persistence is fire-and-forget; any
+    // failure is logged to telemetry and never crashes the session.
+    _completionCtrl.add(event);
+    unawaited(_persistCompletedSession(event, _activeStart ?? DateTime.now()));
+  }
+
+  Future<void> _persistCompletedSession(
+    WorkoutCompletedEvent event,
+    DateTime startedAt,
+  ) async {
+    try {
+      await _sessionRepository.insertCompletedSession(
+        event,
+        startedAt: startedAt,
+      );
+    } catch (e, st) {
+      TelemetryLog.instance.log(
+        'session.save_failed',
+        e.toString(),
+        data: <String, Object?>{'stackTrace': st.toString()},
+      );
+    }
   }
 
   // ── Dispose ───────────────────────────────────────────

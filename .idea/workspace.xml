@@ -4,20 +4,12 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="feat: initialize project structure with essential configuration files and dependencies, Week 11: per-user ROM profile + T2.4 dataset pipeline + data-driven thresholds">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/GLOSSARY.md" beforeDir="false" afterPath="$PROJECT_DIR$/GLOSSARY.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/ios/Podfile.lock" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Podfile.lock" afterDir="false" />
+    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="WP5.1: SQLite engine + ProfileRepository + JSON migration Closes #22">
       <change beforePath="$PROJECT_DIR$/app/lib/app.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/app.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/services/rom_profile_store.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/rom_profile_store.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/db/session_repository.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/session_repository.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/pubspec.lock" beforeDir="false" afterPath="$PROJECT_DIR$/app/pubspec.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/pubspec.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/app/pubspec.yaml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/test/view_models/workout_view_model_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/view_models/workout_view_model_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/widget_test.dart" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -233,7 +225,15 @@
       <option name="project" value="LOCAL" />
       <updated>1777044380988</updated>
     </task>
-    <option name="localTasksCounter" value="16" />
+    <task id="LOCAL-00016" summary="WP5.1: SQLite engine + ProfileRepository + JSON migration Closes #22">
+      <option name="closed" value="true" />
+      <created>1777064098881</created>
+      <option name="number" value="00016" />
+      <option name="presentableId" value="LOCAL-00016" />
+      <option name="project" value="LOCAL" />
+      <updated>1777064098881</updated>
+    </task>
+    <option name="localTasksCounter" value="17" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -263,7 +263,8 @@
     <MESSAGE value="fix: continuous curl view re-detection with hysteresis and idle-state deferral" />
     <MESSAGE value="feat: enhance camera and pose detection services with improved format handling and error logging" />
     <MESSAGE value="feat: initialize project structure with essential configuration files and dependencies, Week 11: per-user ROM profile + T2.4 dataset pipeline + data-driven thresholds" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat: initialize project structure with essential configuration files and dependencies, Week 11: per-user ROM profile + T2.4 dataset pipeline + data-driven thresholds" />
+    <MESSAGE value="WP5.1: SQLite engine + ProfileRepository + JSON migration Closes #22" />
+    <option name="LAST_COMMIT_MESSAGE" value="WP5.1: SQLite engine + ProfileRepository + JSON migration Closes #22" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

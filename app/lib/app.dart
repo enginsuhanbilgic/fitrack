@@ -41,7 +41,7 @@ class _FiTrackAppState extends State<FiTrackApp> {
       return AppServices(
         databaseService: db,
         profileRepository: SqliteProfileRepository(handle),
-        sessionRepository: InMemorySessionRepository(),
+        sessionRepository: SqliteSessionRepository(handle),
       );
     } catch (e, st) {
       // Bootstrap failure is recoverable: fall back to in-memory repos so the
