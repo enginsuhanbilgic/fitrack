@@ -74,12 +74,14 @@ class RepCounter {
     this.side = ExerciseSide.both,
     RomThresholdsProvider? curlThresholdsProvider,
     CurlRepCommitCallback? onCurlRepCommit,
+    List<Duration> curlHistoricalConcentricDurations = const [],
   }) {
     _strategy = _buildStrategy(
       exercise: exercise,
       side: side,
       curlThresholdsProvider: curlThresholdsProvider,
       onCurlRepCommit: onCurlRepCommit,
+      curlHistoricalConcentricDurations: curlHistoricalConcentricDurations,
     );
   }
 
@@ -88,11 +90,13 @@ class RepCounter {
     required ExerciseSide side,
     RomThresholdsProvider? curlThresholdsProvider,
     CurlRepCommitCallback? onCurlRepCommit,
+    List<Duration> curlHistoricalConcentricDurations = const [],
   }) => switch (exercise) {
     ExerciseType.bicepsCurl => CurlStrategy(
       side: side,
       thresholdsProvider: curlThresholdsProvider,
       onRepCommit: onCurlRepCommit,
+      historicalConcentricDurations: curlHistoricalConcentricDurations,
     ),
     ExerciseType.squat => SquatStrategy(),
     ExerciseType.pushUp => PushUpStrategy(),

@@ -152,6 +152,14 @@ class WorkoutViewModel extends ChangeNotifier {
   // Per-rep detail records for summary screen (curl only).
   final List<CurlRepRecord> _curlRepRecords = [];
 
+  /// Per-rep concentric durations, index-aligned with `_curlRepRecords` so
+  /// that rep N in the DB carries the duration captured at its commit time.
+  /// Values are nullable: the analyzer reports `null` when a rep commits
+  /// before `onPeakReached` fires (edge cases). Consumed by
+  /// `_persistCompletedSession` in PR4 and by `SqliteSessionRepository` via
+  /// `insertCompletedSession`'s `concentricDurations` arg.
+  final List<Duration?> _repConcentricDurations = [];
+
   // Completion channel — widget pushes SummaryScreen on emission.
   final StreamController<WorkoutCompletedEvent> _completionCtrl =
       StreamController.broadcast();
@@ -178,13 +186,7 @@ class WorkoutViewModel extends ChangeNotifier {
        _pose = pose ?? MlKitPoseService(),
        _tts = tts ?? TtsService(),
        _profileRepository = profileRepository,
-       _sessionRepository = sessionRepository {
-    _repCounter = RepCounter(
-      exercise: exercise,
-      curlThresholdsProvider: _resolveThresholds,
-      onCurlRepCommit: _handleCurlRepCommit,
-    );
-  }
+       _sessionRepository = sessionRepository;
 
   // ── Public read-only getters (widget-observable state) ──
   bool get isReady => _isReady;
@@ -214,15 +216,37 @@ class WorkoutViewModel extends ChangeNotifier {
       await _pose.init();
       await _camera.init();
       await _tts.init();
-      // Load profile first so the FSM provider sees correct buckets even
-      // for the very first rep (no race with the camera stream).
+      // Load profile AND historical fatigue baseline before constructing the
+      // RepCounter, so the analyzer sees both from rep 1. Failures on either
+      // load are non-fatal: profile falls back to empty, baseline to empty
+      // list (analyzer collapses to in-session-only fatigue detection —
+      // pre-WP5.4 behavior).
+      var historical = const <Duration>[];
       if (exercise == ExerciseType.bicepsCurl) {
         _profile = await _profileRepository.loadCurl() ?? CurlRomProfile();
+        try {
+          historical = await _sessionRepository.recentConcentricDurations(
+            exercise: ExerciseType.bicepsCurl,
+            window: const Duration(days: 30),
+          );
+        } catch (e, st) {
+          TelemetryLog.instance.log(
+            'fatigue.baseline.load_failed',
+            e.toString(),
+            data: <String, Object?>{'stackTrace': st.toString()},
+          );
+        }
+      }
+      _repCounter = RepCounter(
+        exercise: exercise,
+        curlThresholdsProvider: _resolveThresholds,
+        onCurlRepCommit: _handleCurlRepCommit,
+        curlHistoricalConcentricDurations: historical,
+      );
+      if (exercise == ExerciseType.bicepsCurl && forceCalibration) {
         // Personal calibration is opt-in only — Settings → Recalibrate sets
         // `forceCalibration`. We never launch it automatically.
-        if (forceCalibration) {
-          _enterCalibration();
-        }
+        _enterCalibration();
       }
       _camera.startStream(_onFrame);
       _isReady = true;
@@ -259,6 +283,7 @@ class WorkoutViewModel extends ChangeNotifier {
     required CurlCameraView view,
     required double minAngle,
     required double maxAngle,
+    required Duration? concentricDuration,
   }) {
     _autoCalibrator.recordRepExtremes(minAngle, maxAngle);
     final profile = _profile;
@@ -286,6 +311,9 @@ class WorkoutViewModel extends ChangeNotifier {
         rejectedOutlier: result == RepApplyResult.rejectedOutlier,
       ),
     );
+    // Index-aligned with `_curlRepRecords`; consumed by
+    // `_persistCompletedSession` → `SqliteSessionRepository`.
+    _repConcentricDurations.add(concentricDuration);
 
     TelemetryLog.instance.log(
       'profile.update',
@@ -887,6 +915,9 @@ class WorkoutViewModel extends ChangeNotifier {
       await _sessionRepository.insertCompletedSession(
         event,
         startedAt: startedAt,
+        concentricDurations: List<Duration?>.unmodifiable(
+          _repConcentricDurations,
+        ),
       );
     } catch (e, st) {
       TelemetryLog.instance.log(

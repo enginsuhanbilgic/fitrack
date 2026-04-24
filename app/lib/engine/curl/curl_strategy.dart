@@ -33,6 +33,13 @@ typedef CurlRepCommitCallback =
       required CurlCameraView view,
       required double minAngle,
       required double maxAngle,
+
+      /// Most recent rep's concentric duration as measured by
+      /// [CurlFormAnalyzer]. Nullable because a rep can commit before the
+      /// analyzer's `onPeakReached` fires (partial reps, edge cases); hosts
+      /// should treat null as "no data" and skip persistence rather than
+      /// inferring a duration. Added in WP5.4.
+      required Duration? concentricDuration,
     });
 
 /// Biceps-curl FSM encapsulated as a strategy.
@@ -50,14 +57,21 @@ class CurlStrategy extends ExerciseStrategy {
     this.side = ExerciseSide.both,
     RomThresholdsProvider? thresholdsProvider,
     CurlRepCommitCallback? onRepCommit,
+
+    /// 30-day historical concentric durations for the analyzer's fatigue
+    /// baseline (WP5.4). Empty list → backward-compat pre-WP5.4 behavior.
+    List<Duration> historicalConcentricDurations = const [],
   }) : _thresholdsProvider = thresholdsProvider ?? _defaultGlobalProvider,
-       _onRepCommit = onRepCommit;
+       _onRepCommit = onRepCommit,
+       _form = CurlFormAnalyzer(
+         historicalConcentricDurations: historicalConcentricDurations,
+       );
 
   final ExerciseSide side;
   final RomThresholdsProvider _thresholdsProvider;
   final CurlRepCommitCallback? _onRepCommit;
 
-  final CurlFormAnalyzer _form = CurlFormAnalyzer();
+  final CurlFormAnalyzer _form;
   final CurlViewDetector _viewDetector = CurlViewDetector();
 
   CurlCameraView _lockedView = CurlCameraView.unknown;
@@ -333,18 +347,26 @@ class CurlStrategy extends ExerciseStrategy {
         rightBilateral != null &&
         (leftBilateral - rightBilateral).abs() < kAsymmetryAngleDelta;
 
+    // Same duration flows to both commits for symmetric front-view reps —
+    // one physical rep, one measurement, two bucket updates. Pulled once here
+    // so every call site sees the same value (no risk of the analyzer's
+    // internal state shifting between invocations).
+    final concentricDuration = _form.lastConcentricDuration;
+
     if (symmetric) {
       commit(
         side: ProfileSide.left,
         view: _lockedView,
         minAngle: minAngle,
         maxAngle: maxAngle,
+        concentricDuration: concentricDuration,
       );
       commit(
         side: ProfileSide.right,
         view: _lockedView,
         minAngle: minAngle,
         maxAngle: maxAngle,
+        concentricDuration: concentricDuration,
       );
     } else {
       commit(
@@ -352,6 +374,7 @@ class CurlStrategy extends ExerciseStrategy {
         view: _lockedView,
         minAngle: minAngle,
         maxAngle: maxAngle,
+        concentricDuration: concentricDuration,
       );
     }
   }

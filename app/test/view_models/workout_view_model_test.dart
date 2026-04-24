@@ -108,6 +108,7 @@ class _ThrowingSessionRepository implements SessionRepository {
   Future<int> insertCompletedSession(
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
+    List<Duration?> concentricDurations = const [],
   }) async {
     throw StateError('simulated persistence failure');
   }
@@ -238,23 +239,30 @@ void main() {
   });
 
   group('WorkoutViewModel — startNextSet', () {
-    test('increments sets, zeros reps, resets snapshot state to idle', () {
+    test(
+      'increments sets, zeros reps, resets snapshot state to idle',
+      () async {
+        final vm = buildVm();
+        // WP5.4: RepCounter is init-built now, so tests that exercise the
+        // counter must await `init()` first.
+        await vm.init();
+        expect(vm.snapshot.sets, 1);
+        expect(vm.snapshot.reps, 0);
+
+        vm.startNextSet();
+        expect(vm.snapshot.sets, 2);
+        expect(vm.snapshot.reps, 0);
+        expect(vm.snapshot.state, RepState.idle);
+
+        vm.startNextSet();
+        expect(vm.snapshot.sets, 3);
+        vm.dispose();
+      },
+    );
+
+    test('notifies listeners', () async {
       final vm = buildVm();
-      expect(vm.snapshot.sets, 1);
-      expect(vm.snapshot.reps, 0);
-
-      vm.startNextSet();
-      expect(vm.snapshot.sets, 2);
-      expect(vm.snapshot.reps, 0);
-      expect(vm.snapshot.state, RepState.idle);
-
-      vm.startNextSet();
-      expect(vm.snapshot.sets, 3);
-      vm.dispose();
-    });
-
-    test('notifies listeners', () {
-      final vm = buildVm();
+      await vm.init();
       var notifyCount = 0;
       vm.addListener(() => notifyCount++);
 
@@ -400,4 +408,91 @@ void main() {
       },
     );
   });
+
+  group('WorkoutViewModel — historical fatigue baseline (WP5.4)', () {
+    test(
+      'init() queries recentConcentricDurations with 30-day window for curl',
+      () async {
+        final spy = _SpyingSessionRepository();
+        final vm = buildVm(sessionRepository: spy);
+        await vm.init();
+        expect(spy.concentricQueries, hasLength(1));
+        expect(spy.concentricQueries.first.exercise, ExerciseType.bicepsCurl);
+        expect(spy.concentricQueries.first.window, const Duration(days: 30));
+        vm.dispose();
+      },
+    );
+
+    test(
+      'init() on squat does NOT query historical baseline (curl-only path)',
+      () async {
+        final spy = _SpyingSessionRepository();
+        final vm = buildVm(
+          exercise: ExerciseType.squat,
+          sessionRepository: spy,
+        );
+        await vm.init();
+        expect(spy.concentricQueries, isEmpty);
+        vm.dispose();
+      },
+    );
+
+    test(
+      'init() swallows repository errors and still succeeds (empty baseline fallback)',
+      () async {
+        TelemetryLog.instance.clear();
+        final vm = buildVm(sessionRepository: _BaselineThrowingRepository());
+        await vm.init();
+        // VM reached isReady despite the baseline-load failure.
+        expect(vm.error, isNull);
+        expect(
+          TelemetryLog.instance.entries.any(
+            (e) => e.tag == 'fatigue.baseline.load_failed',
+          ),
+          isTrue,
+          reason: 'baseline load failures must be logged, not crash init',
+        );
+        vm.dispose();
+      },
+    );
+  });
+}
+
+/// Session repo that records every `recentConcentricDurations` call for
+/// assertion. Inherits all other behavior from InMemory so `init()` can load
+/// profile-side state without surprises.
+class _SpyingSessionRepository extends InMemorySessionRepository {
+  final List<({ExerciseType exercise, Duration window, int limitReps})>
+  concentricQueries = [];
+
+  @override
+  Future<List<Duration>> recentConcentricDurations({
+    required ExerciseType exercise,
+    required Duration window,
+    int limitReps = 200,
+  }) async {
+    concentricQueries.add((
+      exercise: exercise,
+      window: window,
+      limitReps: limitReps,
+    ));
+    return super.recentConcentricDurations(
+      exercise: exercise,
+      window: window,
+      limitReps: limitReps,
+    );
+  }
+}
+
+/// Session repo whose baseline query throws — exercises the
+/// `fatigue.baseline.load_failed` branch of `init()`.
+class _BaselineThrowingRepository extends InMemorySessionRepository {
+  @override
+  Future<List<Duration>> recentConcentricDurations({
+    required ExerciseType exercise,
+    required Duration window,
+    int limitReps = 200,
+  }) async {
+    throw StateError('simulated baseline failure');
+  }
 }

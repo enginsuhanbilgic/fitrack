@@ -20,9 +20,15 @@ import 'session_dtos.dart';
 abstract class SessionRepository {
   /// Writes one `sessions` row + N `reps` rows + M `form_errors` rows in a
   /// single transaction. Returns the new session id.
+  ///
+  /// `concentricDurations` is index-aligned with `event.curlRepRecords` (or
+  /// with `event.repQualities` for non-curl sessions). Any `null` entry
+  /// persists as NULL in `reps.concentric_ms`. Empty list = write NULL for
+  /// every rep (pre-WP5.4 behavior + non-curl sessions).
   Future<int> insertCompletedSession(
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
+    List<Duration?> concentricDurations = const [],
   });
 
   /// History list source. Newest first (`started_at DESC`). `exercise = null`
@@ -59,6 +65,7 @@ class SqliteSessionRepository implements SessionRepository {
   Future<int> insertCompletedSession(
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
+    List<Duration?> concentricDurations = const [],
   }) async {
     return _db.transaction<int>((txn) async {
       final sessionId = await txn.insert('sessions', <String, Object?>{
@@ -83,6 +90,10 @@ class SqliteSessionRepository implements SessionRepository {
               r.repIndex >= 1 && r.repIndex <= event.repQualities.length
               ? event.repQualities[r.repIndex - 1]
               : null;
+          final concentricMs = _concentricMsAt(
+            concentricDurations,
+            r.repIndex - 1,
+          );
           await txn.insert('reps', <String, Object?>{
             'session_id': sessionId,
             'rep_index': r.repIndex,
@@ -94,7 +105,7 @@ class SqliteSessionRepository implements SessionRepository {
             'threshold_source': r.source.name,
             'bucket_updated': r.bucketUpdated ? 1 : 0,
             'rejected_outlier': r.rejectedOutlier ? 1 : 0,
-            // concentric_ms intentionally omitted — PR4 adds it.
+            'concentric_ms': concentricMs,
           });
         }
       } else {
@@ -103,6 +114,7 @@ class SqliteSessionRepository implements SessionRepository {
             'session_id': sessionId,
             'rep_index': i + 1,
             'quality': event.repQualities[i],
+            'concentric_ms': _concentricMsAt(concentricDurations, i),
           });
         }
       }
@@ -126,6 +138,13 @@ class SqliteSessionRepository implements SessionRepository {
     if (event.exercise != ExerciseType.bicepsCurl) return null;
     if (event.detectedView == CurlCameraView.unknown) return null;
     return event.detectedView.name;
+  }
+
+  /// Lookup `concentricDurations[i]` safely. Out-of-bounds / null → null
+  /// column. Callers do NOT need to pre-pad the list.
+  static int? _concentricMsAt(List<Duration?> durations, int index) {
+    if (index < 0 || index >= durations.length) return null;
+    return durations[index]?.inMilliseconds;
   }
 
   @override
@@ -200,9 +219,27 @@ class SqliteSessionRepository implements SessionRepository {
     required Duration window,
     int limitReps = 200,
   }) async {
-    // PR4 lands the real query. PR2 must not crash on an empty column; return
-    // an empty list so call-sites can treat "no baseline" uniformly.
-    return const <Duration>[];
+    // Newest-first, filtered by exercise + `started_at` within the window,
+    // and only rows where `concentric_ms IS NOT NULL` (pre-WP5.4 rows + any
+    // rep the analyzer failed to time stay out of the baseline).
+    final cutoff =
+        DateTime.now().millisecondsSinceEpoch - window.inMilliseconds;
+    final rows = await _db.rawQuery(
+      '''
+SELECT r.concentric_ms
+FROM reps AS r
+JOIN sessions AS s ON s.id = r.session_id
+WHERE s.exercise = ?
+  AND s.started_at >= ?
+  AND r.concentric_ms IS NOT NULL
+ORDER BY s.started_at DESC, r.rep_index ASC
+LIMIT ?
+''',
+      <Object?>[exercise.name, cutoff, limitReps],
+    );
+    return rows
+        .map((r) => Duration(milliseconds: r['concentric_ms'] as int))
+        .toList(growable: false);
   }
 
   // ── Row mappers ─────────────────────────────────────────
@@ -261,9 +298,17 @@ class InMemorySessionRepository implements SessionRepository {
   Future<int> insertCompletedSession(
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
+    List<Duration?> concentricDurations = const [],
   }) async {
     final id = _nextId++;
-    _sessions.add(_InMemorySession(id: id, event: event, startedAt: startedAt));
+    _sessions.add(
+      _InMemorySession(
+        id: id,
+        event: event,
+        startedAt: startedAt,
+        concentricDurations: List<Duration?>.unmodifiable(concentricDurations),
+      ),
+    );
     return id;
   }
 
@@ -337,7 +382,24 @@ class InMemorySessionRepository implements SessionRepository {
     required Duration window,
     int limitReps = 200,
   }) async {
-    return const <Duration>[];
+    final cutoff = DateTime.now().subtract(window);
+    final filtered =
+        _sessions
+            .where(
+              (s) =>
+                  s.event.exercise == exercise && !s.startedAt.isBefore(cutoff),
+            )
+            .toList()
+          ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
+    final out = <Duration>[];
+    for (final s in filtered) {
+      for (final d in s.concentricDurations) {
+        if (d == null) continue;
+        out.add(d);
+        if (out.length >= limitReps) return out;
+      }
+    }
+    return out;
   }
 
   /// Test-only snapshot of raw inserts.
@@ -370,10 +432,12 @@ class _InMemorySession {
     required this.id,
     required this.event,
     required this.startedAt,
+    this.concentricDurations = const [],
   });
   final int id;
   final WorkoutCompletedEvent event;
   final DateTime startedAt;
+  final List<Duration?> concentricDurations;
 }
 
 /// Back-compat shim for PR1 tests that observed inserts directly. PR2 prefers

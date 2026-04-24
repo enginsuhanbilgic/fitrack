@@ -357,7 +357,7 @@ void main() {
     });
 
     test(
-      'returns empty list in PR2 (column exists but not populated)',
+      'empty when concentricDurations not passed (pre-WP5.4 behavior)',
       () async {
         await repo.insertCompletedSession(
           buildCurlEvent(reps: 3),
@@ -370,7 +370,174 @@ void main() {
         expect(result, isEmpty);
       },
     );
+
+    test(
+      'returns durations within the window, newest-first, filtered by exercise',
+      () async {
+        // Old curl session: 35 days ago, 2 reps — OUT of 30-day window.
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 2),
+          startedAt: DateTime.now().subtract(const Duration(days: 35)),
+          concentricDurations: const [
+            Duration(milliseconds: 999),
+            Duration(milliseconds: 888),
+          ],
+        );
+        // Recent curl session: 5 days ago, 3 reps.
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 3),
+          startedAt: DateTime.now().subtract(const Duration(days: 5)),
+          concentricDurations: const [
+            Duration(milliseconds: 100),
+            Duration(milliseconds: 110),
+            Duration(milliseconds: 120),
+          ],
+        );
+        // Squat session: 2 days ago — must NOT bleed into curl results.
+        await repo.insertCompletedSession(
+          buildSquatEvent(reps: 2),
+          startedAt: DateTime.now().subtract(const Duration(days: 2)),
+          concentricDurations: const [
+            Duration(milliseconds: 500),
+            Duration(milliseconds: 600),
+          ],
+        );
+
+        final curl = await repo.recentConcentricDurations(
+          exercise: ExerciseType.bicepsCurl,
+          window: const Duration(days: 30),
+        );
+        expect(curl.map((d) => d.inMilliseconds).toList(), [100, 110, 120]);
+
+        final squat = await repo.recentConcentricDurations(
+          exercise: ExerciseType.squat,
+          window: const Duration(days: 30),
+        );
+        expect(squat.map((d) => d.inMilliseconds).toList(), [500, 600]);
+      },
+    );
+
+    test(
+      'skips rows where concentric_ms is NULL (mixed pre/post-WP5.4 data)',
+      () async {
+        // Older session with no durations written.
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 2),
+          startedAt: DateTime.now().subtract(const Duration(days: 3)),
+        );
+        // Recent session WITH durations.
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 2),
+          startedAt: DateTime.now().subtract(const Duration(days: 1)),
+          concentricDurations: const [
+            Duration(milliseconds: 250),
+            Duration(milliseconds: 260),
+          ],
+        );
+        final result = await repo.recentConcentricDurations(
+          exercise: ExerciseType.bicepsCurl,
+          window: const Duration(days: 30),
+        );
+        expect(result.map((d) => d.inMilliseconds).toList(), [250, 260]);
+      },
+    );
+
+    test('limitReps caps the returned list', () async {
+      await repo.insertCompletedSession(
+        buildCurlEvent(reps: 5),
+        startedAt: DateTime.now(),
+        concentricDurations: const [
+          Duration(milliseconds: 100),
+          Duration(milliseconds: 200),
+          Duration(milliseconds: 300),
+          Duration(milliseconds: 400),
+          Duration(milliseconds: 500),
+        ],
+      );
+      final result = await repo.recentConcentricDurations(
+        exercise: ExerciseType.bicepsCurl,
+        window: const Duration(days: 30),
+        limitReps: 2,
+      );
+      expect(result, hasLength(2));
+    });
   });
+
+  group(
+    'SqliteSessionRepository.insertCompletedSession — WP5.4 concentric_ms',
+    () {
+      late Database db;
+      late SqliteSessionRepository repo;
+
+      setUp(() async {
+        db = await openTestDb();
+        repo = SqliteSessionRepository(db);
+      });
+
+      tearDown(() async {
+        await db.close();
+      });
+
+      test(
+        'persists per-rep concentric_ms in reps table, aligned by rep_index',
+        () async {
+          await repo.insertCompletedSession(
+            buildCurlEvent(reps: 3),
+            startedAt: DateTime.now(),
+            concentricDurations: const [
+              Duration(milliseconds: 420),
+              null, // rep 2 missed the peak-reached timing
+              Duration(milliseconds: 380),
+            ],
+          );
+          final rows = await db.query('reps', orderBy: 'rep_index ASC');
+          expect(rows, hasLength(3));
+          expect(rows[0]['concentric_ms'], 420);
+          expect(rows[1]['concentric_ms'], isNull);
+          expect(rows[2]['concentric_ms'], 380);
+        },
+      );
+
+      test(
+        'missing entries (list shorter than reps) write NULL, no crash',
+        () async {
+          await repo.insertCompletedSession(
+            buildCurlEvent(reps: 4),
+            startedAt: DateTime.now(),
+            concentricDurations: const [
+              Duration(milliseconds: 100),
+              Duration(milliseconds: 120),
+            ],
+          );
+          final rows = await db.query('reps', orderBy: 'rep_index ASC');
+          expect(rows, hasLength(4));
+          expect(rows[0]['concentric_ms'], 100);
+          expect(rows[1]['concentric_ms'], 120);
+          expect(rows[2]['concentric_ms'], isNull);
+          expect(rows[3]['concentric_ms'], isNull);
+        },
+      );
+
+      test(
+        'non-curl session persists concentric_ms on repQualities-only path',
+        () async {
+          await repo.insertCompletedSession(
+            buildSquatEvent(reps: 3),
+            startedAt: DateTime.now(),
+            concentricDurations: const [
+              Duration(milliseconds: 700),
+              Duration(milliseconds: 720),
+              Duration(milliseconds: 740),
+            ],
+          );
+          final rows = await db.query('reps', orderBy: 'rep_index ASC');
+          expect(rows, hasLength(3));
+          expect(rows[0]['concentric_ms'], 700);
+          expect(rows[2]['concentric_ms'], 740);
+        },
+      );
+    },
+  );
 
   group('InMemorySessionRepository', () {
     late InMemorySessionRepository repo;
@@ -423,13 +590,37 @@ void main() {
     );
 
     test(
-      'recentConcentricDurations returns empty (parity with Sqlite stub)',
+      'recentConcentricDurations on empty repo returns empty list',
       () async {
         final result = await repo.recentConcentricDurations(
           exercise: ExerciseType.bicepsCurl,
           window: const Duration(days: 30),
         );
         expect(result, isEmpty);
+      },
+    );
+
+    test(
+      'recentConcentricDurations returns stored durations filtered by exercise + window',
+      () async {
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 2),
+          startedAt: DateTime.now().subtract(const Duration(days: 3)),
+          concentricDurations: const [
+            Duration(milliseconds: 150),
+            Duration(milliseconds: 160),
+          ],
+        );
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 1),
+          startedAt: DateTime.now().subtract(const Duration(days: 60)),
+          concentricDurations: const [Duration(milliseconds: 999)],
+        );
+        final result = await repo.recentConcentricDurations(
+          exercise: ExerciseType.bicepsCurl,
+          window: const Duration(days: 30),
+        );
+        expect(result.map((d) => d.inMilliseconds).toList(), [150, 160]);
       },
     );
   });

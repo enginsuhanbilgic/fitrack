@@ -142,6 +142,7 @@ void main() {
               required view,
               required minAngle,
               required maxAngle,
+              required concentricDuration,
             }) {
               commitCount++;
               committedSide = side;
@@ -198,6 +199,7 @@ void main() {
               required view,
               required minAngle,
               required maxAngle,
+              required concentricDuration,
             }) {
               commitCount++;
             },
@@ -300,6 +302,7 @@ void main() {
               required view,
               required minAngle,
               required maxAngle,
+              required concentricDuration,
             }) {
               commitCount++;
             },

@@ -4,13 +4,7 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="WP5.1: SQLite engine + ProfileRepository + JSON migration Closes #22">
-      <change beforePath="$PROJECT_DIR$/app/lib/app.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/app.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/services/db/session_repository.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/session_repository.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/view_models/workout_view_model_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/view_models/workout_view_model_test.dart" afterDir="false" />
-    </list>
+    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="WP5.3: History screen + reconstructed SummaryScreen Closes #24" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -233,7 +227,23 @@
       <option name="project" value="LOCAL" />
       <updated>1777064098881</updated>
     </task>
-    <option name="localTasksCounter" value="17" />
+    <task id="LOCAL-00017" summary="WP5.2: Session write path on workout completion Closes #23">
+      <option name="closed" value="true" />
+      <created>1777064848922</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1777064848922</updated>
+    </task>
+    <task id="LOCAL-00018" summary="WP5.3: History screen + reconstructed SummaryScreen Closes #24">
+      <option name="closed" value="true" />
+      <created>1777065690057</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1777065690057</updated>
+    </task>
+    <option name="localTasksCounter" value="19" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -264,7 +274,9 @@
     <MESSAGE value="feat: enhance camera and pose detection services with improved format handling and error logging" />
     <MESSAGE value="feat: initialize project structure with essential configuration files and dependencies, Week 11: per-user ROM profile + T2.4 dataset pipeline + data-driven thresholds" />
     <MESSAGE value="WP5.1: SQLite engine + ProfileRepository + JSON migration Closes #22" />
-    <option name="LAST_COMMIT_MESSAGE" value="WP5.1: SQLite engine + ProfileRepository + JSON migration Closes #22" />
+    <MESSAGE value="WP5.2: Session write path on workout completion Closes #23" />
+    <MESSAGE value="WP5.3: History screen + reconstructed SummaryScreen Closes #24" />
+    <option name="LAST_COMMIT_MESSAGE" value="WP5.3: History screen + reconstructed SummaryScreen Closes #24" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

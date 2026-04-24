@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../../core/constants.dart';
 import '../../core/rom_thresholds.dart';
 import '../../core/types.dart';
@@ -48,6 +50,22 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
   // ── Fatigue detection ───────────────────────────────────
   final List<Duration> _concentricDurations = [];
   bool _fatigueFired = false;
+
+  /// 30-day historical concentric durations from prior sessions (WP5.4).
+  /// When non-empty, the fatigue rule's baseline is raised to
+  /// `max(in-session firstWindowAvg, historicalMedian)` — a user whose
+  /// warmup reps are artificially slow still gets fatigue detected when
+  /// later reps slow below their true baseline. Empty list → analyzer
+  /// behaves exactly as pre-WP5.4 (backward compat).
+  final List<Duration> _historicalConcentricDurations;
+
+  /// Pure-Dart analyzer. Historical durations are a plain `List<Duration>` —
+  /// no service import bleed into `lib/engine/`. Default to `const []` so
+  /// every existing call-site (`CurlFormAnalyzer()`) compiles unchanged.
+  CurlFormAnalyzer({List<Duration> historicalConcentricDurations = const []})
+    : _historicalConcentricDurations = List<Duration>.unmodifiable(
+        historicalConcentricDurations,
+      );
 
   // ── Bilateral asymmetry (front view only) ───────────────
   /// Per-rep bilateral peak-angle readings, front view only.
@@ -297,6 +315,11 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
     }
 
     // Fatigue detection.
+    //
+    // Baseline = max(in-session first-window avg, 30-day historical median).
+    // Empty historical list collapses the max to `firstAvg` — backward-compat
+    // with pre-WP5.4 behavior. A warm-up-slow user still gets fatigue when
+    // later reps slow below their true historical baseline.
     if (!_fatigueFired && _concentricDurations.length >= kFatigueMinReps) {
       final firstAvg = _avgDuration(
         _concentricDurations.sublist(0, kFatigueWindowSize),
@@ -306,7 +329,9 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
           _concentricDurations.length - kFatigueWindowSize,
         ),
       );
-      if (firstAvg > 0 && lastAvg / firstAvg > kFatigueSlowdownRatio) {
+      final historicalMedian = _historicalMedianMs();
+      final baseline = math.max(firstAvg, historicalMedian);
+      if (baseline > 0 && lastAvg / baseline > kFatigueSlowdownRatio) {
         errors.add(FormError.fatigue);
         _fatigueFired = true;
       }
@@ -429,6 +454,29 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
     final totalMs = durations.fold<int>(0, (sum, d) => sum + d.inMilliseconds);
     return totalMs / durations.length;
   }
+
+  /// Median of the 30-day historical window in milliseconds. Returns 0.0 on
+  /// empty, which collapses `max(firstAvg, historicalMedian)` to `firstAvg` —
+  /// preserving pre-WP5.4 fatigue behavior for first-time curl users.
+  ///
+  /// Median (not mean) because a single anomalously-slow prior rep
+  /// (stretching mid-set, phone interruption, etc.) would pull a mean baseline
+  /// high enough to hide real fatigue on today's session.
+  double _historicalMedianMs() {
+    if (_historicalConcentricDurations.isEmpty) return 0.0;
+    final sorted =
+        _historicalConcentricDurations.map((d) => d.inMilliseconds).toList()
+          ..sort();
+    final n = sorted.length;
+    if (n.isOdd) return sorted[n ~/ 2].toDouble();
+    return (sorted[n ~/ 2 - 1] + sorted[n ~/ 2]) / 2.0;
+  }
+
+  /// Most recent rep's concentric duration. Set in `onPeakReached`; null
+  /// until the first rep's peak is reached this session. Consumed by
+  /// `CurlStrategy._commitRepSamples` so the VM can persist per-rep
+  /// `concentric_ms` (WP5.4).
+  Duration? get lastConcentricDuration => _lastConcentricDuration;
 
   double? _computeTorsoLen(PoseResult current, bool useLeft, bool useRight) {
     final l = useLeft

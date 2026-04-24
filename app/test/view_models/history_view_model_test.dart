@@ -49,6 +49,7 @@ class _ThrowingRepo implements SessionRepository {
   Future<int> insertCompletedSession(
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
+    List<Duration?> concentricDurations = const [],
   }) async => 0;
 
   @override
