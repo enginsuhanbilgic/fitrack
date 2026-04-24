@@ -13,14 +13,78 @@ class _StubBucket implements RomBucketLike {
 
 void main() {
   group('RomThresholds.global', () {
-    test('returns the kCurl* constants verbatim', () {
-      final t = RomThresholds.global();
+    // These tests assume the data-driven flag is on — which it is in shipping
+    // config (constants.dart). If the flag is ever flipped back to `false`
+    // (legacy `kCurl*` constants), these tests must be reworked rather than
+    // silently regress.
+    test('data-driven branch is active under kUseDataDrivenThresholds', () {
+      expect(
+        kUseDataDrivenThresholds,
+        isTrue,
+        reason:
+            'Test file assumes the data-driven branch. Flip this precondition '
+            'if the flag is intentionally set to false.',
+      );
+    });
 
-      expect(t.startAngle, kCurlStartAngle);
-      expect(t.peakAngle, kCurlPeakAngle);
-      expect(t.peakExitAngle, kCurlPeakExitAngle);
-      expect(t.endAngle, kCurlEndAngle);
+    test('front view returns the T2.4 front bucket', () {
+      final t = RomThresholds.global(CurlCameraView.front);
+
+      // Values from DefaultRomThresholds (default_rom_thresholds.dart).
+      expect(t.startAngle, closeTo(172.94, 0.01));
+      expect(t.peakAngle, closeTo(19.75, 0.01));
+      expect(t.peakExitAngle, closeTo(34.75, 0.01));
+      expect(t.endAngle, closeTo(171.94, 0.01));
       expect(t.source, ThresholdSource.global);
+    });
+
+    test('sideLeft view returns the T2.4 side-left bucket', () {
+      final t = RomThresholds.global(CurlCameraView.sideLeft);
+
+      expect(t.startAngle, closeTo(143.85, 0.01));
+      expect(t.peakAngle, closeTo(59.62, 0.01));
+      expect(t.peakExitAngle, closeTo(74.62, 0.01));
+      expect(t.endAngle, closeTo(142.85, 0.01));
+      expect(t.source, ThresholdSource.global);
+    });
+
+    test('sideRight mirrors sideLeft (bilateral symmetry)', () {
+      final left = RomThresholds.global(CurlCameraView.sideLeft);
+      final right = RomThresholds.global(CurlCameraView.sideRight);
+
+      expect(right.startAngle, left.startAngle);
+      expect(right.peakAngle, left.peakAngle);
+      expect(right.peakExitAngle, left.peakExitAngle);
+      expect(right.endAngle, left.endAngle);
+    });
+
+    test('no-arg call routes unknown → sideLeft bucket', () {
+      final unknown = RomThresholds.global();
+      final sideLeft = RomThresholds.global(CurlCameraView.sideLeft);
+
+      expect(unknown.startAngle, sideLeft.startAngle);
+      expect(unknown.peakAngle, sideLeft.peakAngle);
+    });
+
+    test('FSM-completability holds for every data-driven bucket', () {
+      for (final v in CurlCameraView.values) {
+        final t = RomThresholds.global(v);
+        expect(
+          t.endAngle,
+          greaterThan(t.peakExitAngle),
+          reason: 'view=$v produced uncompletable FSM: $t',
+        );
+        expect(
+          t.startAngle,
+          greaterThan(t.peakAngle),
+          reason: 'view=$v produced uncompletable FSM: $t',
+        );
+        expect(
+          t.peakExitAngle - t.peakAngle,
+          closeTo(kCurlPeakExitGap, 0.01),
+          reason: 'view=$v violates peakExitGap contract',
+        );
+      }
     });
   });
 
@@ -132,7 +196,17 @@ void main() {
 
   group('RomThresholds.toString', () {
     test('includes all four angles and the source label', () {
-      final s = RomThresholds.global().toString();
+      // Use a fixed synthetic threshold set so this test is independent of
+      // the live data-driven bucket values (which evolve with the dataset).
+      const t = RomThresholds(
+        startAngle: 160,
+        peakAngle: 70,
+        peakExitAngle: 85,
+        endAngle: 140,
+        source: ThresholdSource.global,
+      );
+
+      final s = t.toString();
 
       expect(s, contains('start=160.0'));
       expect(s, contains('peak=70.0'));

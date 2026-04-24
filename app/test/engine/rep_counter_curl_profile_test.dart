@@ -98,17 +98,41 @@ Future<void> _lockViewToFront(RepCounter counter) async {
 /// Each phase pumps enough frames to comfortably clear the 500ms FSM
 /// debounce — total wall-clock per rep ≈ 5–6s, well under the stuck
 /// limit but ample for transitions.
+///
+/// Defaults chosen to clear the widest data-driven threshold bucket
+/// (`DefaultRomThresholds.front`: start≈172.9, peak≈19.75). A test can
+/// still override both extremes for narrower-ROM scenarios.
 Future<RepSnapshot> _driveOneRep(
   RepCounter counter, {
-  double restAngle = 170,
-  double peakAngle = 50,
+  double restAngle = 180,
+  double peakAngle = 10,
 }) async {
   await _holdAt(counter, restAngle, frames: 8);
-  for (final a in [150.0, 130.0, 110.0, 90.0, 70.0, peakAngle]) {
+  for (final a in [
+    160.0,
+    140.0,
+    120.0,
+    100.0,
+    80.0,
+    60.0,
+    40.0,
+    20.0,
+    peakAngle,
+  ]) {
     await _holdAt(counter, a, frames: 8);
   }
   await _holdAt(counter, peakAngle, frames: 8);
-  for (final a in [70.0, 90.0, 110.0, 130.0, 150.0, restAngle]) {
+  for (final a in [
+    20.0,
+    40.0,
+    60.0,
+    80.0,
+    100.0,
+    120.0,
+    140.0,
+    160.0,
+    restAngle,
+  ]) {
     await _holdAt(counter, a, frames: 8);
   }
   return _holdAt(counter, restAngle, frames: 8);
@@ -163,25 +187,34 @@ void main() {
 
       final counter = RepCounter(curlThresholdsProvider: provider);
       await _lockViewToFront(counter);
-      // Sit at rest.
-      await _holdAt(counter, 170, frames: 8);
-      // Drive descent past the start gate. Hold until the 3-frame
-      // smoothed value clears 160°, so the FSM commits to CONCENTRIC.
-      await _holdAt(counter, 150, frames: 8);
+      // Sit at rest (above the widest start gate: front≈172.9).
+      await _holdAt(counter, 180, frames: 8);
+      // Drive descent past the start gate. Hold until the 3-frame smoothed
+      // value clears the start threshold so the FSM commits to CONCENTRIC.
+      await _holdAt(counter, 160, frames: 8);
       // FSM is now in CONCENTRIC. Arm the latch — any further provider
       // call returns poison.
       locked = true;
-      // Continue the descent through PEAK and back up. Provider is
-      // now poison; if FSM uses a fresh resolve, peak unreachable →
-      // no rep. Each phase holds well past the 500ms debounce.
-      for (final a in [130.0, 110.0, 90.0, 70.0, 50.0]) {
+      // Continue the descent through PEAK (front≈19.75) and back up.
+      // Provider is poison; if FSM re-resolves, peak unreachable → no rep.
+      for (final a in [140.0, 120.0, 100.0, 80.0, 60.0, 40.0, 20.0, 10.0]) {
         await _holdAt(counter, a, frames: 8);
       }
-      await _holdAt(counter, 50, frames: 8); // Hold at peak.
-      for (final a in [70.0, 90.0, 110.0, 130.0, 150.0, 170.0]) {
+      await _holdAt(counter, 10, frames: 8); // Hold at peak.
+      for (final a in [
+        20.0,
+        40.0,
+        60.0,
+        80.0,
+        100.0,
+        120.0,
+        140.0,
+        160.0,
+        180.0,
+      ]) {
         await _holdAt(counter, a, frames: 8);
       }
-      final snap = await _holdAt(counter, 170, frames: 8);
+      final snap = await _holdAt(counter, 180, frames: 8);
       expect(
         snap.reps,
         1,

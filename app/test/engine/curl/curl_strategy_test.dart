@@ -74,6 +74,22 @@ CurlCameraView lockView(CurlStrategy strategy, PoseResult pose) {
   return view;
 }
 
+/// Fixed legacy threshold provider for FSM-edge tests. These tests use hand-
+/// chosen angles (170/150/60/90/145) that cross the legacy constant gates
+/// (start=160, peak=70, peakExit=85, end=140). Injecting this provider keeps
+/// the tests insulated from `kUseDataDrivenThresholds` and data-set evolution.
+RomThresholds legacyThresholdsProvider(
+  ProfileSide _,
+  CurlCameraView _,
+  int _,
+) => const RomThresholds(
+  startAngle: kCurlStartAngle,
+  peakAngle: kCurlPeakAngle,
+  peakExitAngle: kCurlPeakExitAngle,
+  endAngle: kCurlEndAngle,
+  source: ThresholdSource.global,
+);
+
 /// Drive one frame through the strategy with an arbitrary smoothed elbow
 /// angle and the current FSM state. The pose is a neutral fixture — angle is
 /// what actually drives the FSM.
@@ -119,6 +135,7 @@ void main() {
 
       final strategy = CurlStrategy(
         side: ExerciseSide.right,
+        thresholdsProvider: legacyThresholdsProvider,
         onRepCommit:
             ({
               required side,
@@ -276,6 +293,7 @@ void main() {
     test('concentric aborted without reaching peak does not count', () {
       var commitCount = 0;
       final strategy = CurlStrategy(
+        thresholdsProvider: legacyThresholdsProvider,
         onRepCommit:
             ({
               required side,

@@ -247,7 +247,7 @@ class WorkoutViewModel extends ChangeNotifier {
     }
     final auto = _autoCalibrator.currentThresholds;
     if (auto != null) return auto;
-    return RomThresholds.global();
+    return RomThresholds.global(view);
   }
 
   void _handleCurlRepCommit({

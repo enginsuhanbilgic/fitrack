@@ -68,6 +68,10 @@ class CurlStrategy extends ExerciseStrategy {
   double? _minAngleThisRep;
   double? _maxAngleAtStart;
 
+  // Sentinel: overwritten on the first IDLE→CONCENTRIC tick (line 160) before
+  // any state that reads `_activeThresholds` (CONCENTRIC/PEAK/ECCENTRIC) can
+  // execute. Passing a real view here would still resolve to `sideLeft`
+  // because `_lockedView == unknown` at construction.
   RomThresholds _activeThresholds = RomThresholds.global();
 
   static RomThresholds _defaultGlobalProvider(
