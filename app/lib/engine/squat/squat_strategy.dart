@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 import '../../core/constants.dart';
 import '../../core/types.dart';
 import '../../models/landmark_types.dart';
@@ -168,9 +166,17 @@ class SquatStrategy extends ExerciseStrategy {
     if (allAbove90 && allReached100) {
       _longFemurDetected = true;
       _effectiveBottomAngle = kLongFemurBottomAngle;
-      debugPrint(
-        '[SquatStrategy] Long-femur detected — relaxing BOTTOM to $kLongFemurBottomAngle°',
-      );
+      // Log only in checked builds — keeps squat_strategy.dart pure-Dart
+      // so the offline replay harness (tools/dataset_analysis/dart_replay)
+      // can run without pulling in package:flutter.
+      assert(() {
+        // ignore: avoid_print
+        print(
+          '[SquatStrategy] Long-femur detected — relaxing BOTTOM to '
+          '$kLongFemurBottomAngle°',
+        );
+        return true;
+      }());
     }
   }
 

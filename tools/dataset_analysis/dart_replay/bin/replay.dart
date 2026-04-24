@@ -328,6 +328,14 @@ Future<List<DetectedRep>> _replayClip(File jsonl, VideoMeta meta) async {
   final detected = <DetectedRep>[];
   int lastReps = 0;
 
+  // Buffer the first `_setupWarmupFrames` frames and pump them through
+  // `updateSetupView` so the curl view-detector locks before any `update()`
+  // call. Invariant 9: curl drops rep commits while view is unknown, so
+  // without this warm-up the replay harness would report 0 reps on every
+  // clip regardless of FSM behavior.
+  const _setupWarmupFrames = 30;
+  final warmup = <PoseResult>[];
+
   final lines = jsonl
       .openRead()
       .transform(utf8.decoder)
@@ -355,7 +363,17 @@ Future<List<DetectedRep>> _replayClip(File jsonl, VideoMeta meta) async {
       );
     }
     final pose = PoseResult(landmarks: landmarks, inferenceTime: Duration.zero);
-    final snapshot = counter.onPose(pose);
+
+    // Warm up the view detector on the first N frames.
+    if (warmup.length < _setupWarmupFrames) {
+      warmup.add(pose);
+      counter.updateSetupView(pose);
+      if (warmup.length < _setupWarmupFrames) continue;
+      // Final warmup frame: fall through into the replay path for this
+      // same pose so no frame is double-counted nor skipped.
+    }
+
+    final snapshot = counter.update(pose);
     if (snapshot.reps > lastReps) {
       detected.add(
         DetectedRep(
@@ -375,7 +393,7 @@ Future<List<DetectedRep>> _replayClip(File jsonl, VideoMeta meta) async {
   return detected;
 }
 
-engine.ExerciseSide _sideFromArm(String arm) {
+ExerciseSide _sideFromArm(String arm) {
   switch (arm) {
     case 'left':
       return ExerciseSide.left;
