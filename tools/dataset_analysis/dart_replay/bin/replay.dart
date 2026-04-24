@@ -328,13 +328,14 @@ Future<List<DetectedRep>> _replayClip(File jsonl, VideoMeta meta) async {
   final detected = <DetectedRep>[];
   int lastReps = 0;
 
-  // Buffer the first `_setupWarmupFrames` frames and pump them through
-  // `updateSetupView` so the curl view-detector locks before any `update()`
-  // call. Invariant 9: curl drops rep commits while view is unknown, so
-  // without this warm-up the replay harness would report 0 reps on every
-  // clip regardless of FSM behavior.
-  const _setupWarmupFrames = 30;
-  final warmup = <PoseResult>[];
+  // Pump the first `setupWarmupFrames` frames through `updateSetupView` so
+  // the curl view-detector locks before any `update()` call. Invariant 9:
+  // curl drops rep commits while view is unknown, so without this warm-up
+  // the replay harness would report 0 reps on every clip regardless of FSM
+  // behavior. 30 frames comfortably exceeds `kViewDetectionConsensusFrames`
+  // (10) so any clip with a stable opening pose will lock.
+  const setupWarmupFrames = 30;
+  var warmupFrames = 0;
 
   final lines = jsonl
       .openRead()
@@ -365,10 +366,10 @@ Future<List<DetectedRep>> _replayClip(File jsonl, VideoMeta meta) async {
     final pose = PoseResult(landmarks: landmarks, inferenceTime: Duration.zero);
 
     // Warm up the view detector on the first N frames.
-    if (warmup.length < _setupWarmupFrames) {
-      warmup.add(pose);
+    if (warmupFrames < setupWarmupFrames) {
+      warmupFrames++;
       counter.updateSetupView(pose);
-      if (warmup.length < _setupWarmupFrames) continue;
+      if (warmupFrames < setupWarmupFrames) continue;
       // Final warmup frame: fall through into the replay path for this
       // same pose so no frame is double-counted nor skipped.
     }
