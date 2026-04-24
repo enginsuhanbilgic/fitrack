@@ -3,6 +3,7 @@ import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
 import '../services/app_services.dart';
 import '../services/db/profile_repository.dart';
+import 'history_screen.dart';
 import 'mlkit_test_screen.dart';
 import 'settings_screen.dart';
 import 'workout_screen.dart';
@@ -67,6 +68,13 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('FiTrack'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'History',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const HistoryScreen()),
+            ),
+          ),
           _GearWithBadge(
             badgeColor: _badgeColor,
             onTap: () async {

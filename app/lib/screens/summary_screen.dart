@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/types.dart';
+import '../services/db/session_dtos.dart';
 
 class SummaryScreen extends StatefulWidget {
   final ExerciseType exercise;
@@ -39,6 +40,38 @@ class SummaryScreen extends StatefulWidget {
     this.curlRepRecords = const [],
     this.curlBucketSummaries = const [],
   });
+
+  /// Rebuild a SummaryScreen from a persisted [SessionDetail] — used by the
+  /// History screen's reopen path. Widget tree is untouched; only the data
+  /// source changes. Bucket summaries are live-only state (engine ring-buffer
+  /// counters don't persist across sessions), so the Details panel's bucket
+  /// block collapses on reconstructed sessions — acceptable per plan.
+  factory SummaryScreen.fromSession(SessionDetail d, {Key? key}) {
+    final s = d.summary;
+    final curlRecords = d.reps
+        .map((r) => r.toCurlRepRecord())
+        .whereType<CurlRepRecord>()
+        .toList(growable: false);
+    final qualities = d.reps
+        .map((r) => r.quality ?? 0.0)
+        .toList(growable: false);
+    return SummaryScreen(
+      key: key,
+      exercise: s.exercise,
+      totalReps: s.totalReps,
+      totalSets: s.totalSets,
+      sessionDuration: s.duration,
+      averageQuality: s.averageQuality,
+      detectedView: s.detectedView ?? CurlCameraView.unknown,
+      repQualities: qualities,
+      fatigueDetected: s.fatigueDetected,
+      asymmetryDetected: s.asymmetryDetected,
+      eccentricTooFastCount: d.eccentricTooFastCount,
+      errorsTriggered: d.formErrors.keys.toSet(),
+      curlRepRecords: curlRecords,
+      // Bucket summaries are live-only state; no persisted source exists.
+    );
+  }
 
   @override
   State<SummaryScreen> createState() => _SummaryScreenState();

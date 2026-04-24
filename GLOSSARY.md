@@ -429,11 +429,17 @@ Introduced by WP5.1. The live surface is under `lib/services/db/` and `lib/servi
 
 - **Fatigue Baseline** *(PR4 consumes; column ships in PR1)* — The reference duration the curl analyzer compares against when deciding whether to emit `FormError.fatigue`. Since WP5.4 (planned), the baseline is `max(in-session first-window avg, 30-day historical median)`. Historical list comes from `SessionRepository.recentConcentricDurations(exercise: bicepsCurl, window: Duration(days: 30))`. On a user's first-ever curl session the list is empty and the baseline collapses to today's in-session-only value (backward-compat).
 
-### 13b.3 Scope plumbing
+### 13b.3 UI (WP5.3)
+
+- **HistoryViewModel** — `ChangeNotifier` backing the History screen. Owns `filter` (nullable `ExerciseType`, null = all), `loading`, `error`, and `sessions` state. `load()` + `setFilter()` + `deleteSession()`. Per-screen lifetime (disposed on pop). Internal `_disposed` guard swallows any notify that races with a late-resolving async chain.
+- **Workout History** — The UI surface (`HistoryScreen`, `SessionCard`, `HistoryDetailLoader`) that lists past `Session`s newest-first and reopens a reconstructed `SummaryScreen` via `SummaryScreen.fromSession(SessionDetail)`. Filter row: `[All · Curl · Squat · Push-up]` chips (plan-locked). Read-only in v1 — no swipe-to-delete or pin.
+- **`SummaryScreen.fromSession(SessionDetail)`** — Factory constructor on the existing `SummaryScreen`. Maps persisted `RepRow`s back into `CurlRepRecord`s via `RepRow.toCurlRepRecord()` and forwards into the unchanged named-parameter constructor. `curlBucketSummaries` is passed empty because bucket ring-buffer state is live-only, not persisted.
+
+### 13b.4 Scope plumbing
 
 - **AppServicesScope** — `InheritedWidget` at the `MaterialApp` root (`app/lib/app.dart`) that exposes `DatabaseService` + `ProfileRepository` + `SessionRepository` to descendants. Resolve via `AppServicesScope.of(context)` (registers a dependency) or `AppServicesScope.read(context)` (one-shot read for callbacks / `initState`). Avoids a global `MultiProvider` while still being a single app-lifetime singleton — matches the existing "providers are per-screen" convention.
 
-### 13b.4 Schema & versioning
+### 13b.5 Schema & versioning
 
 - **`kDbSchemaVersion`** — 1 at ship. Shared across all four WP5 PRs. `reps.concentric_ms` ships NULL-tolerant so PR4 starts writing without an ALTER TABLE. Bump when adding tables or non-NULL-tolerant columns.
 
