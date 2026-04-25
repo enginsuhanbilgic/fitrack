@@ -33,6 +33,24 @@ const _defaultVideosCsv = '../data/annotations/videos.csv';
 const _defaultRepsCsv = '../data/annotations/reps.csv';
 const _defaultOutMarkdown = '../data/derived/validation_report.md';
 
+/// Number of opening frames pumped through `RepCounter.updateSetupView` before
+/// the regular replay loop takes over.
+///
+/// Why this exists: the curl FSM's invariant 9 drops every rep commit while
+/// `_lockedView == CurlCameraView.unknown`. On the device, the view detector
+/// gets ~1s of pre-active video to lock in (`WorkoutPhase.setupCheck` →
+/// `countdown` → `active`). The replay harness has no such phase boundary —
+/// every JSONL frame is "active" — so without an explicit warm-up the detector
+/// would still be unknown when the first real rep completes, and that rep
+/// would be silently dropped. Without this, every clip reports 0 detected
+/// reps regardless of FSM behavior.
+///
+/// 30 frames comfortably exceeds `kViewDetectionConsensusFrames` (10) so any
+/// clip with a stable opening pose will lock. The 30th warmup frame falls
+/// through into the replay path for the SAME pose, so no frame is
+/// double-counted nor skipped.
+const int kViewDetectorWarmupFrames = 30;
+
 /// A rep boundary as reported by the FSM while replaying a clip.
 class DetectedRep {
   final int indexInClip;
@@ -326,15 +344,7 @@ Future<List<DetectedRep>> _replayClip(File jsonl, VideoMeta meta) async {
   );
 
   final detected = <DetectedRep>[];
-  int lastReps = 0;
-
-  // Pump the first `setupWarmupFrames` frames through `updateSetupView` so
-  // the curl view-detector locks before any `update()` call. Invariant 9:
-  // curl drops rep commits while view is unknown, so without this warm-up
-  // the replay harness would report 0 reps on every clip regardless of FSM
-  // behavior. 30 frames comfortably exceeds `kViewDetectionConsensusFrames`
-  // (10) so any clip with a stable opening pose will lock.
-  const setupWarmupFrames = 30;
+  var lastReps = 0;
   var warmupFrames = 0;
 
   final lines = jsonl
@@ -342,56 +352,70 @@ Future<List<DetectedRep>> _replayClip(File jsonl, VideoMeta meta) async {
       .transform(utf8.decoder)
       .transform(const LineSplitter());
 
-  var frameCounter = 0;
-  var lastTMs = 0;
   await for (final line in lines) {
     final trimmed = line.trim();
     if (trimmed.isEmpty) continue;
-    final obj = jsonDecode(trimmed) as Map<String, dynamic>;
-    final frame = (obj['frame'] as num).toInt();
-    final tMs = (obj['t_ms'] as num).toInt();
-    final landmarksRaw = obj['landmarks'] as List<dynamic>;
-    final landmarks = <PoseLandmark>[];
-    for (var i = 0; i < landmarksRaw.length; i++) {
-      final entry = landmarksRaw[i] as Map<String, dynamic>;
-      landmarks.add(
-        PoseLandmark(
-          type: i,
-          x: (entry['x'] as num).toDouble(),
-          y: (entry['y'] as num).toDouble(),
-          confidence: (entry['v'] as num).toDouble(),
-        ),
-      );
-    }
-    final pose = PoseResult(landmarks: landmarks, inferenceTime: Duration.zero);
+    final parsed = _parseFrame(trimmed);
 
-    // Warm up the view detector on the first N frames.
-    if (warmupFrames < setupWarmupFrames) {
+    // Pre-active warm-up: pump the first N frames through `updateSetupView`
+    // so the curl view-detector locks before any `update()` call. See the
+    // `kViewDetectorWarmupFrames` docstring for the invariant-9 reasoning.
+    // The final warmup frame falls through into the regular replay path for
+    // the same pose so no frame is double-counted nor skipped.
+    if (warmupFrames < kViewDetectorWarmupFrames) {
       warmupFrames++;
-      counter.updateSetupView(pose);
-      if (warmupFrames < setupWarmupFrames) continue;
-      // Final warmup frame: fall through into the replay path for this
-      // same pose so no frame is double-counted nor skipped.
+      counter.updateSetupView(parsed.pose);
+      if (warmupFrames < kViewDetectorWarmupFrames) continue;
     }
 
-    final snapshot = counter.update(pose);
+    final snapshot = counter.update(parsed.pose);
     if (snapshot.reps > lastReps) {
       detected.add(
         DetectedRep(
           indexInClip: snapshot.reps,
-          endFrame: frame,
-          endTimestampMs: tMs,
+          endFrame: parsed.frame,
+          endTimestampMs: parsed.tMs,
         ),
       );
       lastReps = snapshot.reps;
     }
-    frameCounter = frame;
-    lastTMs = tMs;
   }
-  // Unused now, but kept for future per-clip telemetry.
-  _silence(frameCounter);
-  _silence(lastTMs);
   return detected;
+}
+
+/// Decoded fields from one JSONL line. Tiny value type so the replay loop
+/// can read `parsed.pose`, `parsed.frame`, `parsed.tMs` without re-decoding.
+class _ParsedFrame {
+  const _ParsedFrame({
+    required this.pose,
+    required this.frame,
+    required this.tMs,
+  });
+  final PoseResult pose;
+  final int frame;
+  final int tMs;
+}
+
+_ParsedFrame _parseFrame(String jsonLine) {
+  final obj = jsonDecode(jsonLine) as Map<String, dynamic>;
+  final landmarksRaw = obj['landmarks'] as List<dynamic>;
+  final landmarks = <PoseLandmark>[];
+  for (var i = 0; i < landmarksRaw.length; i++) {
+    final entry = landmarksRaw[i] as Map<String, dynamic>;
+    landmarks.add(
+      PoseLandmark(
+        type: i,
+        x: (entry['x'] as num).toDouble(),
+        y: (entry['y'] as num).toDouble(),
+        confidence: (entry['v'] as num).toDouble(),
+      ),
+    );
+  }
+  return _ParsedFrame(
+    pose: PoseResult(landmarks: landmarks, inferenceTime: Duration.zero),
+    frame: (obj['frame'] as num).toInt(),
+    tMs: (obj['t_ms'] as num).toInt(),
+  );
 }
 
 ExerciseSide _sideFromArm(String arm) {
@@ -406,8 +430,6 @@ ExerciseSide _sideFromArm(String arm) {
       return ExerciseSide.right;
   }
 }
-
-void _silence(Object? _) {}
 
 // ---------------------------------------------------------------------------
 // Scoring — overlap-based TP/FP/FN per clip.

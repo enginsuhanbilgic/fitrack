@@ -1,8 +1,10 @@
-import 'dart:typed_data';
 import 'dart:ui';
+
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart'
     as mlkit;
+
 import '../../core/platform_config.dart';
 import '../../models/pose_landmark.dart';
 import '../../models/pose_result.dart';
@@ -18,7 +20,7 @@ class MlKitPoseService extends PoseService {
   @override
   Future<void> init() async {
     try {
-      print(
+      debugPrint(
         'DEBUG [ML Kit]: Initializing PoseDetector with base model, stream mode',
       );
       _detector = mlkit.PoseDetector(
@@ -27,9 +29,9 @@ class MlKitPoseService extends PoseService {
           mode: mlkit.PoseDetectionMode.stream,
         ),
       );
-      print('DEBUG [ML Kit]: PoseDetector initialized successfully');
+      debugPrint('DEBUG [ML Kit]: PoseDetector initialized successfully');
     } catch (e) {
-      print('ERROR [ML Kit]: Failed to initialize: $e');
+      debugPrint('ERROR [ML Kit]: Failed to initialize: $e');
       rethrow;
     }
   }
@@ -68,7 +70,7 @@ class MlKitPoseService extends PoseService {
         final type = entry.key;
         final lm = entry.value;
 
-        int typeIndex = type.index ?? 0;
+        final typeIndex = type.index;
         if (typeIndex >= 0 && typeIndex <= 32) {
           landmarks.add(
             PoseLandmark(
@@ -96,7 +98,7 @@ class MlKitPoseService extends PoseService {
   ) async {
     // On iOS, use processCameraImage instead
     // This method is kept for Android compatibility
-    print(
+    debugPrint(
       'ERROR [ML Kit]: processNv21 called on iOS - this won\'t work! Use processCameraImage',
     );
     return PoseResult(landmarks: [], inferenceTime: Duration.zero);

@@ -62,28 +62,36 @@ class CalibrationOverlay extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
             child: Column(
               children: [
-                const Text(
-                  'Calibration',
-                  style: TextStyle(
-                    color: Color(0xFF00E676),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.2,
+                Semantics(
+                  header: true,
+                  child: const Text(
+                    'Calibration',
+                    style: TextStyle(
+                      color: Color(0xFF00E676),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.2,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  errorMessage ??
-                      'Curl through your full natural range — '
-                          '$kCalibrationMinReps reps.',
-                  style: TextStyle(
-                    color: errorMessage == null
-                        ? Colors.white
-                        : Colors.orangeAccent,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
+                // liveRegion: error/instruction swap mid-flow — screen reader
+                // re-announces when errorMessage transitions from null to set.
+                Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    errorMessage ??
+                        'Curl through your full natural range — '
+                            '$kCalibrationMinReps reps.',
+                    style: TextStyle(
+                      color: errorMessage == null
+                          ? Colors.white
+                          : Colors.orangeAccent,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
-                  textAlign: TextAlign.center,
                 ),
               ],
             ),
@@ -95,15 +103,32 @@ class CalibrationOverlay extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _RepDots(detected: repsDetected, target: kCalibrationMinReps),
+              // Decorative dot row gets an accessible label so screen-reader
+              // users hear progress instead of nothing. liveRegion so each
+              // detected rep re-announces.
+              Semantics(
+                liveRegion: true,
+                label:
+                    'Calibration progress: $repsDetected of $kCalibrationMinReps reps detected',
+                excludeSemantics: true,
+                child: _RepDots(
+                  detected: repsDetected,
+                  target: kCalibrationMinReps,
+                ),
+              ),
               const SizedBox(height: 24),
               if (currentAngle != null)
-                Text(
-                  '${currentAngle!.toStringAsFixed(0)}°',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 64,
-                    fontWeight: FontWeight.w900,
+                Semantics(
+                  label:
+                      'Current elbow angle ${currentAngle!.toStringAsFixed(0)} degrees',
+                  excludeSemantics: true,
+                  child: Text(
+                    '${currentAngle!.toStringAsFixed(0)}°',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 64,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
             ],

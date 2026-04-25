@@ -34,7 +34,7 @@ void main() {
   setUp(() => det = RepBoundaryDetector());
   tearDown(() => det.dispose());
 
-  Future<List<RepExtreme>> _drive(List<double> angles) async {
+  Future<List<RepExtreme>> drive(List<double> angles) async {
     final got = <RepExtreme>[];
     final sub = det.extremes.listen(got.add);
     for (final a in angles) {
@@ -53,7 +53,7 @@ void main() {
         // the bottom of the curl. A single full down-up suffices.
         final stream = _curlCycle(topAngle: 170, bottomAngle: 60);
 
-        final got = await _drive(stream);
+        final got = await drive(stream);
 
         expect(got, hasLength(1));
         expect(got.first.maxAngle, closeTo(170, 2));
@@ -67,7 +67,7 @@ void main() {
         stream.addAll(_curlCycle(topAngle: 170, bottomAngle: 65));
       }
 
-      final got = await _drive(stream);
+      final got = await drive(stream);
       expect(got, hasLength(3));
       for (final rep in got) {
         expect(rep.minAngle, closeTo(65, 3));
@@ -81,14 +81,14 @@ void main() {
       // ROM = 30°, well below the 40° floor.
       final stream = _curlCycle(topAngle: 150, bottomAngle: 120);
 
-      final got = await _drive(stream);
+      final got = await drive(stream);
       expect(got, isEmpty);
     });
 
     test('a single jittery frame does not trigger a rep', () async {
       final stream = <double>[170, 170, 169, 170, 170, 170, 170, 170];
 
-      final got = await _drive(stream);
+      final got = await drive(stream);
       expect(got, isEmpty);
     });
   });
@@ -115,7 +115,7 @@ void main() {
           stream.add(59.25 + (170 - 59.25) * i / 19);
         }
 
-        final got = await _drive(stream);
+        final got = await drive(stream);
         expect(got, hasLength(1));
       },
     );
@@ -126,7 +126,7 @@ void main() {
         // Standard _curlCycle uses 15-frame descent — above the 8-frame dwell.
         // Guarantee the happy path is not regressed by the new guard.
         final stream = _curlCycle(topAngle: 170, bottomAngle: 60);
-        final got = await _drive(stream);
+        final got = await drive(stream);
         expect(got, hasLength(1));
       },
     );
@@ -142,7 +142,7 @@ void main() {
           // Attempt ascent immediately — 3 ascending frames to confirm.
           155, 160, 165,
         ];
-        final got = await _drive(stream);
+        final got = await drive(stream);
         expect(got, isEmpty);
       },
     );
@@ -161,7 +161,7 @@ void main() {
         // After reset, drive a complete cycle. With the bottom-emit algorithm
         // a single down-up suffices.
         final stream = _curlCycle(topAngle: 170, bottomAngle: 60);
-        final got = await _drive(stream);
+        final got = await drive(stream);
         expect(got, hasLength(1));
       },
     );

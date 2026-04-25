@@ -222,47 +222,58 @@ class _ExerciseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Opacity(
-      opacity: enabled ? 1.0 : 0.4,
-      child: Material(
-        color: const Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
+    // Material's InkWell does not expose a button role to screen readers when
+    // wrapped in a custom card surface; the Semantics wrapper makes the whole
+    // card a single tappable announcement ("Biceps Curl. Front camera. Button.")
+    // instead of three separate text reads. `excludeSemantics: true` on the
+    // inner content avoids each child Text being announced separately.
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: '$title. $subtitle',
+      excludeSemantics: true,
+      child: Opacity(
+        opacity: enabled ? 1.0 : 0.4,
+        child: Material(
+          color: const Color(0xFF1E1E1E),
           borderRadius: BorderRadius.circular(12),
-          onTap: enabled ? onTap : null,
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              children: [
-                Icon(icon, size: 36, color: const Color(0xFF00E676)),
-                const SizedBox(width: 20),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: enabled ? onTap : null,
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  Icon(icon, size: 36, color: const Color(0xFF00E676)),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        subtitle,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 13,
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 13,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                if (enabled)
-                  const Icon(Icons.chevron_right, color: Colors.white38),
-              ],
+                  if (enabled)
+                    const Icon(Icons.chevron_right, color: Colors.white38),
+                ],
+              ),
             ),
           ),
         ),

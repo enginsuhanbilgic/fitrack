@@ -62,33 +62,44 @@ class _RepCounterDisplayState extends State<RepCounterDisplay> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Rep count — big.
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '${widget.reps}',
-                style: const TextStyle(
-                  color: Color(0xFF00E676),
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
+          // Rep count — big. Wrapped in Semantics(liveRegion: true) so
+          // VoiceOver/TalkBack announce each rep in the active set as the
+          // count increments. excludeSemantics: true prevents each child Text
+          // from also being announced separately.
+          Semantics(
+            liveRegion: true,
+            label: '${widget.reps} reps in set ${widget.sets}',
+            excludeSemantics: true,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${widget.reps}',
+                  style: const TextStyle(
+                    color: Color(0xFF00E676),
+                    fontSize: 48,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'REPS',
-                    style: TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-                  Text(
-                    'Set ${widget.sets}',
-                    style: const TextStyle(color: Colors.white38, fontSize: 11),
-                  ),
-                ],
-              ),
-            ],
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'REPS',
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                    Text(
+                      'Set ${widget.sets}',
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 6),
 
@@ -117,17 +128,27 @@ class _RepCounterDisplayState extends State<RepCounterDisplay> {
           ),
 
           // Form errors — shown only when present, no extra chrome.
+          // Wrapped in liveRegion so corrective cues are announced as they
+          // appear (matches the TTS audio cue that fires on the same trigger).
           if (widget.activeErrors.isNotEmpty) ...[
             const SizedBox(height: 6),
-            for (final err in widget.activeErrors)
-              Text(
-                _errorLabel(err),
-                style: const TextStyle(
-                  color: Colors.redAccent,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
+            Semantics(
+              liveRegion: true,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final err in widget.activeErrors)
+                    Text(
+                      _errorLabel(err),
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                ],
               ),
+            ),
           ],
         ],
       ),

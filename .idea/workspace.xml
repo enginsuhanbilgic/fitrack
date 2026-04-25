@@ -4,7 +4,25 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="WP5.3: History screen + reconstructed SummaryScreen Closes #24" />
+    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="WP5.4: Historical fatigue baseline (engine feedback loop) Closes #25">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/ios/Podfile.lock" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Podfile.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/calibration_overlay.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/calibration_overlay.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/history_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/history_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/mlkit_test_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/mlkit_test_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/camera_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/camera_service.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/pose/mlkit_pose_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/pose/mlkit_pose_service.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pubspec.lock" beforeDir="false" afterPath="$PROJECT_DIR$/app/pubspec.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pubspec.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/app/pubspec.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/engine/curl/rep_boundary_detector_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/curl/rep_boundary_detector_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/engine/rep_counter_curl_profile_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/rep_counter_curl_profile_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tools/dataset_analysis/dart_replay/bin/replay.dart" beforeDir="false" afterPath="$PROJECT_DIR$/tools/dataset_analysis/dart_replay/bin/replay.dart" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -243,7 +261,15 @@
       <option name="project" value="LOCAL" />
       <updated>1777065690057</updated>
     </task>
-    <option name="localTasksCounter" value="19" />
+    <task id="LOCAL-00019" summary="WP5.4: Historical fatigue baseline (engine feedback loop) Closes #25">
+      <option name="closed" value="true" />
+      <created>1777067930808</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1777067930808</updated>
+    </task>
+    <option name="localTasksCounter" value="20" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -276,7 +302,8 @@
     <MESSAGE value="WP5.1: SQLite engine + ProfileRepository + JSON migration Closes #22" />
     <MESSAGE value="WP5.2: Session write path on workout completion Closes #23" />
     <MESSAGE value="WP5.3: History screen + reconstructed SummaryScreen Closes #24" />
-    <option name="LAST_COMMIT_MESSAGE" value="WP5.3: History screen + reconstructed SummaryScreen Closes #24" />
+    <MESSAGE value="WP5.4: Historical fatigue baseline (engine feedback loop) Closes #25" />
+    <option name="LAST_COMMIT_MESSAGE" value="WP5.4: Historical fatigue baseline (engine feedback loop) Closes #25" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

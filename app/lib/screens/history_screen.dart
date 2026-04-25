@@ -206,15 +206,85 @@ class _Body extends StatelessWidget {
         separatorBuilder: (_, _) => const SizedBox(height: 10),
         itemBuilder: (context, i) {
           final s = vm.sessions[i];
-          return SessionCard(
-            summary: s,
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => HistoryDetailLoader(sessionId: s.id),
+          // Dismissible wraps the card so swipe-to-delete operates at the
+          // list-item level (the session id keys the dismiss animation).
+          // Confirmation dialog matches the destructive-button idiom from
+          // SettingsScreen._confirmReset — red action, no-undo language.
+          return Dismissible(
+            key: ValueKey<int>(s.id),
+            direction: DismissDirection.endToStart,
+            background: const SizedBox.shrink(),
+            secondaryBackground: const _DeleteSwipeBackground(),
+            confirmDismiss: (_) => _confirmDelete(context),
+            onDismissed: (_) => vm.deleteSession(s.id),
+            child: SessionCard(
+              summary: s,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => HistoryDetailLoader(sessionId: s.id),
+                ),
               ),
             ),
           );
         },
+      ),
+    );
+  }
+
+  Future<bool> _confirmDelete(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete session?'),
+        content: const Text(
+          'This permanently removes the session and all its reps. '
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    return ok ?? false;
+  }
+}
+
+/// The red trailing-edge surface revealed during a left-swipe. Stateless;
+/// a sibling of the SessionCard inside Dismissible.secondaryBackground.
+class _DeleteSwipeBackground extends StatelessWidget {
+  const _DeleteSwipeBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.redAccent.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.delete_outline, color: Colors.white, size: 22),
+          SizedBox(width: 8),
+          Text(
+            'Delete',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

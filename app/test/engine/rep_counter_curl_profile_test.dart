@@ -158,6 +158,7 @@ void main() {
                 required CurlCameraView view,
                 required double minAngle,
                 required double maxAngle,
+                required Duration? concentricDuration,
               }) {
                 commitCount++;
               },
@@ -235,6 +236,7 @@ void main() {
                 required CurlCameraView view,
                 required double minAngle,
                 required double maxAngle,
+                required Duration? concentricDuration,
               }) {
                 commits.add(_Commit(side, view, minAngle, maxAngle));
               },
@@ -266,6 +268,7 @@ void main() {
               required CurlCameraView view,
               required double minAngle,
               required double maxAngle,
+              required Duration? concentricDuration,
             }) {
               commits.add(_Commit(side, view, minAngle, maxAngle));
             },
@@ -293,6 +296,7 @@ void main() {
               required CurlCameraView view,
               required double minAngle,
               required double maxAngle,
+              required Duration? concentricDuration,
             }) {
               commits++;
             },

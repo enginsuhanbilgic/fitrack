@@ -1,4 +1,6 @@
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
+
 import '../core/platform_config.dart';
 
 /// Thin wrapper around CameraController.
@@ -52,7 +54,7 @@ class CameraService {
     _ctrl!.startImageStream((CameraImage image) {
       frameCount++;
       if (frameCount % 30 == 0) {
-        print(
+        debugPrint(
           'DEBUG [CameraService]: Frame #$frameCount - ${image.width}x${image.height}, planes: ${image.planes.length}',
         );
       }

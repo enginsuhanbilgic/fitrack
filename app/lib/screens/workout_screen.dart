@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../core/constants.dart';
 import '../core/types.dart';
+import '../engine/rep_counter.dart' show RepSnapshot;
 import '../models/landmark_types.dart';
 import '../services/app_services.dart';
 import '../view_models/workout_view_model.dart';
@@ -528,16 +529,33 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           ),
 
         // ACTIVE — rep counter overlay.
+        //
+        // Wrapped in a `Selector<WorkoutViewModel, RepSnapshot>` so the
+        // counter's widget construction skips on frames where the snapshot
+        // didn't change (rep counter typically changes 1–2× per second; the
+        // pose pipeline notifies at 15–20 Hz). Without this, the
+        // `RepCounterDisplay` subtree was rebuilt on every pose frame even
+        // when only `landmarks` advanced.
+        //
+        // Note: the skeleton overlay above is intentionally NOT wrapped in
+        // a Selector. The VM publishes a fresh `landmarks` list every pose
+        // frame (via `LandmarkSmoother.smooth` returning a new List), so the
+        // `==` short-circuit would never fire. The skeleton's perf hedge is
+        // the existing `RepaintBoundary` (line 300+) which isolates the
+        // 15–20 Hz repaint into its own compositor layer.
         if (phase == WorkoutPhase.active)
           Positioned(
             left: 16,
             bottom: 32,
-            child: RepCounterDisplay(
-              reps: snapshot.reps,
-              sets: snapshot.sets,
-              state: snapshot.state,
-              jointAngle: snapshot.jointAngle,
-              activeErrors: snapshot.formErrors,
+            child: Selector<WorkoutViewModel, RepSnapshot>(
+              selector: (_, vm) => vm.snapshot,
+              builder: (_, snap, _) => RepCounterDisplay(
+                reps: snap.reps,
+                sets: snap.sets,
+                state: snap.state,
+                jointAngle: snap.jointAngle,
+                activeErrors: snap.formErrors,
+              ),
             ),
           ),
       ],

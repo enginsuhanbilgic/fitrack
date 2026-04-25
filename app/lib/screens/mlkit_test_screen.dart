@@ -32,19 +32,19 @@ class _MLKitTestScreenState extends State<MLKitTestScreen> {
 
   Future<void> _init() async {
     try {
-      print('TEST: Initializing camera...');
+      debugPrint('TEST: Initializing camera...');
       _camera = CameraService();
       await _camera.init();
-      print('TEST: Camera initialized');
+      debugPrint('TEST: Camera initialized');
 
-      print('TEST: Initializing ML Kit detector...');
+      debugPrint('TEST: Initializing ML Kit detector...');
       _detector = mlkit.PoseDetector(
         options: mlkit.PoseDetectorOptions(
           model: mlkit.PoseDetectionModel.base,
           mode: mlkit.PoseDetectionMode.stream,
         ),
       );
-      print('TEST: ML Kit detector initialized');
+      debugPrint('TEST: ML Kit detector initialized');
 
       _camera.startStream(_onFrame);
       if (mounted) {
@@ -54,7 +54,7 @@ class _MLKitTestScreenState extends State<MLKitTestScreen> {
         });
       }
     } catch (e) {
-      print('TEST ERROR: $e');
+      debugPrint('TEST ERROR: $e');
       if (mounted) {
         setState(() {
           _error = e.toString();
@@ -73,8 +73,12 @@ class _MLKitTestScreenState extends State<MLKitTestScreen> {
 
   Future<void> _processFrame(CameraImage image) async {
     try {
-      print('TEST: Processing frame #$_frameCount (${image.width}x${image.height})');
-      print('TEST: Plane 0: ${image.planes[0].bytes.length} bytes, bytesPerRow=${image.planes[0].bytesPerRow}');
+      debugPrint(
+        'TEST: Processing frame #$_frameCount (${image.width}x${image.height})',
+      );
+      debugPrint(
+        'TEST: Plane 0: ${image.planes[0].bytes.length} bytes, bytesPerRow=${image.planes[0].bytesPerRow}',
+      );
 
       final sw = Stopwatch()..start();
 
@@ -90,9 +94,9 @@ class _MLKitTestScreenState extends State<MLKitTestScreen> {
             bytesPerRow: image.planes.first.bytesPerRow,
           ),
         );
-        print('TEST: InputImage created with yuv420 format');
+        debugPrint('TEST: InputImage created with yuv420 format');
       } catch (e) {
-        print('TEST: yuv420 failed, trying nv21: $e');
+        debugPrint('TEST: yuv420 failed, trying nv21: $e');
         inputImage = mlkit.InputImage.fromBytes(
           bytes: image.planes.first.bytes,
           metadata: mlkit.InputImageMetadata(
@@ -107,32 +111,37 @@ class _MLKitTestScreenState extends State<MLKitTestScreen> {
       final poses = await _detector.processImage(inputImage);
       sw.stop();
 
-      print('TEST: Detection returned ${poses.length} poses in ${sw.elapsedMilliseconds}ms');
+      debugPrint(
+        'TEST: Detection returned ${poses.length} poses in ${sw.elapsedMilliseconds}ms',
+      );
 
       if (poses.isNotEmpty) {
         _detectionCount++;
         final pose = poses.first;
-        print('TEST: Pose has ${pose.landmarks.length} landmarks');
+        debugPrint('TEST: Pose has ${pose.landmarks.length} landmarks');
 
         final landmarks = <PoseLandmark>[];
         for (final entry in pose.landmarks.entries) {
           final lm = entry.value;
-          final typeValue = entry.key.index ?? 0;
+          final typeValue = entry.key.index;
 
           if (typeValue >= 0 && typeValue <= 32) {
-            landmarks.add(PoseLandmark(
-              type: typeValue,
-              x: (lm.x / image.width).clamp(0.0, 1.0),
-              y: (lm.y / image.height).clamp(0.0, 1.0),
-              confidence: lm.likelihood,
-            ));
+            landmarks.add(
+              PoseLandmark(
+                type: typeValue,
+                x: (lm.x / image.width).clamp(0.0, 1.0),
+                y: (lm.y / image.height).clamp(0.0, 1.0),
+                confidence: lm.likelihood,
+              ),
+            );
           }
         }
 
         if (mounted) {
           setState(() {
             _landmarks = landmarks;
-            _status = 'Detected #$_detectionCount - ${landmarks.length} landmarks - frame #$_frameCount';
+            _status =
+                'Detected #$_detectionCount - ${landmarks.length} landmarks - frame #$_frameCount';
           });
         }
       } else {
@@ -141,7 +150,7 @@ class _MLKitTestScreenState extends State<MLKitTestScreen> {
         }
       }
     } catch (e) {
-      print('TEST ERROR in processFrame: $e');
+      debugPrint('TEST ERROR in processFrame: $e');
     }
   }
 
@@ -156,9 +165,7 @@ class _MLKitTestScreenState extends State<MLKitTestScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: const Text('ML Kit Pose Test'),
-      ),
+      appBar: AppBar(title: const Text('ML Kit Pose Test')),
       body: _error != null
           ? Center(
               child: Padding(
@@ -178,65 +185,64 @@ class _MLKitTestScreenState extends State<MLKitTestScreen> {
               ),
             )
           : !_isInitialized
-              ? const Center(
-                  child: CircularProgressIndicator(color: Color(0xFF00E676)),
-                )
-              : Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (_camera.controller != null)
-                      ClipRect(
-                        child: FittedBox(
-                          fit: BoxFit.cover,
-                          child: SizedBox(
-                            width: _camera.controller!.value.previewSize!.height,
-                            height:
-                                _camera.controller!.value.previewSize!.width,
-                            child: CameraPreview(_camera.controller!),
-                          ),
-                        ),
-                      ),
-                    if (_landmarks.isNotEmpty)
-                      CustomPaint(
-                        painter: SkeletonPainter(
-                          landmarks: _landmarks,
-                          mirror: false,
-                        ),
-                        size: Size.infinite,
-                      ),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        color: Colors.black87,
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              _status,
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Frames: $_frameCount | Detections: $_detectionCount | Landmarks: ${_landmarks.length}',
-                              style: const TextStyle(
-                                color: Color(0xFF00E676),
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFF00E676)),
+            )
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                if (_camera.controller != null)
+                  ClipRect(
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      child: SizedBox(
+                        width: _camera.controller!.value.previewSize!.height,
+                        height: _camera.controller!.value.previewSize!.width,
+                        child: CameraPreview(_camera.controller!),
                       ),
                     ),
-                  ],
+                  ),
+                if (_landmarks.isNotEmpty)
+                  CustomPaint(
+                    painter: SkeletonPainter(
+                      landmarks: _landmarks,
+                      mirror: false,
+                    ),
+                    size: Size.infinite,
+                  ),
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    color: Colors.black87,
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _status,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Frames: $_frameCount | Detections: $_detectionCount | Landmarks: ${_landmarks.length}',
+                          style: const TextStyle(
+                            color: Color(0xFF00E676),
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
+              ],
+            ),
     );
   }
 }

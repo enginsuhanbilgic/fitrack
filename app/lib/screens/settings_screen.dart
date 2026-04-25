@@ -11,11 +11,14 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:share_plus/share_plus.dart';
+
 import '../core/constants.dart';
 import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
 import '../services/app_services.dart';
 import '../services/db/profile_repository.dart';
+import '../services/session_exporter.dart';
 import '../services/telemetry_log.dart';
 import 'workout_screen.dart';
 
@@ -100,6 +103,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Build sessions.csv + reps.csv in a temp dir, hand both to the system
+  /// share sheet. Failures land in a SnackBar — no telemetry tag because
+  /// share-sheet cancellation is a normal user flow, not an error.
+  Future<void> _exportSessions() async {
+    final repo = AppServicesScope.read(context).sessionRepository;
+    final messenger = ScaffoldMessenger.of(context);
+    final exporter = SessionExporter(repository: repo);
+    try {
+      final result = await exporter.exportToTempDir();
+      if (result.sessionCount == 0) {
+        if (!mounted) return;
+        messenger.showSnackBar(
+          const SnackBar(content: Text('No sessions to export yet.')),
+        );
+        return;
+      }
+      // share_plus 10.x legacy static API (`SharePlus.instance.share` lands
+      // in 11+). XFile is provided by cross_file, re-exported by share_plus.
+      await Share.shareXFiles(
+        <XFile>[XFile(result.sessionsCsv), XFile(result.repsCsv)],
+        subject: 'FiTrack workout export',
+        text:
+            'Exported ${result.sessionCount} sessions, '
+            '${result.repCount} reps.',
+      );
+    } catch (e, st) {
+      TelemetryLog.instance.log(
+        'export.failed',
+        e.toString(),
+        data: <String, Object?>{'stackTrace': st.toString()},
+      );
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('Export failed: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -135,6 +174,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   label: 'Diagnostics',
                   subtitle: '${TelemetryLog.instance.length} telemetry entries',
                   onTap: _openDiagnostics,
+                ),
+                const Divider(),
+                _ActionRow(
+                  icon: Icons.ios_share,
+                  label: 'Export sessions',
+                  subtitle: 'Share sessions.csv + reps.csv',
+                  onTap: _exportSessions,
                 ),
               ],
             ),
