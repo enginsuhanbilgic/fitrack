@@ -29,6 +29,10 @@ abstract class SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
+
+    /// Per-rep DTW similarity scores (0.0–1.0), index-aligned with
+    /// `event.curlRepRecords`. Null entries and missing indices persist as NULL.
+    List<double?> dtwSimilarities = const [],
   });
 
   /// History list source. Newest first (`started_at DESC`). `exercise = null`
@@ -66,6 +70,7 @@ class SqliteSessionRepository implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
+    List<double?> dtwSimilarities = const [],
   }) async {
     return _db.transaction<int>((txn) async {
       final sessionId = await txn.insert('sessions', <String, Object?>{
@@ -94,6 +99,9 @@ class SqliteSessionRepository implements SessionRepository {
             concentricDurations,
             r.repIndex - 1,
           );
+          final dtwSimilarity = r.repIndex - 1 < dtwSimilarities.length
+              ? dtwSimilarities[r.repIndex - 1]
+              : null;
           await txn.insert('reps', <String, Object?>{
             'session_id': sessionId,
             'rep_index': r.repIndex,
@@ -106,6 +114,7 @@ class SqliteSessionRepository implements SessionRepository {
             'bucket_updated': r.bucketUpdated ? 1 : 0,
             'rejected_outlier': r.rejectedOutlier ? 1 : 0,
             'concentric_ms': concentricMs,
+            'dtw_similarity': dtwSimilarity,
           });
         }
       } else {
@@ -283,6 +292,7 @@ LIMIT ?
           ? null
           : (row['rejected_outlier'] as int) == 1,
       concentricMs: row['concentric_ms'] as int?,
+      dtwSimilarity: (row['dtw_similarity'] as num?)?.toDouble(),
     );
   }
 }
@@ -299,6 +309,7 @@ class InMemorySessionRepository implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
+    List<double?> dtwSimilarities = const [],
   }) async {
     final id = _nextId++;
     _sessions.add(

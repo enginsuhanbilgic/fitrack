@@ -8,6 +8,7 @@ import '../../models/pose_result.dart';
 import '../angle_utils.dart';
 import '../form_analyzer_base.dart';
 import 'curl_form_analyzer_extras.dart';
+import 'dtw_scorer.dart';
 
 /// Form analyzer for biceps curl — view-aware.
 ///
@@ -59,13 +60,36 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
   /// behaves exactly as pre-WP5.4 (backward compat).
   final List<Duration> _historicalConcentricDurations;
 
+  /// Optional reference angle series for DTW scoring. Null = scoring disabled.
+  final List<double>? _referenceRepAngleSeries;
+
+  /// When true and [_referenceRepAngleSeries] is non-null, [scoreRep] returns
+  /// a [DtwScore]. Defaults to false so existing call sites are unchanged.
+  final bool _enableDtwScoring;
+
+  final DtwScorer _dtwScorer;
+
   /// Pure-Dart analyzer. Historical durations are a plain `List<Duration>` —
   /// no service import bleed into `lib/engine/`. Default to `const []` so
   /// every existing call-site (`CurlFormAnalyzer()`) compiles unchanged.
-  CurlFormAnalyzer({List<Duration> historicalConcentricDurations = const []})
-    : _historicalConcentricDurations = List<Duration>.unmodifiable(
-        historicalConcentricDurations,
-      );
+  CurlFormAnalyzer({
+    List<Duration> historicalConcentricDurations = const [],
+    List<double>? referenceRepAngleSeries,
+    bool enableDtwScoring = false,
+    DtwScorer? dtwScorer,
+  }) : _historicalConcentricDurations = List<Duration>.unmodifiable(
+         historicalConcentricDurations,
+       ),
+       _referenceRepAngleSeries = referenceRepAngleSeries,
+       _enableDtwScoring = enableDtwScoring,
+       _dtwScorer = dtwScorer ?? DtwScorer();
+
+  /// Score a completed rep's angle trace against the reference.
+  /// Returns null when scoring is disabled or no reference is available.
+  DtwScore? scoreRep(List<double> candidate) {
+    if (!_enableDtwScoring || _referenceRepAngleSeries == null) return null;
+    return _dtwScorer.score(candidate, _referenceRepAngleSeries);
+  }
 
   // ── Bilateral asymmetry (front view only) ───────────────
   /// Per-rep bilateral peak-angle readings, front view only.

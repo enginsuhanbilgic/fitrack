@@ -5,7 +5,7 @@
 > text must use these exact terms. If you need a new term, add it here first,
 > then use it elsewhere.
 >
-> **Last updated:** 2026-04-20 · **Maintainer duty:** any contributor who
+> **Last updated:** 2026-04-25 · **Maintainer duty:** any contributor who
 > coins a term is responsible for updating this file in the same PR.
 
 ---
@@ -441,11 +441,31 @@ Introduced by WP5.1. The live surface is under `lib/services/db/` and `lib/servi
 
 ### 13b.5 Schema & versioning
 
-- **`kDbSchemaVersion`** — 1 at ship. Shared across all four WP5 PRs. `reps.concentric_ms` ships NULL-tolerant so PR4 starts writing without an ALTER TABLE. Bump when adding tables or non-NULL-tolerant columns.
+- **`kDbSchemaVersion`** — 2 as of T5.3 (was 1 across WP5 PRs 1–4). v2 adds `preferences` table + `reps.dtw_similarity REAL` column. `onUpgrade` is additive; v1 installs upgrade cleanly. Bump when adding tables or non-NULL-tolerant columns.
 
 - **`profiles.schema_version`** — Per-row wrapper tag (independent of `CurlRomProfile.schemaVersion` embedded in `profile_json`). Exists so the row-wrapper can evolve separately from the engine's JSON blob.
 
 - **`.migrated.backup`** — Suffix applied to legacy `biceps_curl.json` after successful migration. Collision-safe via `.N` uniquification. User can manually rename back to roll back PR1 on-device.
+
+---
+
+## 13c. DTW Reference Scoring (T5.3, 2026-04-25)
+
+Introduced by T5.3 Layer 1. All terms below are opt-in — the feature is gated behind a `PreferencesRepository` toggle and has no effect on the default workout flow.
+
+| Term | Meaning |
+|---|---|
+| **DtwScorer** | Pure-Dart class in `engine/curl/dtw_scorer.dart`. Compares two angle traces using Dynamic Time Warping with a Sakoe-Chiba band (width=8). Both series are amplitude-normalized and resampled to 64 samples before comparison. |
+| **DtwScore** | Immutable value class: `similarity` (0.0–1.0, clamped) + `rawDistance` (unnormalized, for diagnostics). `similarity = 1 / (1 + raw/64)`. |
+| **Sakoe-Chiba band** | DTW path constraint: the warp path may not deviate more than `_kBandWidth = 8` steps from the diagonal. Prevents degenerate alignments (e.g. collapsing the entire candidate onto a single reference point) and keeps complexity O(n × band) rather than O(n²). |
+| **Form Match card** | The `SummaryScreen` card that shows `(avg_similarity × 100).round()%` after a session where DTW scoring was enabled. Hidden when `dtwSimilarities` is empty or all-null (toggle was off, or session predates the feature). |
+| **ReferenceRepSource** | Abstract interface (`services/reference_reps/reference_rep_source.dart`). `forBucket(CurlCameraView) → List<double>?`. Layer 1 ships `ConstReferenceRepSource`; Layer 2 will introduce `PersonalReferenceRepSource` without touching this interface or the engine. |
+| **ConstReferenceRepSource** | Layer 1 concrete impl. Delegates to `DefaultReferenceReps.forBucket(view)`. Returns `null` for `sideRight` and `unknown` (no data yet). |
+| **DefaultReferenceReps** | Utility class in `core/default_reference_reps.dart` (private constructor). Holds hand-curated 64-sample median-good-rep angle traces from the T2.4 dataset: `front:both` (n=9) and `side:left` (n=4). A follow-up codegen step will emit this file automatically from Phase D median-good-rep selection. |
+| **PreferencesRepository** | Abstract key/value settings interface in `services/db/preferences_repository.dart`. Backed by the `preferences` SQLite table (schema v2). Current keys: `enable_dtw_scoring`. Designed to be reusable for future toggles (TTS, haptics, units). |
+| **enable_dtw_scoring** | The `preferences` table key for the DTW toggle. Defaults to `false`. Set via Settings → "Reference Rep Scoring (Beta)" switch. |
+| **angle buffer** | `WorkoutViewModel._currentRepAngles` — the per-rep host-side buffer that accumulates `snapshot.jointAngle` values during CONCENTRIC/PEAK/ECCENTRIC phases. Cleared on rep commit and on IDLE→CONCENTRIC. Scored by `RepCounter.scoreCurlRep()` at commit time. Kept in the ViewModel (not the engine) to preserve engine purity (CLAUDE.md hard rule). |
+| **Layer 1 / Layer 2** | Layered architecture for reference reps. Layer 1 (shipped): textbook gold-standard via `ConstReferenceRepSource`. Layer 2 (reserved seam): per-user personal reference via `PersonalReferenceRepSource`, backed by a `personal_references` SQLite table, falling back to Layer 1. No engine changes needed for Layer 2. |
 
 ---
 

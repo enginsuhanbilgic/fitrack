@@ -24,6 +24,9 @@ class SummaryScreen extends StatefulWidget {
   /// the caller side — summary just renders what it gets.
   final List<CurlProfileBucketSummary> curlBucketSummaries;
 
+  /// Per-rep DTW similarity scores (0.0–1.0). Empty or all-null = card hidden.
+  final List<double?> dtwSimilarities;
+
   const SummaryScreen({
     super.key,
     required this.exercise,
@@ -39,6 +42,7 @@ class SummaryScreen extends StatefulWidget {
     this.errorsTriggered = const {},
     this.curlRepRecords = const [],
     this.curlBucketSummaries = const [],
+    this.dtwSimilarities = const [],
   });
 
   /// Rebuild a SummaryScreen from a persisted [SessionDetail] — used by the
@@ -69,6 +73,9 @@ class SummaryScreen extends StatefulWidget {
       eccentricTooFastCount: d.eccentricTooFastCount,
       errorsTriggered: d.formErrors.keys.toSet(),
       curlRepRecords: curlRecords,
+      dtwSimilarities: d.reps
+          .map((r) => r.dtwSimilarity)
+          .toList(growable: false),
       // Bucket summaries are live-only state; no persisted source exists.
     );
   }
@@ -94,6 +101,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
   List<CurlRepRecord> get curlRepRecords => widget.curlRepRecords;
   List<CurlProfileBucketSummary> get curlBucketSummaries =>
       widget.curlBucketSummaries;
+  List<double?> get dtwSimilarities => widget.dtwSimilarities;
 
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -229,6 +237,75 @@ class _SummaryScreenState extends State<SummaryScreen> {
     ThresholdSource.warmup => const Color(0xFFFFB300),
     ThresholdSource.global => const Color(0xFF9E9E9E),
   };
+
+  Widget _buildFormMatchCard() {
+    final scores = dtwSimilarities.whereType<double>().toList();
+    final avg = scores.reduce((a, b) => a + b) / scores.length;
+    final pct = (avg * 100).round();
+    final color = avg >= 0.80
+        ? const Color(0xFF00E676)
+        : avg >= 0.60
+        ? const Color(0xFFFFB300)
+        : const Color(0xFFFF5252);
+    final subtitle = avg >= 0.85
+        ? 'Your reps closely match the reference technique.'
+        : avg >= 0.70
+        ? 'Good alignment with reference form. A few deviations noted.'
+        : avg >= 0.55
+        ? 'Moderate match. Focus on the full range and tempo.'
+        : 'Low match. Review technique and consider recalibrating.';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.4), width: 1),
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.compare_arrows_rounded, color: color, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'Form Match (Beta)',
+                style: TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                '$pct',
+                style: TextStyle(
+                  fontSize: 56,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+              ),
+              Text(
+                '%',
+                style: TextStyle(
+                  fontSize: 24,
+                  color: color.withValues(alpha: 0.7),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildDetailsCard() {
     final rejected = curlRepRecords.where((r) => r.rejectedOutlier).length;
@@ -714,6 +791,12 @@ class _SummaryScreenState extends State<SummaryScreen> {
             ),
           ),
           const SizedBox(height: 16),
+
+          // [3.5] Form Match Card (DTW scoring — opt-in, hidden when no scores)
+          if (dtwSimilarities.any((s) => s != null)) ...[
+            _buildFormMatchCard(),
+            const SizedBox(height: 16),
+          ],
 
           // [4] Per-Rep Quality Bar Chart
           if (repQualities.isNotEmpty) ...[

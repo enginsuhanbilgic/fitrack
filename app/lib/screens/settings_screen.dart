@@ -35,6 +35,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   CurlRomProfile? _profile;
   bool _loading = true;
   bool _showDetails = false;
+  bool _dtwScoringEnabled = false;
 
   @override
   void didChangeDependencies() {
@@ -48,12 +49,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _reload() async {
     setState(() => _loading = true);
+    final services = AppServicesScope.of(context);
     final p = await _repository.loadCurl();
+    final dtw = await services.preferencesRepository.getEnableDtwScoring();
     if (!mounted) return;
     setState(() {
       _profile = p;
+      _dtwScoringEnabled = dtw;
       _loading = false;
     });
+  }
+
+  Future<void> _setDtwScoring(bool value) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setEnableDtwScoring(value);
+    TelemetryLog.instance.log(
+      'preferences.dtw_scoring_toggled',
+      'enabled=$value',
+    );
+    if (!mounted) return;
+    setState(() => _dtwScoringEnabled = value);
   }
 
   Future<void> _confirmReset() async {
@@ -181,6 +196,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   label: 'Export sessions',
                   subtitle: 'Share sessions.csv + reps.csv',
                   onTap: _exportSessions,
+                ),
+                const Divider(),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Reference Rep Scoring (Beta)'),
+                  subtitle: const Text(
+                    'Compare your form against a textbook-correct rep.',
+                  ),
+                  value: _dtwScoringEnabled,
+                  onChanged: _setDtwScoring,
                 ),
               ],
             ),

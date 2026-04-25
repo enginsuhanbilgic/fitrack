@@ -50,6 +50,7 @@ class _ThrowingRepo implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
+    List<double?> dtwSimilarities = const [],
   }) async => 0;
 
   @override
@@ -190,6 +191,91 @@ void main() {
       await vm.deleteSession(id);
       expect(vm.sessions, hasLength(1));
       expect(await repo.getSession(id), isNull);
+      vm.dispose();
+    });
+  });
+
+  group('HistoryViewModel.loadMore (pagination)', () {
+    /// Seeds [repo] with [count] curl sessions and returns the inserted ids.
+    Future<void> seed(InMemorySessionRepository repo, int count) async {
+      for (var i = 0; i < count; i++) {
+        await repo.insertCompletedSession(
+          _curlEvent(reps: i + 1),
+          startedAt: DateTime(2026, 1, 1).add(Duration(days: i)),
+        );
+      }
+    }
+
+    test('120 sessions load in two pages of 50 + one page of 20', () async {
+      final repo = InMemorySessionRepository();
+      await seed(repo, 120);
+
+      final vm = HistoryViewModel(repository: repo, pageSize: 50);
+      await vm.load();
+      expect(vm.sessions, hasLength(50));
+      expect(vm.hasMore, isTrue);
+
+      await vm.loadMore();
+      expect(vm.sessions, hasLength(100));
+      expect(vm.hasMore, isTrue);
+
+      await vm.loadMore();
+      expect(vm.sessions, hasLength(120));
+      expect(vm.hasMore, isFalse);
+
+      vm.dispose();
+    });
+
+    test('loadMore is a no-op after reaching end', () async {
+      final repo = InMemorySessionRepository();
+      await seed(repo, 10);
+
+      final vm = HistoryViewModel(repository: repo, pageSize: 50);
+      await vm.load();
+      expect(vm.sessions, hasLength(10));
+      expect(vm.hasMore, isFalse);
+
+      var notifyCount = 0;
+      vm.addListener(() => notifyCount++);
+      await vm.loadMore();
+      expect(notifyCount, 0, reason: 'no-op should not notify');
+      expect(vm.sessions, hasLength(10));
+      vm.dispose();
+    });
+
+    test('pull-to-refresh (load) resets to first page', () async {
+      final repo = InMemorySessionRepository();
+      await seed(repo, 80);
+
+      final vm = HistoryViewModel(repository: repo, pageSize: 50);
+      await vm.load();
+      await vm.loadMore();
+      expect(vm.sessions, hasLength(80));
+
+      // Simulate pull-to-refresh.
+      await vm.load();
+      expect(vm.sessions, hasLength(50));
+      expect(vm.hasMore, isTrue);
+      vm.dispose();
+    });
+
+    test('filter change resets pagination', () async {
+      final repo = InMemorySessionRepository();
+      await seed(repo, 60); // curl sessions
+      for (var i = 0; i < 5; i++) {
+        await repo.insertCompletedSession(
+          _squatEvent(reps: i + 1),
+          startedAt: DateTime(2026, 6, 1).add(Duration(days: i)),
+        );
+      }
+
+      final vm = HistoryViewModel(repository: repo, pageSize: 50);
+      await vm.load();
+      expect(vm.sessions, hasLength(50));
+
+      await vm.setFilter(ExerciseType.squat);
+      expect(vm.sessions, hasLength(5));
+      expect(vm.hasMore, isFalse);
       vm.dispose();
     });
   });

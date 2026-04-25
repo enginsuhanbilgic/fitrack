@@ -20,6 +20,7 @@ import 'package:camera/camera.dart';
 import 'package:fitrack/core/types.dart';
 import 'package:fitrack/models/pose_result.dart';
 import 'package:fitrack/services/camera_service.dart';
+import 'package:fitrack/services/db/preferences_repository.dart';
 import 'package:fitrack/services/db/profile_repository.dart';
 import 'package:fitrack/services/db/session_dtos.dart';
 import 'package:fitrack/services/db/session_repository.dart';
@@ -98,6 +99,7 @@ WorkoutViewModel buildVm({
     tts: _FakeTtsService(),
     profileRepository: profileRepository ?? InMemoryProfileRepository(),
     sessionRepository: sessionRepository ?? InMemorySessionRepository(),
+    preferencesRepository: InMemoryPreferencesRepository(),
   );
 }
 
@@ -109,6 +111,7 @@ class _ThrowingSessionRepository implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
+    List<double?> dtwSimilarities = const [],
   }) async {
     throw StateError('simulated persistence failure');
   }

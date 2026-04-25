@@ -65,6 +65,7 @@ class RepRow {
     this.bucketUpdated,
     this.rejectedOutlier,
     this.concentricMs,
+    this.dtwSimilarity,
   });
 
   final int repIndex;
@@ -79,6 +80,10 @@ class RepRow {
 
   /// Populated only on WP5.4+. NULL on rows written by WP5.2/WP5.3 builds.
   final int? concentricMs;
+
+  /// DTW similarity score 0.0–1.0 vs reference rep. NULL when scoring was
+  /// disabled or session predates T5.3.
+  final double? dtwSimilarity;
 
   /// Rebuild a [CurlRepRecord] when every curl-specific field is present;
   /// return null for squat/push-up rows (PR3 uses `.whereType<CurlRepRecord>()`

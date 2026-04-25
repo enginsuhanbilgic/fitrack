@@ -45,6 +45,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       forceCalibration: widget.forceCalibration,
       profileRepository: services.profileRepository,
       sessionRepository: services.sessionRepository,
+      preferencesRepository: services.preferencesRepository,
     );
     _completionSub = _vm.completionEvents.listen(_onWorkoutCompleted);
     _vm.init();

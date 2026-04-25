@@ -2,14 +2,15 @@ import '../core/constants.dart';
 import '../core/types.dart';
 import '../models/pose_result.dart';
 import 'curl/curl_strategy.dart';
+import 'curl/dtw_scorer.dart';
 import 'exercise_strategy.dart';
 import 'push_up/push_up_strategy.dart';
 import 'squat/squat_strategy.dart';
 
-// Typedefs are re-exported here so existing call sites keep importing them
-// from `rep_counter.dart` unchanged.
+// Typedefs and DTW types re-exported so call sites don't need extra imports.
 export 'curl/curl_strategy.dart'
     show RomThresholdsProvider, CurlRepCommitCallback;
+export 'curl/dtw_scorer.dart' show DtwScore;
 
 /// Snapshot returned after every frame — everything the UI needs.
 class RepSnapshot {
@@ -75,6 +76,8 @@ class RepCounter {
     RomThresholdsProvider? curlThresholdsProvider,
     CurlRepCommitCallback? onCurlRepCommit,
     List<Duration> curlHistoricalConcentricDurations = const [],
+    List<double>? curlReferenceRepAngleSeries,
+    bool curlEnableDtwScoring = false,
   }) {
     _strategy = _buildStrategy(
       exercise: exercise,
@@ -82,6 +85,8 @@ class RepCounter {
       curlThresholdsProvider: curlThresholdsProvider,
       onCurlRepCommit: onCurlRepCommit,
       curlHistoricalConcentricDurations: curlHistoricalConcentricDurations,
+      curlReferenceRepAngleSeries: curlReferenceRepAngleSeries,
+      curlEnableDtwScoring: curlEnableDtwScoring,
     );
   }
 
@@ -91,12 +96,16 @@ class RepCounter {
     RomThresholdsProvider? curlThresholdsProvider,
     CurlRepCommitCallback? onCurlRepCommit,
     List<Duration> curlHistoricalConcentricDurations = const [],
+    List<double>? curlReferenceRepAngleSeries,
+    bool curlEnableDtwScoring = false,
   }) => switch (exercise) {
     ExerciseType.bicepsCurl => CurlStrategy(
       side: side,
       thresholdsProvider: curlThresholdsProvider,
       onRepCommit: onCurlRepCommit,
       historicalConcentricDurations: curlHistoricalConcentricDurations,
+      referenceRepAngleSeries: curlReferenceRepAngleSeries,
+      enableDtwScoring: curlEnableDtwScoring,
     ),
     ExerciseType.squat => SquatStrategy(),
     ExerciseType.pushUp => PushUpStrategy(),
@@ -182,6 +191,14 @@ class RepCounter {
     _lastErrors = const [];
     _lastAngle = null;
     _strategy.onReset();
+  }
+
+  /// Score a candidate angle trace against the curl reference rep.
+  /// Returns null for non-curl exercises or when DTW scoring is disabled.
+  DtwScore? scoreCurlRep(List<double> candidate) {
+    final strategy = _strategy;
+    if (strategy is! CurlStrategy) return null;
+    return strategy.scoreRep(candidate);
   }
 
   // ── Internals ─────────────────────────────────────────────────────

@@ -139,13 +139,40 @@ class _Chip extends StatelessWidget {
   }
 }
 
-class _Body extends StatelessWidget {
+class _Body extends StatefulWidget {
   const _Body({required this.vm});
 
   final HistoryViewModel vm;
 
   @override
+  State<_Body> createState() => _BodyState();
+}
+
+class _BodyState extends State<_Body> {
+  late final ScrollController _scrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController()..addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    final pos = _scrollController.position;
+    if (pos.pixels >= pos.maxScrollExtent - 200) {
+      widget.vm.loadMore();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final vm = widget.vm;
     if (vm.loading && vm.sessions.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -162,9 +189,9 @@ class _Body extends StatelessWidget {
                 size: 40,
               ),
               const SizedBox(height: 12),
-              Text(
+              const Text(
                 "Couldn't load history.",
-                style: const TextStyle(color: Colors.white, fontSize: 16),
+                style: TextStyle(color: Colors.white, fontSize: 16),
               ),
               const SizedBox(height: 6),
               Text(
@@ -198,13 +225,24 @@ class _Body extends StatelessWidget {
         ),
       );
     }
+
+    // +1 for the footer sentinel/spinner row.
+    final itemCount = vm.sessions.length + 1;
+
     return RefreshIndicator(
       onRefresh: vm.load,
       child: ListView.separated(
+        controller: _scrollController,
         padding: const EdgeInsets.all(12),
-        itemCount: vm.sessions.length,
+        itemCount: itemCount,
         separatorBuilder: (_, _) => const SizedBox(height: 10),
         itemBuilder: (context, i) {
+          if (i == vm.sessions.length) {
+            return _ListFooter(
+              loadingMore: vm.loadingMore,
+              hasMore: vm.hasMore,
+            );
+          }
           final s = vm.sessions[i];
           // Dismissible wraps the card so swipe-to-delete operates at the
           // list-item level (the session id keys the dismiss animation).
@@ -254,6 +292,35 @@ class _Body extends StatelessWidget {
       ),
     );
     return ok ?? false;
+  }
+}
+
+class _ListFooter extends StatelessWidget {
+  const _ListFooter({required this.loadingMore, required this.hasMore});
+
+  final bool loadingMore;
+  final bool hasMore;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loadingMore) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (!hasMore) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(
+          child: Text(
+            'End of history',
+            style: TextStyle(color: Colors.white38, fontSize: 12),
+          ),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
   }
 }
 

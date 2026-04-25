@@ -9,6 +9,7 @@ import '../form_analyzer_base.dart';
 import 'curl_form_analyzer.dart';
 import 'curl_form_analyzer_extras.dart';
 import 'curl_view_detector.dart';
+import 'dtw_scorer.dart';
 
 /// Resolves the RomThresholds to apply for the next curl rep.
 ///
@@ -61,10 +62,16 @@ class CurlStrategy extends ExerciseStrategy {
     /// 30-day historical concentric durations for the analyzer's fatigue
     /// baseline (WP5.4). Empty list → backward-compat pre-WP5.4 behavior.
     List<Duration> historicalConcentricDurations = const [],
+
+    /// Reference angle series for DTW form scoring (T5.3). Null = disabled.
+    List<double>? referenceRepAngleSeries,
+    bool enableDtwScoring = false,
   }) : _thresholdsProvider = thresholdsProvider ?? _defaultGlobalProvider,
        _onRepCommit = onRepCommit,
        _form = CurlFormAnalyzer(
          historicalConcentricDurations: historicalConcentricDurations,
+         referenceRepAngleSeries: referenceRepAngleSeries,
+         enableDtwScoring: enableDtwScoring,
        );
 
   final ExerciseSide side;
@@ -256,6 +263,10 @@ class CurlStrategy extends ExerciseStrategy {
     _pendingViewStreak = 0;
     _form.reset();
   }
+
+  /// Score a completed rep's angle trace against the reference. Delegates to
+  /// [CurlFormAnalyzer.scoreRep]. Returns null when scoring is disabled.
+  DtwScore? scoreRep(List<double> candidate) => _form.scoreRep(candidate);
 
   // ── Internals ─────────────────────────────────────────────────────
 

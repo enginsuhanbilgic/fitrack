@@ -4,24 +4,28 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="WP5.4: Historical fatigue baseline (engine feedback loop) Closes #25">
+    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="  chore(lint): replace prints with debugPrint, drop dead code&#10;  feat(history): swipe-to-delete with confirmation dialog&#10;  feat(a11y): Semantics + live regions across Home, RepCounter, Calibration, Summary&#10;  refactor(replay): hoist warmup const, extract _parseFrame, drop dead code&#10;  feat(settings): CSV export with share sheet&#10;  perf(workout): Selector for rep counter to skip pose-frame rebuilds">
+      <change afterPath="$PROJECT_DIR$/Squat_Biomechanics_for_Mobile Analysis_CLAUDE_DEEP_RESEARCH.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Squat_Biomechanics_for_Mobile Analysis_GOOGLE_DEEP_RESEARCH.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/ios/Podfile.lock" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Podfile.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/calibration_overlay.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/calibration_overlay.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/GLOSSARY.md" beforeDir="false" afterPath="$PROJECT_DIR$/GLOSSARY.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/app.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/app.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_strategy.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_strategy.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/history_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/history_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/mlkit_test_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/mlkit_test_screen.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/services/camera_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/camera_service.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/services/pose/mlkit_pose_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/pose/mlkit_pose_service.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/pubspec.lock" beforeDir="false" afterPath="$PROJECT_DIR$/app/pubspec.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/pubspec.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/app/pubspec.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/engine/curl/rep_boundary_detector_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/curl/rep_boundary_detector_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/engine/rep_counter_curl_profile_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/rep_counter_curl_profile_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/dataset_analysis/dart_replay/bin/replay.dart" beforeDir="false" afterPath="$PROJECT_DIR$/tools/dataset_analysis/dart_replay/bin/replay.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/app_services.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/app_services.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/db/schema.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/schema.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/db/session_dtos.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/session_dtos.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/db/session_repository.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/session_repository.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/view_models/history_view_model.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/view_models/history_view_model.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/engine/curl/curl_form_analyzer_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/curl/curl_form_analyzer_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/view_models/history_view_model_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/view_models/history_view_model_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/view_models/workout_view_model_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/view_models/workout_view_model_test.dart" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -269,7 +273,15 @@
       <option name="project" value="LOCAL" />
       <updated>1777067930808</updated>
     </task>
-    <option name="localTasksCounter" value="20" />
+    <task id="LOCAL-00020" summary="  chore(lint): replace prints with debugPrint, drop dead code&#10;  feat(history): swipe-to-delete with confirmation dialog&#10;  feat(a11y): Semantics + live regions across Home, RepCounter, Calibration, Summary&#10;  refactor(replay): hoist warmup const, extract _parseFrame, drop dead code&#10;  feat(settings): CSV export with share sheet&#10;  perf(workout): Selector for rep counter to skip pose-frame rebuilds">
+      <option name="closed" value="true" />
+      <created>1777076359308</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1777076359308</updated>
+    </task>
+    <option name="localTasksCounter" value="21" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -303,7 +315,8 @@
     <MESSAGE value="WP5.2: Session write path on workout completion Closes #23" />
     <MESSAGE value="WP5.3: History screen + reconstructed SummaryScreen Closes #24" />
     <MESSAGE value="WP5.4: Historical fatigue baseline (engine feedback loop) Closes #25" />
-    <option name="LAST_COMMIT_MESSAGE" value="WP5.4: Historical fatigue baseline (engine feedback loop) Closes #25" />
+    <MESSAGE value="  chore(lint): replace prints with debugPrint, drop dead code&#10;  feat(history): swipe-to-delete with confirmation dialog&#10;  feat(a11y): Semantics + live regions across Home, RepCounter, Calibration, Summary&#10;  refactor(replay): hoist warmup const, extract _parseFrame, drop dead code&#10;  feat(settings): CSV export with share sheet&#10;  perf(workout): Selector for rep counter to skip pose-frame rebuilds" />
+    <option name="LAST_COMMIT_MESSAGE" value="  chore(lint): replace prints with debugPrint, drop dead code&#10;  feat(history): swipe-to-delete with confirmation dialog&#10;  feat(a11y): Semantics + live regions across Home, RepCounter, Calibration, Summary&#10;  refactor(replay): hoist warmup const, extract _parseFrame, drop dead code&#10;  feat(settings): CSV export with share sheet&#10;  perf(workout): Selector for rep counter to skip pose-frame rebuilds" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

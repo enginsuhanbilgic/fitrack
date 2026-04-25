@@ -16,17 +16,17 @@ import '../services/db/session_dtos.dart';
 import '../services/db/session_repository.dart';
 
 class HistoryViewModel extends ChangeNotifier {
-  HistoryViewModel({required this.repository, this.pageLimit = 100});
+  HistoryViewModel({required this.repository, this.pageSize = 50});
 
   final SessionRepository repository;
 
-  /// Per plan: no pagination in v1. Single page of up to 100 sessions covers
-  /// ~3 months of heavy use. Bump or swap for `ListView.builder` + load-more
-  /// in a future PR if user data grows past this.
-  final int pageLimit;
+  final int pageSize;
 
   ExerciseType? _filter; // null = all exercises merged
   bool _loading = false;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  int _offset = 0;
   Object? _error;
   List<SessionSummary> _sessions = const <SessionSummary>[];
 
@@ -36,22 +36,28 @@ class HistoryViewModel extends ChangeNotifier {
 
   ExerciseType? get filter => _filter;
   bool get loading => _loading;
+  bool get loadingMore => _loadingMore;
+  bool get hasMore => _hasMore;
   Object? get error => _error;
   List<SessionSummary> get sessions => _sessions;
 
-  /// Load (or reload with the current filter). Safe to call more than once;
-  /// the most recent call always wins.
+  /// Load (or reload) the first page. Resets pagination state.
   Future<void> load() async {
+    _offset = 0;
+    _hasMore = true;
     _loading = true;
     _error = null;
     _safeNotify();
     try {
       final list = await repository.listSessions(
         exercise: _filter,
-        limit: pageLimit,
+        limit: pageSize,
+        offset: _offset,
       );
       if (_disposed) return;
       _sessions = list;
+      _hasMore = list.length == pageSize;
+      _offset = list.length;
       _loading = false;
       _safeNotify();
     } catch (e) {
@@ -62,8 +68,32 @@ class HistoryViewModel extends ChangeNotifier {
     }
   }
 
+  /// Appends the next page. No-op if already loading or no more pages.
+  Future<void> loadMore() async {
+    if (_loadingMore || !_hasMore || _loading || _disposed) return;
+    _loadingMore = true;
+    _safeNotify();
+    try {
+      final list = await repository.listSessions(
+        exercise: _filter,
+        limit: pageSize,
+        offset: _offset,
+      );
+      if (_disposed) return;
+      _sessions = [..._sessions, ...list];
+      _hasMore = list.length == pageSize;
+      _offset += list.length;
+      _loadingMore = false;
+      _safeNotify();
+    } catch (e) {
+      if (_disposed) return;
+      _loadingMore = false;
+      _safeNotify();
+    }
+  }
+
   /// Update the exercise filter and reload. Passing the same filter is a
-  /// no-op (avoids a pointless DB round-trip).
+  /// no-op (avoids a pointless DB round-trip). Resets pagination.
   Future<void> setFilter(ExerciseType? next) async {
     if (next == _filter) return;
     _filter = next;

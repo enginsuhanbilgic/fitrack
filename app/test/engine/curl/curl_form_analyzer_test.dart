@@ -11,6 +11,7 @@ import 'package:fitrack/core/constants.dart';
 import 'package:fitrack/core/types.dart';
 import 'package:fitrack/core/rom_thresholds.dart';
 import 'package:fitrack/engine/curl/curl_form_analyzer.dart';
+import 'package:fitrack/engine/curl/dtw_scorer.dart';
 
 import '_pose_fixtures.dart';
 
@@ -511,6 +512,51 @@ void main() {
     });
   });
 
+  group('DTW scoring', () {
+    test('scoreRep returns null when enableDtwScoring is false (default)', () {
+      final analyzer = CurlFormAnalyzer(
+        referenceRepAngleSeries: List<double>.generate(64, (i) => i.toDouble()),
+      );
+      final result = analyzer.scoreRep(
+        List<double>.generate(32, (i) => i.toDouble()),
+      );
+      expect(result, isNull);
+    });
+
+    test('scoreRep returns null when no reference series provided', () {
+      final analyzer = CurlFormAnalyzer(enableDtwScoring: true);
+      final result = analyzer.scoreRep(
+        List<double>.generate(32, (i) => i.toDouble()),
+      );
+      expect(result, isNull);
+    });
+
+    test('scoreRep delegates to injected DtwScorer', () {
+      const fixedScore = DtwScore(similarity: 0.88, rawDistance: 7.2);
+      final analyzer = CurlFormAnalyzer(
+        referenceRepAngleSeries: List<double>.generate(64, (i) => i.toDouble()),
+        enableDtwScoring: true,
+        dtwScorer: _FixedDtwScorer(fixedScore),
+      );
+      final result = analyzer.scoreRep(
+        List<double>.generate(32, (i) => i.toDouble()),
+      );
+      expect(result, isNotNull);
+      expect(result!.similarity, 0.88);
+      expect(result.rawDistance, 7.2);
+    });
+
+    test(
+      'existing tests unaffected — default analyzer has scoring disabled',
+      () {
+        // Default constructor: enableDtwScoring=false, no reference.
+        // scoreRep always returns null; no other behavior changes.
+        final analyzer = CurlFormAnalyzer();
+        expect(analyzer.scoreRep([1.0, 2.0, 3.0]), isNull);
+      },
+    );
+  });
+
   group('reset', () {
     test('clears all state including _fatigueFired', () async {
       // Trigger fatigue first.
@@ -534,4 +580,14 @@ void main() {
       expect(a.lastRepQuality, 1.0);
     });
   });
+}
+
+/// Stub scorer that always returns a fixed [DtwScore] — isolates the analyzer's
+/// wiring from the actual DTW math.
+class _FixedDtwScorer extends DtwScorer {
+  _FixedDtwScorer(this._fixed);
+  final DtwScore _fixed;
+
+  @override
+  DtwScore score(List<double> candidate, List<double> reference) => _fixed;
 }

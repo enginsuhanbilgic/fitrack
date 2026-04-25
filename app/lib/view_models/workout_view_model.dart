@@ -16,8 +16,10 @@ import '../models/landmark_types.dart';
 import '../models/pose_landmark.dart';
 import '../models/pose_result.dart';
 import '../services/camera_service.dart';
+import '../services/db/preferences_repository.dart';
 import '../services/db/profile_repository.dart';
 import '../services/db/session_repository.dart';
+import '../services/reference_reps/reference_rep_source.dart';
 import '../services/pose/mlkit_pose_service.dart';
 import '../services/pose/pose_service.dart';
 import '../services/telemetry_log.dart';
@@ -43,6 +45,9 @@ class WorkoutCompletedEvent {
   final List<CurlRepRecord> curlRepRecords;
   final List<CurlProfileBucketSummary> curlBucketSummaries;
 
+  /// Per-rep DTW similarity scores (0.0–1.0). Empty or all-null = card hidden.
+  final List<double?> dtwSimilarities;
+
   const WorkoutCompletedEvent({
     required this.exercise,
     required this.totalReps,
@@ -57,6 +62,7 @@ class WorkoutCompletedEvent {
     required this.errorsTriggered,
     required this.curlRepRecords,
     required this.curlBucketSummaries,
+    this.dtwSimilarities = const [],
   });
 }
 
@@ -81,6 +87,8 @@ class WorkoutViewModel extends ChangeNotifier {
   final TtsService _tts;
   final ProfileRepository _profileRepository;
   final SessionRepository _sessionRepository;
+  final PreferencesRepository _preferencesRepository;
+  final ReferenceRepSource _referenceRepSource;
   late final RepCounter _repCounter;
 
   // ── Engine ─────────────────────────────────────────────
@@ -160,6 +168,17 @@ class WorkoutViewModel extends ChangeNotifier {
   /// `insertCompletedSession`'s `concentricDurations` arg.
   final List<Duration?> _repConcentricDurations = [];
 
+  /// Per-rep DTW similarity scores (T5.3), index-aligned with _curlRepRecords.
+  final List<double?> _repDtwSimilarities = [];
+
+  /// Angle buffer for the current in-progress rep. Filled per frame while the
+  /// FSM is in CONCENTRIC/PEAK/ECCENTRIC; cleared on IDLE→CONCENTRIC and on
+  /// commit. Scored against the reference in [_handleCurlRepCommit].
+  final List<double> _currentRepAngles = [];
+
+  /// Set in [init] from [PreferencesRepository]. Immutable for the session.
+  bool _dtwScoringEnabled = false;
+
   // Completion channel — widget pushes SummaryScreen on emission.
   final StreamController<WorkoutCompletedEvent> _completionCtrl =
       StreamController.broadcast();
@@ -178,15 +197,20 @@ class WorkoutViewModel extends ChangeNotifier {
     required this.exercise,
     required ProfileRepository profileRepository,
     required SessionRepository sessionRepository,
+    required PreferencesRepository preferencesRepository,
     this.forceCalibration = false,
     CameraService? camera,
     PoseService? pose,
     TtsService? tts,
+    ReferenceRepSource? referenceRepSource,
   }) : _camera = camera ?? CameraService(),
        _pose = pose ?? MlKitPoseService(),
        _tts = tts ?? TtsService(),
        _profileRepository = profileRepository,
-       _sessionRepository = sessionRepository;
+       _sessionRepository = sessionRepository,
+       _preferencesRepository = preferencesRepository,
+       _referenceRepSource =
+           referenceRepSource ?? const ConstReferenceRepSource();
 
   // ── Public read-only getters (widget-observable state) ──
   bool get isReady => _isReady;
@@ -222,6 +246,7 @@ class WorkoutViewModel extends ChangeNotifier {
       // list (analyzer collapses to in-session-only fatigue detection —
       // pre-WP5.4 behavior).
       var historical = const <Duration>[];
+      List<double>? referenceAngles;
       if (exercise == ExerciseType.bicepsCurl) {
         _profile = await _profileRepository.loadCurl() ?? CurlRomProfile();
         try {
@@ -236,12 +261,22 @@ class WorkoutViewModel extends ChangeNotifier {
             data: <String, Object?>{'stackTrace': st.toString()},
           );
         }
+        _dtwScoringEnabled = await _preferencesRepository.getEnableDtwScoring();
+        if (_dtwScoringEnabled) {
+          // View is not yet known at init time; use the detected view once the
+          // first frame arrives. For now seed with front:both as the common
+          // default — WorkoutViewModel updates _referenceAngles on first
+          // view-lock via _onViewLocked (below).
+          referenceAngles = _referenceRepSource.forBucket(CurlCameraView.front);
+        }
       }
       _repCounter = RepCounter(
         exercise: exercise,
         curlThresholdsProvider: _resolveThresholds,
         onCurlRepCommit: _handleCurlRepCommit,
         curlHistoricalConcentricDurations: historical,
+        curlReferenceRepAngleSeries: referenceAngles,
+        curlEnableDtwScoring: _dtwScoringEnabled,
       );
       if (exercise == ExerciseType.bicepsCurl && forceCalibration) {
         // Personal calibration is opt-in only — Settings → Recalibrate sets
@@ -314,6 +349,15 @@ class WorkoutViewModel extends ChangeNotifier {
     // Index-aligned with `_curlRepRecords`; consumed by
     // `_persistCompletedSession` → `SqliteSessionRepository`.
     _repConcentricDurations.add(concentricDuration);
+
+    // DTW score for this rep (null when scoring disabled or no reference).
+    // scoreRep() lives on the analyzer, but the angle buffer is host-owned
+    // (engine stays Flutter-free). We pass the captured buffer here.
+    final dtwScore = _repCounter.scoreCurlRep(
+      List<double>.unmodifiable(_currentRepAngles),
+    );
+    _repDtwSimilarities.add(dtwScore?.similarity);
+    _currentRepAngles.clear();
 
     TelemetryLog.instance.log(
       'profile.update',
@@ -747,6 +791,20 @@ class WorkoutViewModel extends ChangeNotifier {
       if (snapshot.reps > _snapshot.reps) {
         _tts.speak('${snapshot.reps}');
       }
+      // Capture angle into the DTW buffer while the rep is in progress.
+      // The buffer is consumed + cleared in _handleCurlRepCommit.
+      if (_dtwScoringEnabled &&
+          exercise == ExerciseType.bicepsCurl &&
+          snapshot.jointAngle != null &&
+          (snapshot.state == RepState.concentric ||
+              snapshot.state == RepState.peak ||
+              snapshot.state == RepState.eccentric)) {
+        _currentRepAngles.add(snapshot.jointAngle!);
+      } else if (snapshot.state == RepState.idle &&
+          _snapshot.state != RepState.idle) {
+        // Transition back to idle without a commit (aborted rep) — clear buffer.
+        _currentRepAngles.clear();
+      }
       _landmarks = smoothed;
       _snapshot = snapshot;
       notifyListeners();
@@ -899,6 +957,7 @@ class WorkoutViewModel extends ChangeNotifier {
       errorsTriggered: _lastFeedbackTime.keys.toSet(),
       curlRepRecords: List.unmodifiable(_curlRepRecords),
       curlBucketSummaries: _snapshotBucketsForSummary(),
+      dtwSimilarities: List<double?>.unmodifiable(_repDtwSimilarities),
     );
     // Emit first — the UI's SummaryScreen push is latency-critical and must
     // not wait for a SQLite round-trip. Persistence is fire-and-forget; any
@@ -918,6 +977,7 @@ class WorkoutViewModel extends ChangeNotifier {
         concentricDurations: List<Duration?>.unmodifiable(
           _repConcentricDurations,
         ),
+        dtwSimilarities: List<double?>.unmodifiable(_repDtwSimilarities),
       );
     } catch (e, st) {
       TelemetryLog.instance.log(

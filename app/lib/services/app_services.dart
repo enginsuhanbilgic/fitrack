@@ -12,6 +12,7 @@ library;
 import 'package:flutter/widgets.dart';
 
 import 'db/database_service.dart';
+import 'db/preferences_repository.dart';
 import 'db/profile_repository.dart';
 import 'db/session_repository.dart';
 
@@ -20,11 +21,13 @@ class AppServices {
     required this.databaseService,
     required this.profileRepository,
     required this.sessionRepository,
+    required this.preferencesRepository,
   });
 
   final DatabaseService databaseService;
   final ProfileRepository profileRepository;
   final SessionRepository sessionRepository;
+  final PreferencesRepository preferencesRepository;
 }
 
 class AppServicesScope extends InheritedWidget {

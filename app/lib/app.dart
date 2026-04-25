@@ -5,6 +5,7 @@ import 'screens/home_screen.dart';
 import 'services/app_services.dart';
 import 'services/db/database_service.dart';
 import 'services/db/json_migrator.dart';
+import 'services/db/preferences_repository.dart';
 import 'services/db/profile_repository.dart';
 import 'services/db/session_repository.dart';
 import 'services/telemetry_log.dart';
@@ -42,6 +43,7 @@ class _FiTrackAppState extends State<FiTrackApp> {
         databaseService: db,
         profileRepository: SqliteProfileRepository(handle),
         sessionRepository: SqliteSessionRepository(handle),
+        preferencesRepository: SqlitePreferencesRepository(handle),
       );
     } catch (e, st) {
       // Bootstrap failure is recoverable: fall back to in-memory repos so the
@@ -55,6 +57,7 @@ class _FiTrackAppState extends State<FiTrackApp> {
         databaseService: db,
         profileRepository: InMemoryProfileRepository(),
         sessionRepository: InMemorySessionRepository(),
+        preferencesRepository: InMemoryPreferencesRepository(),
       );
     }
   }
