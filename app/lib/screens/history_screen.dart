@@ -63,7 +63,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 selected: vm.filter,
                 onChanged: (next) => vm.setFilter(next),
               ),
-              const Divider(height: 1, color: Colors.white12),
+              Divider(
+                height: 1,
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.12),
+              ),
               Expanded(child: _Body(vm: vm)),
             ],
           ),
@@ -92,7 +97,10 @@ class _FilterRow extends StatelessWidget {
             onTap: () => onChanged(null),
           ),
           const SizedBox(width: 8),
-          for (final type in ExerciseType.values) ...[
+          // ignore: deprecated_member_use_from_same_package
+          for (final type in ExerciseType.values.where(
+            (e) => e != ExerciseType.bicepsCurl,
+          )) ...[
             _Chip(
               label: type.label,
               selected: selected == type,
@@ -119,22 +127,27 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return ChoiceChip(
       label: Text(label),
       selected: selected,
       onSelected: (_) => onTap(),
       selectedColor: const Color(0xFF00E676).withValues(alpha: 0.20),
       labelStyle: TextStyle(
-        color: selected ? const Color(0xFF00E676) : Colors.white70,
+        color: selected
+            ? const Color(0xFF00E676)
+            : theme.colorScheme.onSurface.withValues(alpha: 0.70),
         fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
       ),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
         side: BorderSide(
-          color: selected ? const Color(0xFF00E676) : Colors.white24,
+          color: selected
+              ? const Color(0xFF00E676)
+              : theme.colorScheme.onSurface.withValues(alpha: 0.24),
         ),
       ),
-      backgroundColor: const Color(0xFF1E1E1E),
+      backgroundColor: theme.colorScheme.surface,
     );
   }
 }
@@ -172,6 +185,7 @@ class _BodyState extends State<_Body> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final vm = widget.vm;
     if (vm.loading && vm.sessions.isEmpty) {
       return const Center(child: CircularProgressIndicator());
@@ -189,14 +203,20 @@ class _BodyState extends State<_Body> {
                 size: 40,
               ),
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 "Couldn't load history.",
-                style: TextStyle(color: Colors.white, fontSize: 16),
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface,
+                  fontSize: 16,
+                ),
               ),
               const SizedBox(height: 6),
               Text(
                 '${vm.error}',
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+                  fontSize: 12,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
@@ -207,17 +227,24 @@ class _BodyState extends State<_Body> {
       );
     }
     if (vm.sessions.isEmpty) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.history_edu, size: 48, color: Colors.white24),
-              SizedBox(height: 12),
+              Icon(
+                Icons.history_edu,
+                size: 48,
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.24),
+              ),
+              const SizedBox(height: 12),
               Text(
                 'No workouts yet — finish one to see it here.',
-                style: TextStyle(color: Colors.white54, fontSize: 14),
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+                  fontSize: 14,
+                ),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -310,12 +337,16 @@ class _ListFooter extends StatelessWidget {
       );
     }
     if (!hasMore) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 16),
+      final theme = Theme.of(context);
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
         child: Center(
           child: Text(
             'End of history',
-            style: TextStyle(color: Colors.white38, fontSize: 12),
+            style: TextStyle(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.38),
+              fontSize: 12,
+            ),
           ),
         ),
       );
@@ -331,6 +362,7 @@ class _DeleteSwipeBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Always use white on the red delete background for proper contrast.
     return Container(
       decoration: BoxDecoration(
         color: Colors.redAccent.withValues(alpha: 0.85),

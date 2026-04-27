@@ -21,7 +21,7 @@ class SessionCard extends StatelessWidget {
       label: _semanticLabel(),
       button: true,
       child: Material(
-        color: const Color(0xFF1E1E1E),
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -50,8 +50,10 @@ class SessionCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         _dateLabel(summary.startedAt),
-                        style: const TextStyle(
-                          color: Colors.white54,
+                        style: TextStyle(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withValues(alpha: 0.54),
                           fontSize: 12,
                         ),
                       ),
@@ -100,7 +102,12 @@ class SessionCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                const Icon(Icons.chevron_right, color: Colors.white38),
+                Icon(
+                  Icons.chevron_right,
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.38),
+                ),
               ],
             ),
           ),
@@ -110,6 +117,9 @@ class SessionCard extends StatelessWidget {
   }
 
   IconData _iconFor(ExerciseType e) => switch (e) {
+    ExerciseType.bicepsCurlFront ||
+    ExerciseType.bicepsCurlSide ||
+    // ignore: deprecated_member_use_from_same_package
     ExerciseType.bicepsCurl => Icons.fitness_center,
     ExerciseType.squat => Icons.airline_seat_legroom_extra,
     ExerciseType.pushUp => Icons.sports_gymnastics,
@@ -176,7 +186,9 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = color ?? Colors.white70;
+    final c =
+        color ??
+        Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.70);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [

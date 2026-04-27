@@ -1,14 +1,17 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../../core/constants.dart';
 import '../../core/rom_thresholds.dart';
 import '../../core/types.dart';
 import '../../models/landmark_types.dart';
 import '../../models/pose_result.dart';
 import '../angle_utils.dart';
-import '../form_analyzer_base.dart';
 import 'curl_form_analyzer_extras.dart';
 import 'dtw_scorer.dart';
+import 'head_stability_corroborator.dart';
+import 'sagittal_sway_detector.dart';
 
 /// Form analyzer for biceps curl — view-aware.
 ///
@@ -23,7 +26,7 @@ import 'dtw_scorer.dart';
 ///   - Fatigue: concentric duration degrading across reps
 ///
 /// Per-rep quality score: 0.0–1.0, deductions proportional to error magnitude.
-class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
+class CurlFormAnalyzer extends CurlAnalyzer {
   PoseResult? _repStartSnapshot;
 
   /// Directional short-ROM pending flags. Classification happens in
@@ -86,6 +89,7 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
 
   /// Score a completed rep's angle trace against the reference.
   /// Returns null when scoring is disabled or no reference is available.
+  @override
   DtwScore? scoreRep(List<double> candidate) {
     if (!_enableDtwScoring || _referenceRepAngleSeries == null) return null;
     return _dtwScorer.score(candidate, _referenceRepAngleSeries);
@@ -116,12 +120,74 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
   // ── Per-rep quality score ───────────────────────────────
   double _maxSwingRatio = 0.0;
   double _maxDriftRatio = 0.0;
+
+  /// Peak forward-lean delta (degrees) relative to rep-start baseline.
+  /// Only populated in side views; 0.0 otherwise.
+  double _maxLeanDeltaDeg = 0.0;
+
+  /// Torso angle from vertical captured at rep start (side views only).
+  /// Null when view is unknown or front — lean check is skipped.
+  double? _baselineTorsoAngle;
+
+  /// Torso length (shoulder→hip vertical distance) captured at rep start.
+  /// Front-view depth-swing baseline: as the lifter rocks toward the camera
+  /// the apparent torso grows; rocking back, it shrinks. ML Kit gives us no
+  /// real Z, so apparent size IS the depth signal. Null when the rep started
+  /// without a usable torso measurement.
+  double? _baselineTorsoLen;
+
+  /// Peak |ΔtorsoLen / L_baseline| seen this rep (front view only). Drives
+  /// the depth-swing quality deduction.
+  double _maxDepthRatio = 0.0;
+
+  /// Sagittal sway detector — front view only. Owns its own 1€ filters,
+  /// per-feature baselines, σ-drift cap, dt anomaly guard, and hysteresis.
+  /// We feed it every front-view evaluate() frame and let it decide when
+  /// the user is rocking toward/away from the camera. The analyzer only
+  /// translates `direction` → `FormError.depthSwing` and tracks the
+  /// peak |compositeZ| seen this rep for quality scoring.
+  final SagittalSwayDetector _swayDetector = SagittalSwayDetector();
+
+  /// Head stability corroborator — front view only. Independent of
+  /// `_swayDetector`: tracks `nose.y` and inter-ear distance to decide
+  /// whether the head moved in sympathy with a detected sway. Used as
+  /// a VETO at the depth-swing emission point — when the head is
+  /// stationary but the sway detector fires, the warning is
+  /// suppressed as occlusion artifact (the curling arm shadowing the
+  /// torso). Fail-open when head landmarks are unavailable, so the
+  /// veto can only suppress false positives, never introduce false
+  /// negatives. See `HeadStabilityCorroborator` for the full rationale.
+  final HeadStabilityCorroborator _headCorroborator =
+      HeadStabilityCorroborator();
+
+  /// Peak |composite z-score| seen this rep — drives the depth-swing
+  /// quality deduction once the detector has a baseline. 0.0 until the
+  /// detector emits its first non-null compositeZ.
+  double _maxAbsSwayZ = 0.0;
+
+  /// Hip-relative shoulder vector at rep start (side views only). Subtracting
+  /// the hip cancels whole-body translation, leaving only the rotational
+  /// (semicircle) component of the shoulder's motion around the hip joint.
+  double? _baselineShoulderRelX;
+  double? _baselineShoulderRelY;
+
+  /// Peak shoulder-arc displacement / torso length seen this rep. Drives the
+  /// shoulder-arc quality deduction (side views only).
+  double _maxShoulderArcRatio = 0.0;
   double _lastRepQuality = 1.0;
   final List<double> _repQualities = [];
 
   /// Set once after view detection locks (called by RepCounter).
+  /// View change invalidates the sway baseline (different camera framing
+  /// → different `(μ, σ)`), so reset the detector.
   @override
-  void setView(CurlCameraView view) => _view = view;
+  void setView(CurlCameraView view) {
+    if (view != _view) {
+      _swayDetector.reset();
+      _headCorroborator.reset();
+    }
+    _view = view;
+  }
 
   /// Call at IDLE -> CONCENTRIC.
   @override
@@ -134,6 +200,50 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
     _lastEccentricDuration = null;
     _maxSwingRatio = 0.0;
     _maxDriftRatio = 0.0;
+    _maxLeanDeltaDeg = 0.0;
+    _baselineTorsoAngle = _sideViewTorsoAngle(snapshot);
+
+    // Depth-swing baseline (front view): snapshot the apparent torso length.
+    // We re-derive it the same way `evaluate()` does so the ratio is
+    // dimensionless and self-consistent across frames.
+    //
+    // NOTE: this `_baselineTorsoLen` field is now retained only for
+    // legacy diagnostics — the active depth-swing decision is made by
+    // `_swayDetector` which owns its own per-feature baselines and
+    // does not consult this value. We keep the snapshot so any
+    // out-of-tree consumer that read `_baselineTorsoLen` for telemetry
+    // continues to work.
+    _maxDepthRatio = 0.0;
+    _maxAbsSwayZ = 0.0;
+    _baselineTorsoLen = _view == CurlCameraView.front
+        ? _computeTorsoLen(
+            snapshot,
+            _view != CurlCameraView.sideRight,
+            _view != CurlCameraView.sideLeft,
+          )
+        : null;
+
+    // Shoulder-arc baseline (side views): snapshot the shoulder position in
+    // the hip's local frame so subsequent measurements isolate rotation, not
+    // translation.
+    _maxShoulderArcRatio = 0.0;
+    _baselineShoulderRelX = null;
+    _baselineShoulderRelY = null;
+    if (_view == CurlCameraView.sideLeft || _view == CurlCameraView.sideRight) {
+      final useLeft = _view == CurlCameraView.sideLeft;
+      final shoulder = snapshot.landmark(
+        useLeft ? LM.leftShoulder : LM.rightShoulder,
+        minConfidence: kMinLandmarkConfidence,
+      );
+      final hip = snapshot.landmark(
+        useLeft ? LM.leftHip : LM.rightHip,
+        minConfidence: kMinLandmarkConfidence,
+      );
+      if (shoulder != null && hip != null) {
+        _baselineShoulderRelX = shoulder.x - hip.x;
+        _baselineShoulderRelY = shoulder.y - hip.y;
+      }
+    }
   }
 
   /// Call at CONCENTRIC -> PEAK.
@@ -251,8 +361,91 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
   /// Frame-level evaluation — returns torsoSwing / elbowDrift if active.
   /// Also tracks max deduction magnitudes for quality scoring.
   @override
-  List<FormError> evaluate(PoseResult current) {
+  List<FormError> evaluate(PoseResult current, {DateTime? now}) {
     final errors = <FormError>[];
+    final effectiveNow = now ?? DateTime.now();
+
+    // Depth swing (front view only) — sagittal rocking toward/away from the
+    // camera. The 2D pose has no real Z, so we project apparent body
+    // geometry onto a composite scale-invariant signal and classify its
+    // time-normalized velocity. See `SagittalSwayDetector` for the full
+    // signal-processing rationale.
+    //
+    // Baseline eligibility: only feed (μ, σ) when the user is at the
+    // bottom of a rep — i.e. before the FSM has stamped a rep-start
+    // snapshot, OR right at the start of the concentric phase. We
+    // feed the detector every front-view frame; the `allowBaseline`
+    // flag ensures reps don't poison the neutral-pose baseline.
+    if (_view == CurlCameraView.front) {
+      // ── Layer 2: head stability corroborator ──────────────
+      // Run UNCONDITIONALLY (independent of the occlusion gate below).
+      // The head sits above the arm-over-torso occlusion zone, so its
+      // landmarks are unaffected by the artifact that fools the sway
+      // detector — we want the corroborator's baseline to grow on
+      // every front-view frame, including ones where the arm crosses
+      // the torso. Used as a veto at the emission point further down.
+      final headResult = _headCorroborator.update(
+        pose: current,
+        now: effectiveNow,
+        allowBaseline: _repStartSnapshot == null,
+      );
+
+      // ── Layer 1: arm-over-torso occlusion gate ────────────
+      // When the curling arm is currently inside the torso bounding
+      // box, ML Kit's shoulder/hip landmarks drift even though their
+      // confidence stays high. Skip the sway detector entirely — no
+      // baseline poison, no velocity update. This prevents the false
+      // signal at its source rather than catching it after the fact.
+      final occluded = _armOccludesTorso(current);
+      if (!occluded) {
+        final swayResult = _swayDetector.update(
+          pose: current,
+          now: effectiveNow,
+          allowBaseline: _repStartSnapshot == null,
+        );
+        final z = swayResult.compositeZ;
+        if (z != null) {
+          final absZ = z.abs();
+          // Only track peak for quality deduction if a rep is in flight.
+          if (_repStartSnapshot != null && absZ > _maxAbsSwayZ) {
+            _maxAbsSwayZ = absZ;
+          }
+        }
+        // Only report the error if a rep is in flight. Prevents cues
+        // while the user is standing still or adjusting between reps.
+        if (_repStartSnapshot != null &&
+            swayResult.direction != SagittalSwayDirection.neutral) {
+          if (_headCorroboratesMotion(headResult)) {
+            errors.add(FormError.depthSwing);
+          } else {
+            // Telemetry hook — surfaces every veto so we can tune
+            // `kHeadCorroborationMinZ` empirically without rebuilds.
+            debugPrint(
+              'depthSwing vetoed: head stationary '
+              '(verticalZ=${headResult.verticalZ?.toStringAsFixed(2)}, '
+              'scaleZ=${headResult.scaleZ?.toStringAsFixed(2)})',
+            );
+          }
+        }
+
+        // Legacy peak-ratio tracker — preserved for out-of-tree telemetry
+        // consumers but no longer participates in the decision. Computed
+        // off the rep-start snapshot's torso length, same as before.
+        if (_baselineTorsoLen != null) {
+          final base = _baselineTorsoLen!;
+          if (base > 0.01) {
+            final useLeft = _view != CurlCameraView.sideRight;
+            final useRight = _view != CurlCameraView.sideLeft;
+            final torsoLen = _computeTorsoLen(current, useLeft, useRight);
+            if (torsoLen != null) {
+              final depthRatio = (torsoLen - base).abs() / base;
+              if (depthRatio > _maxDepthRatio) _maxDepthRatio = depthRatio;
+            }
+          }
+        }
+      }
+    }
+
     final ref = _repStartSnapshot;
     if (ref == null) return errors;
 
@@ -262,7 +455,7 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
     final torsoLen = _computeTorsoLen(current, useLeft, useRight);
     if (torsoLen == null || torsoLen < 0.01) return errors;
 
-    // Torso swing.
+    // Torso swing (lateral, both views).
     final swing =
         (useLeft ? horizontalShift(ref, current, LM.leftShoulder) : null) ??
         (useRight ? horizontalShift(ref, current, LM.rightShoulder) : null);
@@ -270,6 +463,52 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
       final ratio = swing / torsoLen;
       if (ratio > _maxSwingRatio) _maxSwingRatio = ratio;
       if (ratio > kSwingThreshold) errors.add(FormError.torsoSwing);
+    }
+
+    // Forward trunk lean (side views only — front view collapses the sagittal
+    // plane into depth, making the angle unreliable).
+    final baseline = _baselineTorsoAngle;
+    if (baseline != null &&
+        (_view == CurlCameraView.sideLeft ||
+            _view == CurlCameraView.sideRight)) {
+      final currentAngle = _sideViewTorsoAngle(current);
+      if (currentAngle != null) {
+        final delta = (currentAngle - baseline).abs();
+        if (delta > _maxLeanDeltaDeg) _maxLeanDeltaDeg = delta;
+        if (delta > kTorsoLeanThresholdDeg &&
+            !errors.contains(FormError.torsoSwing)) {
+          errors.add(FormError.torsoSwing);
+        }
+      }
+    }
+
+    // Shoulder arc (side views only) — hip-pivot rotation. Anchoring the
+    // shoulder vector at the hip cancels whole-body translation, leaving
+    // only the rotational component (the "semicircle" the shoulder traces
+    // when the lifter pivots their torso forward/back at the hip joint).
+    if ((_view == CurlCameraView.sideLeft ||
+            _view == CurlCameraView.sideRight) &&
+        _baselineShoulderRelX != null &&
+        _baselineShoulderRelY != null) {
+      final useLeftSide = _view == CurlCameraView.sideLeft;
+      final shoulder = current.landmark(
+        useLeftSide ? LM.leftShoulder : LM.rightShoulder,
+        minConfidence: kMinLandmarkConfidence,
+      );
+      final hip = current.landmark(
+        useLeftSide ? LM.leftHip : LM.rightHip,
+        minConfidence: kMinLandmarkConfidence,
+      );
+      if (shoulder != null && hip != null) {
+        final relX = shoulder.x - hip.x;
+        final relY = shoulder.y - hip.y;
+        final dx = relX - _baselineShoulderRelX!;
+        final dy = relY - _baselineShoulderRelY!;
+        final disp = math.sqrt(dx * dx + dy * dy);
+        final ratio = disp / torsoLen;
+        if (ratio > _maxShoulderArcRatio) _maxShoulderArcRatio = ratio;
+        if (ratio > kSwingThreshold) errors.add(FormError.shoulderArc);
+      }
     }
 
     // Elbow drift.
@@ -411,6 +650,16 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
     _consecutiveAsymmetricReps = 0;
     _maxSwingRatio = 0.0;
     _maxDriftRatio = 0.0;
+    _maxLeanDeltaDeg = 0.0;
+    _baselineTorsoAngle = null;
+    _baselineTorsoLen = null;
+    _maxDepthRatio = 0.0;
+    _maxAbsSwayZ = 0.0;
+    _swayDetector.reset();
+    _headCorroborator.reset();
+    _baselineShoulderRelX = null;
+    _baselineShoulderRelY = null;
+    _maxShoulderArcRatio = 0.0;
     _lastRepQuality = 1.0;
     _repQualities.clear();
     _eccentricTooFastCount = 0;
@@ -430,6 +679,39 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
     if (_maxSwingRatio > kSwingThreshold) {
       final severity = ((_maxSwingRatio - kSwingThreshold) / kSwingThreshold)
           .clamp(0.0, 1.0);
+      score -= severity * kQualitySwingMaxDeduction;
+    }
+
+    // Depth swing — severity from the sway detector's peak |z-score|.
+    // The detector classifies on velocity (an event signal); the z-score
+    // magnitude tells us how far from neutral the user got at the worst
+    // moment of the rep, which is the right scalar for "how bad was it."
+    // Severity ramps from `kSagittalVelocityThreshold` (just barely
+    // tripped) to 2× that (clearly out of band). Reuses the swing
+    // deduction budget — same cheat family, same penalty budget.
+    if (_maxAbsSwayZ > kSagittalVelocityThreshold) {
+      final severity =
+          ((_maxAbsSwayZ - kSagittalVelocityThreshold) /
+                  kSagittalVelocityThreshold)
+              .clamp(0.0, 1.0);
+      score -= severity * kQualitySwingMaxDeduction;
+    }
+
+    // Shoulder arc — same severity curve & cap.
+    if (_maxShoulderArcRatio > kSwingThreshold) {
+      final severity =
+          ((_maxShoulderArcRatio - kSwingThreshold) / kSwingThreshold).clamp(
+            0.0,
+            1.0,
+          );
+      score -= severity * kQualitySwingMaxDeduction;
+    }
+
+    // Forward lean deduction (side views only — same cap as swing).
+    if (_maxLeanDeltaDeg > kTorsoLeanThresholdDeg) {
+      final severity =
+          ((_maxLeanDeltaDeg - kTorsoLeanThresholdDeg) / kTorsoLeanThresholdDeg)
+              .clamp(0.0, 1.0);
       score -= severity * kQualitySwingMaxDeduction;
     }
 
@@ -500,7 +782,138 @@ class CurlFormAnalyzer extends FormAnalyzerBase with CurlFormAnalyzerExtras {
   /// until the first rep's peak is reached this session. Consumed by
   /// `CurlStrategy._commitRepSamples` so the VM can persist per-rep
   /// `concentric_ms` (WP5.4).
+  @override
   Duration? get lastConcentricDuration => _lastConcentricDuration;
+
+  // ── Side-view telemetry stubs ──────────────────────────
+  // The front analyzer has no side-view metrics. These exist only so the
+  // umbrella `CurlAnalyzer` type can be read uniformly by callers that
+  // don't know which view is active (`WorkoutViewModel` per-rep commit
+  // handler — gates on `ExerciseType.bicepsCurlSide` before reading these,
+  // so the stubs are never observed in practice; declared for type
+  // completeness only).
+
+  @override
+  double? get lastSignedElbowDriftRatio => null;
+
+  @override
+  double? get signedElbowDriftRatioAtMax => null;
+
+  @override
+  double get maxElbowDriftRatioThisRep => 0.0;
+
+  @override
+  double get maxTorsoLeanDegThisRep => 0.0;
+
+  @override
+  double get maxShoulderDriftRatioThisRep => 0.0;
+
+  @override
+  double get maxBackLeanDegThisRep => 0.0;
+
+  /// Torso angle from vertical for side-view lean detection.
+  /// Uses the near-side shoulder→hip segment. Returns null when either
+  /// landmark is missing or below confidence.
+  double? _sideViewTorsoAngle(PoseResult pose) {
+    final useLeft = _view == CurlCameraView.sideLeft;
+    final shoulder = pose.landmark(
+      useLeft ? LM.leftShoulder : LM.rightShoulder,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final hip = pose.landmark(
+      useLeft ? LM.leftHip : LM.rightHip,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    return angleToVertical(shoulder, hip);
+  }
+
+  /// True when the curling-arm wrist OR elbow is currently inside the
+  /// torso bounding box, indicating ML Kit's torso landmarks are
+  /// likely drifting due to occlusion. Front view checks both arms;
+  /// side views check only the camera-facing arm. Fail-open (returns
+  /// `false`) when any required landmark is missing — never makes
+  /// detection more aggressive than today.
+  ///
+  /// Definition of "inside the box":
+  ///   `xMin = min(ls.x, rs.x)`, `xMax = max(ls.x, rs.x)`
+  ///   `yMin = min(ls.y, rs.y)`, `yMax = max(lh.y, rh.y)`
+  /// A joint is occluding when `xMin ≤ joint.x ≤ xMax` AND
+  /// `yMin ≤ joint.y ≤ yMax`.
+  bool _armOccludesTorso(PoseResult pose) {
+    final ls = pose.landmark(
+      LM.leftShoulder,
+      minConfidence: kSagittalMinLandmarkVisibility,
+    );
+    final rs = pose.landmark(
+      LM.rightShoulder,
+      minConfidence: kSagittalMinLandmarkVisibility,
+    );
+    final lh = pose.landmark(
+      LM.leftHip,
+      minConfidence: kSagittalMinLandmarkVisibility,
+    );
+    final rh = pose.landmark(
+      LM.rightHip,
+      minConfidence: kSagittalMinLandmarkVisibility,
+    );
+    if (ls == null || rs == null || lh == null || rh == null) return false;
+
+    final xMin = math.min(ls.x, rs.x);
+    final xMax = math.max(ls.x, rs.x);
+    final yMin = math.min(ls.y, rs.y);
+    final yMax = math.max(lh.y, rh.y);
+
+    bool inside(double x, double y) =>
+        x >= xMin && x <= xMax && y >= yMin && y <= yMax;
+
+    final checkLeft = _view != CurlCameraView.sideRight;
+    final checkRight = _view != CurlCameraView.sideLeft;
+
+    if (checkLeft) {
+      final lw = pose.landmark(
+        LM.leftWrist,
+        minConfidence: kSagittalMinLandmarkVisibility,
+      );
+      final le = pose.landmark(
+        LM.leftElbow,
+        minConfidence: kSagittalMinLandmarkVisibility,
+      );
+      if (lw != null && inside(lw.x, lw.y)) return true;
+      if (le != null && inside(le.x, le.y)) return true;
+    }
+    if (checkRight) {
+      final rw = pose.landmark(
+        LM.rightWrist,
+        minConfidence: kSagittalMinLandmarkVisibility,
+      );
+      final re = pose.landmark(
+        LM.rightElbow,
+        minConfidence: kSagittalMinLandmarkVisibility,
+      );
+      if (rw != null && inside(rw.x, rw.y)) return true;
+      if (re != null && inside(re.x, re.y)) return true;
+    }
+    return false;
+  }
+
+  /// Decide whether a depth-swing detection is corroborated by head
+  /// motion. Returns `true` (no veto, emit the warning) when the head
+  /// shows enough motion to confirm a real spinal sway. Returns
+  /// `false` (veto, suppress the warning) when the head is stationary,
+  /// indicating the sway detector likely fired on arm-occlusion
+  /// artifact.
+  ///
+  /// **Fail-open contract:** if head landmarks are unavailable or the
+  /// corroborator's baseline has not yet closed, return `true` —
+  /// never make detection worse than the baseline (sway-detector-only)
+  /// behavior.
+  bool _headCorroboratesMotion(HeadCorroborationResult r) {
+    if (!r.landmarksAvailable || !r.baselineReady) return true;
+    final vZ = (r.verticalZ ?? 0).abs();
+    final sZ = (r.scaleZ ?? 0).abs();
+    return (kHeadVerticalWeight * vZ + kHeadScaleWeight * sZ) >=
+        kHeadCorroborationMinZ;
+  }
 
   double? _computeTorsoLen(PoseResult current, bool useLeft, bool useRight) {
     final l = useLeft

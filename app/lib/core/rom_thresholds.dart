@@ -7,6 +7,7 @@ library;
 
 import 'constants.dart';
 import 'default_rom_thresholds.dart';
+import 'manual_rom_overrides.dart';
 import 'types.dart';
 
 /// Forward declaration shape — the real bucket lives in
@@ -61,6 +62,22 @@ class RomThresholds {
   /// Once the flag is flipped to `true`, callers that can supply the real
   /// view should — otherwise they default to the side-view bucket.
   factory RomThresholds.global([CurlCameraView view = CurlCameraView.unknown]) {
+    // Tier 1 — manual override. Per-view granularity; null entries fall
+    // through to the lower tiers so views without an override are
+    // unaffected.
+    if (kUseManualOverrides) {
+      final override = ManualRomOverrides.forView(view);
+      if (override != null) {
+        return RomThresholds(
+          startAngle: override.startAngle,
+          peakAngle: override.peakAngle,
+          peakExitAngle: override.peakExitAngle,
+          endAngle: override.endAngle,
+          source: ThresholdSource.global,
+        );
+      }
+    }
+    // Tier 2 — data-driven generated defaults.
     if (kUseDataDrivenThresholds) {
       final set = DefaultRomThresholds.forView(view);
       return RomThresholds(
@@ -71,6 +88,7 @@ class RomThresholds {
         source: ThresholdSource.global,
       );
     }
+    // Tier 3 — legacy hand-tuned constants. Always-available fallback.
     return const RomThresholds(
       startAngle: kCurlStartAngle,
       peakAngle: kCurlPeakAngle,

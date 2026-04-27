@@ -56,16 +56,24 @@ class _FakePoseService extends PoseService {
   @override
   Future<PoseResult> processCameraImage(
     CameraImage image,
-    int sensorRotation,
-  ) async => PoseResult(landmarks: const [], inferenceTime: Duration.zero);
+    int sensorRotation, {
+    List<int>? requiredLandmarks,
+    List<int>? requiredLandmarksAlt,
+    double? confidenceFloor,
+    Set<int>? bestEffortLandmarks,
+  }) async => PoseResult(landmarks: const [], inferenceTime: Duration.zero);
 
   @override
   Future<PoseResult> processNv21(
     Uint8List bytes,
     int width,
     int height,
-    int sensorRotation,
-  ) async => PoseResult(landmarks: const [], inferenceTime: Duration.zero);
+    int sensorRotation, {
+    List<int>? requiredLandmarks,
+    List<int>? requiredLandmarksAlt,
+    double? confidenceFloor,
+    Set<int>? bestEffortLandmarks,
+  }) async => PoseResult(landmarks: const [], inferenceTime: Duration.zero);
 
   @override
   void dispose() {}
@@ -86,7 +94,7 @@ class _FakeTtsService extends TtsService {
 }
 
 WorkoutViewModel buildVm({
-  ExerciseType exercise = ExerciseType.bicepsCurl,
+  ExerciseType exercise = ExerciseType.bicepsCurlFront,
   bool forceCalibration = false,
   ProfileRepository? profileRepository,
   SessionRepository? sessionRepository,
@@ -183,7 +191,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(events, hasLength(1));
-      expect(events.first.exercise, ExerciseType.bicepsCurl);
+      expect(events.first.exercise, ExerciseType.bicepsCurlFront);
       expect(events.first.totalReps, 0);
       expect(events.first.totalSets, 1);
       expect(vm.phase, WorkoutPhase.completed);
@@ -191,6 +199,34 @@ void main() {
       await sub.cancel();
       vm.dispose();
     });
+
+    test(
+      'WorkoutCompletedEvent.exercise is bicepsCurlFront for front variant',
+      () async {
+        final vm = buildVm(exercise: ExerciseType.bicepsCurlFront);
+        final events = <WorkoutCompletedEvent>[];
+        final sub = vm.completionEvents.listen(events.add);
+        vm.finishWorkout();
+        await Future<void>.delayed(Duration.zero);
+        expect(events.first.exercise, ExerciseType.bicepsCurlFront);
+        await sub.cancel();
+        vm.dispose();
+      },
+    );
+
+    test(
+      'WorkoutCompletedEvent.exercise is bicepsCurlSide for side variant',
+      () async {
+        final vm = buildVm(exercise: ExerciseType.bicepsCurlSide);
+        final events = <WorkoutCompletedEvent>[];
+        final sub = vm.completionEvents.listen(events.add);
+        vm.finishWorkout();
+        await Future<void>.delayed(Duration.zero);
+        expect(events.first.exercise, ExerciseType.bicepsCurlSide);
+        await sub.cancel();
+        vm.dispose();
+      },
+    );
 
     test('finishWorkout is idempotent — second call emits nothing', () async {
       final vm = buildVm();
@@ -376,7 +412,7 @@ void main() {
 
         final list = await repo.listSessions();
         expect(list, hasLength(1));
-        expect(list.first.exercise, ExerciseType.bicepsCurl);
+        expect(list.first.exercise, ExerciseType.bicepsCurlFront);
         vm.dispose();
       },
     );
@@ -420,7 +456,10 @@ void main() {
         final vm = buildVm(sessionRepository: spy);
         await vm.init();
         expect(spy.concentricQueries, hasLength(1));
-        expect(spy.concentricQueries.first.exercise, ExerciseType.bicepsCurl);
+        expect(
+          spy.concentricQueries.first.exercise,
+          ExerciseType.bicepsCurlFront,
+        );
         expect(spy.concentricQueries.first.window, const Duration(days: 30));
         vm.dispose();
       },
@@ -458,6 +497,91 @@ void main() {
         vm.dispose();
       },
     );
+  });
+
+  group('WorkoutViewModel — squat preferences hydration', () {
+    test('init() reads squat variant + long-femur from preferences', () async {
+      final prefs = InMemoryPreferencesRepository();
+      await prefs.setSquatVariant(SquatVariant.highBarBackSquat);
+      await prefs.setSquatLongFemurLifter(true);
+      // Wire prefs into the VM by constructing it with our seeded repo.
+      final vm = WorkoutViewModel(
+        exercise: ExerciseType.squat,
+        camera: _FakeCameraService(),
+        pose: _FakePoseService(),
+        tts: _FakeTtsService(),
+        profileRepository: InMemoryProfileRepository(),
+        sessionRepository: InMemorySessionRepository(),
+        preferencesRepository: prefs,
+      );
+      await vm.init();
+      // Triggering completion forwards the snapshotted values into the
+      // emitted event.
+      final events = <WorkoutCompletedEvent>[];
+      final sub = vm.completionEvents.listen(events.add);
+      vm.finishWorkout();
+      await Future<void>.delayed(Duration.zero);
+      await sub.cancel();
+      expect(events, hasLength(1));
+      expect(events.first.squatVariant, SquatVariant.highBarBackSquat);
+      expect(events.first.squatLongFemurLifter, isTrue);
+      vm.dispose();
+    });
+
+    test(
+      'curl session uses default squat values (bodyweight, false) regardless of prefs',
+      () async {
+        final prefs = InMemoryPreferencesRepository();
+        await prefs.setSquatVariant(SquatVariant.highBarBackSquat);
+        await prefs.setSquatLongFemurLifter(true);
+        final vm = WorkoutViewModel(
+          exercise: ExerciseType.bicepsCurlFront,
+          camera: _FakeCameraService(),
+          pose: _FakePoseService(),
+          tts: _FakeTtsService(),
+          profileRepository: InMemoryProfileRepository(),
+          sessionRepository: InMemorySessionRepository(),
+          preferencesRepository: prefs,
+        );
+        await vm.init();
+        final events = <WorkoutCompletedEvent>[];
+        final sub = vm.completionEvents.listen(events.add);
+        vm.finishWorkout();
+        await Future<void>.delayed(Duration.zero);
+        await sub.cancel();
+        // Curl session should not surface squat prefs in the event.
+        expect(events.first.squatVariant, SquatVariant.bodyweight);
+        expect(events.first.squatLongFemurLifter, isFalse);
+        vm.dispose();
+      },
+    );
+  });
+
+  group('WorkoutViewModel — TTS suppression contract', () {
+    test('forwardKneeShift is suppressed from TTS path', () {
+      // Pure-Dart unit test on the static suppression predicate. Locks the
+      // contract that `forwardKneeShift` must not trigger TTS — a future
+      // developer adding it back to the spoken path would have to change
+      // this test, making the regression visible at review time.
+      expect(
+        WorkoutViewModel.isTtsSuppressed(FormError.forwardKneeShift),
+        isTrue,
+      );
+    });
+
+    test('all other FormError values flow through TTS', () {
+      // Every other error must reach the TTS coordinator. If a new
+      // informational-only error is added in the future, this test will
+      // need to be updated alongside `isTtsSuppressed`.
+      for (final err in FormError.values) {
+        if (err == FormError.forwardKneeShift) continue;
+        expect(
+          WorkoutViewModel.isTtsSuppressed(err),
+          isFalse,
+          reason: '$err must not be silently suppressed from TTS',
+        );
+      }
+    });
   });
 }
 

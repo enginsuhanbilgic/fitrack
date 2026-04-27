@@ -95,13 +95,14 @@ Future<void> _lockViewToFront(RepCounter counter) async {
 }
 
 /// Drives one full curl rep (rest → peak → rest) at the given extremes.
-/// Each phase pumps enough frames to comfortably clear the 500ms FSM
-/// debounce — total wall-clock per rep ≈ 5–6s, well under the stuck
-/// limit but ample for transitions.
 ///
-/// Defaults chosen to clear the widest data-driven threshold bucket
-/// (`DefaultRomThresholds.front`: start≈172.9, peak≈19.75). A test can
-/// still override both extremes for narrower-ROM scenarios.
+/// Sweep steps use [_kSweepFrames] frames (enough to advance the 3-frame
+/// smoothing window); hold phases use 8 frames to guarantee the 500ms
+/// debounce window is cleared before the next state transition fires.
+/// The total per-state wall-clock is kept well under [kStuckStateLimit].
+///
+/// Defaults chosen to clear the global threshold constants
+/// (`kCurlStartAngle`=160, `kCurlPeakAngle`=70, `kCurlEndAngle`=140).
 Future<RepSnapshot> _driveOneRep(
   RepCounter counter, {
   double restAngle = 180,
@@ -119,7 +120,7 @@ Future<RepSnapshot> _driveOneRep(
     20.0,
     peakAngle,
   ]) {
-    await _holdAt(counter, a, frames: 8);
+    await _holdAt(counter, a, frames: _kSweepFrames);
   }
   await _holdAt(counter, peakAngle, frames: 8);
   for (final a in [
@@ -133,10 +134,14 @@ Future<RepSnapshot> _driveOneRep(
     160.0,
     restAngle,
   ]) {
-    await _holdAt(counter, a, frames: 8);
+    await _holdAt(counter, a, frames: _kSweepFrames);
   }
   return _holdAt(counter, restAngle, frames: 8);
 }
+
+/// Frames per sweep step: 3 advances the smoothing window; the hold
+/// phases (8 frames × 80ms = 640ms) satisfy the 500ms debounce gate.
+const int _kSweepFrames = 3;
 
 void main() {
   group('default constructor — globals only', () {
@@ -159,6 +164,7 @@ void main() {
                 required double minAngle,
                 required double maxAngle,
                 required Duration? concentricDuration,
+                double? minAtPeak,
               }) {
                 commitCount++;
               },
@@ -199,7 +205,7 @@ void main() {
       // Continue the descent through PEAK (front≈19.75) and back up.
       // Provider is poison; if FSM re-resolves, peak unreachable → no rep.
       for (final a in [140.0, 120.0, 100.0, 80.0, 60.0, 40.0, 20.0, 10.0]) {
-        await _holdAt(counter, a, frames: 8);
+        await _holdAt(counter, a, frames: _kSweepFrames);
       }
       await _holdAt(counter, 10, frames: 8); // Hold at peak.
       for (final a in [
@@ -213,7 +219,7 @@ void main() {
         160.0,
         180.0,
       ]) {
-        await _holdAt(counter, a, frames: 8);
+        await _holdAt(counter, a, frames: _kSweepFrames);
       }
       final snap = await _holdAt(counter, 180, frames: 8);
       expect(
@@ -237,6 +243,7 @@ void main() {
                 required double minAngle,
                 required double maxAngle,
                 required Duration? concentricDuration,
+                double? minAtPeak,
               }) {
                 commits.add(_Commit(side, view, minAngle, maxAngle));
               },
@@ -269,6 +276,7 @@ void main() {
               required double minAngle,
               required double maxAngle,
               required Duration? concentricDuration,
+              double? minAtPeak,
             }) {
               commits.add(_Commit(side, view, minAngle, maxAngle));
             },
@@ -297,6 +305,7 @@ void main() {
               required double minAngle,
               required double maxAngle,
               required Duration? concentricDuration,
+              double? minAtPeak,
             }) {
               commits++;
             },

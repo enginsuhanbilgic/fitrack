@@ -70,6 +70,13 @@ class SessionExporter {
   /// Generate the `reps.csv` content as a string. One row per rep across all
   /// sessions; `session_id` joins back to `sessions.csv`.
   ///
+  /// Squat-specific columns (`squat_lean_deg` / `squat_knee_shift_ratio` /
+  /// `squat_heel_lift_ratio` / `squat_variant`) are populated only for squat
+  /// reps written by schema-v3 builds. Empty for curl, push-up, and
+  /// pre-rebuild squat rows. Enables the telemetry-driven retune workflow
+  /// in `docs/squat/SQUAT_MASTER_SPEC.md §10.3` — open in a spreadsheet,
+  /// pivot by `squat_variant`, compute the per-threshold percentile.
+  ///
   /// `form_errors` is a single semicolon-separated TEXT field per rep — we
   /// don't have a per-rep form-errors mapping in the schema (form errors
   /// aggregate at the session level), so this column is always empty in the
@@ -82,6 +89,10 @@ class SessionExporter {
     buf.writeln(
       'session_id,rep_index,quality,min_angle,max_angle,side,view,'
       'threshold_source,bucket_updated,rejected_outlier,concentric_ms,'
+      'squat_lean_deg,squat_knee_shift_ratio,squat_heel_lift_ratio,'
+      'squat_variant,'
+      'biceps_lean_deg,biceps_shoulder_drift_ratio,biceps_elbow_drift_ratio,'
+      'biceps_back_lean_deg,biceps_elbow_drift_signed,'
       'form_errors',
     );
     for (final entry in all) {
@@ -100,6 +111,15 @@ class SessionExporter {
             r.bucketUpdated == null ? '' : (r.bucketUpdated! ? 1 : 0),
             r.rejectedOutlier == null ? '' : (r.rejectedOutlier! ? 1 : 0),
             r.concentricMs == null ? '' : '${r.concentricMs}',
+            _csvField(r.squatLeanDeg?.toStringAsFixed(2) ?? ''),
+            _csvField(r.squatKneeShiftRatio?.toStringAsFixed(4) ?? ''),
+            _csvField(r.squatHeelLiftRatio?.toStringAsFixed(4) ?? ''),
+            _csvField(r.squatVariant?.name ?? ''),
+            _csvField(r.bicepsLeanDeg?.toStringAsFixed(2) ?? ''),
+            _csvField(r.bicepsShoulderDriftRatio?.toStringAsFixed(4) ?? ''),
+            _csvField(r.bicepsElbowDriftRatio?.toStringAsFixed(4) ?? ''),
+            _csvField(r.bicepsBackLeanDeg?.toStringAsFixed(2) ?? ''),
+            _csvField(r.bicepsElbowDriftSigned?.toStringAsFixed(4) ?? ''),
             // form_errors reserved column — empty until per-rep errors persist.
             '',
           ].join(','),

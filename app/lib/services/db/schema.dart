@@ -2,6 +2,25 @@
 ///
 /// v1 (WP5): profiles, sessions, reps, form_errors, frame_telemetry.
 /// v2 (T5.3): adds `preferences` table + `reps.dtw_similarity` column.
+/// v3 (Squat Master Rebuild follow-up): adds 4 nullable squat columns to `reps`
+/// v4 (bicepsCurl split): rewrites `sessions.exercise = 'bicepsCurl'` rows to
+///     `'bicepsCurlFront'` so legacy sessions render correctly in History after
+///     the enum split. Assumption: all real sessions before this PR were filmed
+///     facing the camera (front view) — valid for the MVP dataset.
+///     so per-rep lean / knee-shift / heel-lift ratios + variant persist
+///     across sessions. Enables the telemetry-driven retune loop documented
+///     in `docs/squat/SQUAT_MASTER_SPEC.md §10.3`. Curl + push-up rows leave
+///     all four columns NULL.
+/// v5 (biceps side-view metrics): adds 5 nullable biceps columns to `reps`
+///     (`biceps_lean_deg`, `biceps_shoulder_drift_ratio`,
+///     `biceps_elbow_drift_ratio`, `biceps_back_lean_deg`,
+///     `biceps_elbow_drift_signed`). Populated only for `bicepsCurlSide`
+///     rows. NULL on front curl, squat, push-up, and pre-v5 rows. The
+///     signed column carries the elbow-drift sign at the frame where the
+///     magnitude peaked — lets the retune split forward-elbow (front-delt
+///     cheat) vs. back-elbow (rare; setup) without ambiguity. Opens the
+///     telemetry channel for the future Phase D-v2 side-view threshold
+///     retune (plan `federated-tickling-sunset` PR 4).
 ///
 /// Five tables (v1) + one table (v2):
 ///   - `profiles`         — JSON-blob per-exercise ROM profile (PR1)
@@ -21,7 +40,7 @@ import 'package:sqflite/sqflite.dart';
 /// On-disk schema version. Bump when any CREATE/ALTER landing in `onCreate` or
 /// `onUpgrade` changes. Independent of `CurlRomProfile.schemaVersion` which
 /// tags the JSON blob inside `profiles.profile_json`.
-const int kDbSchemaVersion = 2;
+const int kDbSchemaVersion = 5;
 
 const String ddlProfiles = '''
 CREATE TABLE profiles (
@@ -116,18 +135,92 @@ Future<void> onCreate(Database db, int version) async {
   await db.execute(ddlFormErrors);
   await db.execute(ddlFrameTelemetry);
   await db.execute(ddlPreferences);
-  // v2 columns included in fresh DDL above — no ALTER TABLE needed for new installs.
-  await db.execute('ALTER TABLE reps ADD COLUMN dtw_similarity REAL');
+  // v2 + v3 ALTERs against the freshly-created `reps` table.
+  // (Inlined here rather than added to `ddlReps` so the DDL constant stays
+  // a faithful "v1 baseline" — easier to reason about migrations.)
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN dtw_similarity              REAL',
+  );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN squat_lean_deg              REAL',
+  );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN squat_knee_shift_ratio      REAL',
+  );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN squat_heel_lift_ratio       REAL',
+  );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN squat_variant               TEXT',
+  );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN biceps_lean_deg             REAL',
+  );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN biceps_shoulder_drift_ratio REAL',
+  );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN biceps_elbow_drift_ratio    REAL',
+  );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN biceps_back_lean_deg        REAL',
+  );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN biceps_elbow_drift_signed   REAL',
+  );
   for (final idx in ddlIndexes) {
     await db.execute(idx);
   }
 }
 
 /// Incremental migrations applied on open when the on-disk version is older.
+///
+/// Each `if (oldVersion < N)` block is **purely additive**: ALTER TABLE ADD
+/// COLUMN with a nullable type so legacy rows automatically pick up NULL.
+/// Never reorder; never make a block conditional on the *new* version.
 Future<void> onUpgrade(Database db, int oldVersion, int newVersion) async {
   if (oldVersion < 2) {
-    // Both DDLs are additive — safe to run on any v1 database.
+    // v1 → v2: DTW reference scoring + preferences table.
     await db.execute(ddlPreferences);
     await db.execute('ALTER TABLE reps ADD COLUMN dtw_similarity REAL');
+  }
+  if (oldVersion < 3) {
+    // v2 → v3: per-rep squat metrics (Squat Master Rebuild follow-up).
+    // Nullable, NULL for all pre-v3 rows AND for non-squat rows. Enables
+    // the telemetry-driven retune loop without breaking any existing data.
+    await db.execute('ALTER TABLE reps ADD COLUMN squat_lean_deg         REAL');
+    await db.execute('ALTER TABLE reps ADD COLUMN squat_knee_shift_ratio REAL');
+    await db.execute('ALTER TABLE reps ADD COLUMN squat_heel_lift_ratio  REAL');
+    await db.execute('ALTER TABLE reps ADD COLUMN squat_variant          TEXT');
+  }
+  if (oldVersion < 4) {
+    // v3 → v4: rewrite legacy 'bicepsCurl' rows to 'bicepsCurlFront'.
+    // All real sessions before this PR were filmed facing the camera, so
+    // front-view is the correct attribution. Existing side-view rows did not
+    // exist in practice (auto-detect was broken before this PR).
+    await db.execute(
+      "UPDATE sessions SET exercise = 'bicepsCurlFront' WHERE exercise = 'bicepsCurl'",
+    );
+  }
+  if (oldVersion < 5) {
+    // v4 → v5: per-rep biceps-curl side-view form metrics. Nullable; NULL
+    // for all pre-v5 rows AND for non-side-view rows (front curl, squat,
+    // push-up). Opens the telemetry channel for the future Phase D-v2
+    // side-view threshold retune (plan `federated-tickling-sunset` PR 4).
+    await db.execute(
+      'ALTER TABLE reps ADD COLUMN biceps_lean_deg             REAL',
+    );
+    await db.execute(
+      'ALTER TABLE reps ADD COLUMN biceps_shoulder_drift_ratio REAL',
+    );
+    await db.execute(
+      'ALTER TABLE reps ADD COLUMN biceps_elbow_drift_ratio    REAL',
+    );
+    await db.execute(
+      'ALTER TABLE reps ADD COLUMN biceps_back_lean_deg        REAL',
+    );
+    await db.execute(
+      'ALTER TABLE reps ADD COLUMN biceps_elbow_drift_signed   REAL',
+    );
   }
 }

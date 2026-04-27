@@ -48,6 +48,20 @@ class WorkoutCompletedEvent {
   /// Per-rep DTW similarity scores (0.0–1.0). Empty or all-null = card hidden.
   final List<double?> dtwSimilarities;
 
+  /// Squat variant the session ran with. `bodyweight` for non-squat sessions.
+  final SquatVariant squatVariant;
+
+  /// True if the "Tall lifter" toggle was on for this session.
+  final bool squatLongFemurLifter;
+
+  /// Per-rep squat metrics, index-aligned with the rep order. Empty for
+  /// non-squat sessions.
+  final List<SquatRepMetrics> squatRepMetrics;
+
+  /// Per-rep biceps-curl side-view metrics, index-aligned with the rep
+  /// order. Empty for non-side-view sessions (front curl, squat, push-up).
+  final List<BicepsSideRepMetrics> bicepsSideRepMetrics;
+
   const WorkoutCompletedEvent({
     required this.exercise,
     required this.totalReps,
@@ -63,6 +77,10 @@ class WorkoutCompletedEvent {
     required this.curlRepRecords,
     required this.curlBucketSummaries,
     this.dtwSimilarities = const [],
+    this.squatVariant = SquatVariant.bodyweight,
+    this.squatLongFemurLifter = false,
+    this.squatRepMetrics = const [],
+    this.bicepsSideRepMetrics = const [],
   });
 }
 
@@ -80,6 +98,36 @@ class WorkoutViewModel extends ChangeNotifier {
   // ── Config ─────────────────────────────────────────────
   final ExerciseType exercise;
   final bool forceCalibration;
+
+  /// User-declared side facing the camera for side-view curls. Drives the
+  /// initial `CurlCameraView` seed in `RepCounter`/`CurlStrategy` so the
+  /// view-aware landmark gate demands the correct arm's landmarks from
+  /// frame one. Ignored for non-curl exercises and front-view curls.
+  /// Defaults to `ExerciseSide.both`, which falls back to sideLeft seeding
+  /// (legacy behavior) — preserves existing call sites until UI is wired.
+  final ExerciseSide curlSide;
+
+  /// Diagnostic-only flag. When true the threshold resolver short-circuits to
+  /// `RomThresholds.global(view)` for every rep regardless of profile state,
+  /// the auto-calibrator is never fed, and the rep-commit path skips bucket
+  /// promotion. This lets you collect a clean `source=global` paste for the
+  /// default-threshold derivation workflow. NEVER ship a workout in this
+  /// mode for normal use — every rep runs on cold-start defaults, defeating
+  /// the entire personal-calibration system.
+  ///
+  /// Read from `PreferencesRepository.getDiagnosticDisableAutoCalibration()`
+  /// during `init()` and frozen for the rest of the VM's lifetime
+  /// (snapshot-on-construction — same pattern as the squat long-femur flag).
+  /// Settings toggling mid-session does NOT affect an in-flight workout.
+  bool _diagnosticDisableAutoCalibration = false;
+  bool get diagnosticDisableAutoCalibration =>
+      _diagnosticDisableAutoCalibration;
+
+  /// Diagnostic-mode rep counter. Lives separately from `_curlRepRecords`
+  /// because diagnostic mode intentionally does not write to the records
+  /// list (no bucket promotion, no summary-screen population). Reset to 0
+  /// per VM lifetime; only incremented inside the diagnostic branch.
+  int _diagnosticRepIndex = 0;
 
   // ── Services ───────────────────────────────────────────
   final CameraService _camera;
@@ -147,7 +195,21 @@ class WorkoutViewModel extends ChangeNotifier {
 
   // Hole #1 passive uncalibrated-view notice.
   String? _uncalibratedViewNotice;
+
+  /// Camera-framing hint state. Set when the pose service has reported
+  /// `lastFrameNearEdge=true` for [_kFramingHintFrames] consecutive
+  /// frames during SETUP_CHECK or COUNTDOWN. Cleared on the first clean
+  /// frame.
+  String? _framingHint;
+  int _nearEdgeStreak = 0;
+  static const int _kFramingHintFrames = 30;
   Timer? _uncalibratedNoticeTimer;
+
+  // Runtime view-flip advisory banner. Set whenever the engine reports
+  // [CurlStrategy.onViewFlipped]; auto-cleared after 2s.
+  String? _viewFlipBannerText;
+  Timer? _viewFlipBannerTimer;
+  static const Duration _kViewFlipBannerDuration = Duration(seconds: 2);
 
   // Per-frame display state.
   List<PoseLandmark> _landmarks = [];
@@ -179,18 +241,61 @@ class WorkoutViewModel extends ChangeNotifier {
   /// Set in [init] from [PreferencesRepository]. Immutable for the session.
   bool _dtwScoringEnabled = false;
 
+  /// Squat variant snapshot. Read in [init] from [PreferencesRepository]
+  /// before the [RepCounter] is constructed; immutable for the session
+  /// (snapshot-on-construction — plan flow-decision #2).
+  SquatVariant _squatVariant = SquatVariant.bodyweight;
+
+  /// "Tall lifter" toggle snapshot. Same lifecycle as `_squatVariant`.
+  bool _squatLongFemurLifter = false;
+
+  /// Per-rep squat metrics, index-aligned with rep order. Empty for
+  /// non-squat sessions. Populated by `_handleSquatRepCommit`.
+  final List<SquatRepMetrics> _squatRepMetrics = [];
+
+  /// Per-rep biceps-curl side-view metrics. Populated by
+  /// [_handleCurlRepCommit] when `exercise == bicepsCurlSide` AND the
+  /// locked view is `sideLeft` / `sideRight`. Read by
+  /// [_persistCompletedSession] (PR 3) and exported to the SQLite `reps`
+  /// table (schema v5). Empty for non-side-view sessions.
+  final List<BicepsSideRepMetrics> _bicepsSideRepMetrics = [];
+
   // Completion channel — widget pushes SummaryScreen on emission.
   final StreamController<WorkoutCompletedEvent> _completionCtrl =
       StreamController.broadcast();
 
-  // Per-error landmark highlight indices (curl only).
+  // Per-error landmark highlight indices (multi-exercise — curl + squat).
+  // Squat highlights stack by region (shoulders+hips for lean, knees for
+  // shift, heels for heel-lift) so multiple cues can flash simultaneously
+  // without color collision (plan flow-decision #6).
   static const Map<FormError, List<int>> _errorLandmarks = {
+    // Curl
     FormError.torsoSwing: [LM.leftShoulder, LM.rightShoulder],
+    FormError.depthSwing: [LM.leftShoulder, LM.rightShoulder],
+    FormError.shoulderArc: [LM.leftShoulder, LM.rightShoulder],
     FormError.elbowDrift: [LM.leftElbow, LM.rightElbow],
+    FormError.shoulderShrug: [LM.leftShoulder, LM.rightShoulder],
+    FormError.backLean: [
+      LM.leftShoulder,
+      LM.rightShoulder,
+      LM.leftHip,
+      LM.rightHip,
+    ],
     FormError.shortRomStart: [LM.leftShoulder, LM.rightShoulder],
     FormError.shortRomPeak: [LM.leftWrist, LM.rightWrist],
     FormError.asymmetryLeftLag: [LM.leftElbow, LM.leftWrist],
     FormError.asymmetryRightLag: [LM.rightElbow, LM.rightWrist],
+    // Squat
+    FormError.excessiveForwardLean: [
+      LM.leftShoulder,
+      LM.rightShoulder,
+      LM.leftHip,
+      LM.rightHip,
+    ],
+    FormError.forwardKneeShift: [LM.leftKnee, LM.rightKnee],
+    FormError.heelLift: [LM.leftHeel, LM.rightHeel],
+    // trunkTibia retained — legacy session rendering path.
+    FormError.trunkTibia: [LM.leftHip, LM.rightHip],
   };
 
   WorkoutViewModel({
@@ -199,6 +304,7 @@ class WorkoutViewModel extends ChangeNotifier {
     required SessionRepository sessionRepository,
     required PreferencesRepository preferencesRepository,
     this.forceCalibration = false,
+    this.curlSide = ExerciseSide.both,
     CameraService? camera,
     PoseService? pose,
     TtsService? tts,
@@ -225,11 +331,34 @@ class WorkoutViewModel extends ChangeNotifier {
   bool get isOccluded => _isOccluded;
   CurlCameraView get detectedCurlView => _detectedCurlView;
   String? get uncalibratedViewNotice => _uncalibratedViewNotice;
+
+  /// Camera-framing hint. Non-null while the user's body has been near
+  /// the frame edges for a sustained period during pre-active phases.
+  /// UI should render as a passive banner so the user can re-frame
+  /// before the rep counter starts.
+  String? get framingHint => _framingHint;
+
+  /// Runtime view-flip advisory text. Surfaced by [WorkoutScreen] as a
+  /// transient amber banner. Null when no flip has happened recently or
+  /// the 2s auto-dismiss has elapsed.
+  String? get viewFlipBanner => _viewFlipBannerText;
   int get calibrationReps => _calibrationReps;
   int get calibrationSecondsRemaining => _calibrationSecondsRemaining;
   String? get calibrationError => _calibrationError;
   double? get calibrationCurrentAngle => _calibrationCurrentAngle;
   CalibrationSummary? get calibrationSummary => _calibrationSummary;
+
+  /// True once a `forceCalibration: true` session has finished its calibration
+  /// summary and should pop back to whatever route launched the recalibrate
+  /// flow (Settings → Recalibrate). The screen listens for this transition and
+  /// performs the navigation — the VM never imports `Navigator`.
+  ///
+  /// One-shot: flips false → true exactly once per VM lifetime, and stays true
+  /// until the screen consumes it. The first-time / auto-cal path (where
+  /// `forceCalibration == false`) never sets this flag, so the workout
+  /// continues into setupCheck → countdown → active as before.
+  bool get shouldExitAfterCalibration => _shouldExitAfterCalibration;
+  bool _shouldExitAfterCalibration = false;
   CameraService get camera => _camera;
   CurlRomProfile? get profile => _profile;
   Stream<WorkoutCompletedEvent> get completionEvents => _completionCtrl.stream;
@@ -247,11 +376,11 @@ class WorkoutViewModel extends ChangeNotifier {
       // pre-WP5.4 behavior).
       var historical = const <Duration>[];
       List<double>? referenceAngles;
-      if (exercise == ExerciseType.bicepsCurl) {
+      if (exercise.isCurl) {
         _profile = await _profileRepository.loadCurl() ?? CurlRomProfile();
         try {
           historical = await _sessionRepository.recentConcentricDurations(
-            exercise: ExerciseType.bicepsCurl,
+            exercise: exercise,
             window: const Duration(days: 30),
           );
         } catch (e, st) {
@@ -259,6 +388,17 @@ class WorkoutViewModel extends ChangeNotifier {
             'fatigue.baseline.load_failed',
             e.toString(),
             data: <String, Object?>{'stackTrace': st.toString()},
+          );
+        }
+        // Diagnostic flag — snapshot once, identical to other curl prefs.
+        // A mid-session toggle in Settings has no effect on this run (matches
+        // the squat long-femur "snapshot-on-construction" rule).
+        _diagnosticDisableAutoCalibration = await _preferencesRepository
+            .getDiagnosticDisableAutoCalibration();
+        if (_diagnosticDisableAutoCalibration) {
+          TelemetryLog.instance.log(
+            'diagnostic.mode_active',
+            'auto-calibration disabled — every rep will run on source=global',
           );
         }
         _dtwScoringEnabled = await _preferencesRepository.getEnableDtwScoring();
@@ -269,16 +409,29 @@ class WorkoutViewModel extends ChangeNotifier {
           // view-lock via _onViewLocked (below).
           referenceAngles = _referenceRepSource.forBucket(CurlCameraView.front);
         }
+      } else if (exercise == ExerciseType.squat) {
+        // Snapshot squat preferences before constructing RepCounter so the
+        // strategy + analyzer freeze on the values that were active at
+        // workout start. Mid-session Settings changes apply to the next
+        // workout (plan flow-decision #2).
+        _squatVariant = await _preferencesRepository.getSquatVariant();
+        _squatLongFemurLifter = await _preferencesRepository
+            .getSquatLongFemurLifter();
       }
       _repCounter = RepCounter(
         exercise: exercise,
+        side: curlSide,
         curlThresholdsProvider: _resolveThresholds,
         onCurlRepCommit: _handleCurlRepCommit,
+        onCurlViewFlipped: _handleCurlViewFlipped,
         curlHistoricalConcentricDurations: historical,
         curlReferenceRepAngleSeries: referenceAngles,
         curlEnableDtwScoring: _dtwScoringEnabled,
+        squatVariant: _squatVariant,
+        squatLongFemurLifter: _squatLongFemurLifter,
+        onSquatRepCommit: _handleSquatRepCommit,
       );
-      if (exercise == ExerciseType.bicepsCurl && forceCalibration) {
+      if (exercise.isCurl && forceCalibration) {
         // Personal calibration is opt-in only — Settings → Recalibrate sets
         // `forceCalibration`. We never launch it automatically.
         _enterCalibration();
@@ -298,6 +451,12 @@ class WorkoutViewModel extends ChangeNotifier {
     CurlCameraView view,
     int repInSet,
   ) {
+    // Diagnostic short-circuit: every rep gets cold-start defaults so the
+    // `rep.extremes` log is uniformly tagged `source=global`. Skips both the
+    // calibrated-bucket path and the auto-cal path; nothing else.
+    if (diagnosticDisableAutoCalibration) {
+      return RomThresholds.global(view);
+    }
     final profile = _profile;
     if (profile != null && view != CurlCameraView.unknown) {
       final bucket = profile.bucketFor(side, view);
@@ -313,13 +472,67 @@ class WorkoutViewModel extends ChangeNotifier {
     return RomThresholds.global(view);
   }
 
+  /// Engine-callback: a view flip just committed at FSM idle. Surface a
+  /// 2-second amber advisory so the user sees the system adapt. Mirrors
+  /// the existing transient-banner patterns in `WorkoutScreen`.
+  void _handleCurlViewFlipped(CurlCameraView from, CurlCameraView to) {
+    final String text;
+    switch (to) {
+      case CurlCameraView.front:
+        text = "Front view isn't supported yet — please turn 90°";
+      case CurlCameraView.sideLeft:
+        text = 'Detected you turned — now tracking left side';
+      case CurlCameraView.sideRight:
+        text = 'Detected you turned — now tracking right side';
+      case CurlCameraView.unknown:
+        // Defensive: the strategy contract forbids firing with to==unknown,
+        // but if that ever changes we don't want to surface garbage copy.
+        return;
+    }
+    _viewFlipBannerTimer?.cancel();
+    _viewFlipBannerText = text;
+    notifyListeners();
+    _viewFlipBannerTimer = Timer(_kViewFlipBannerDuration, () {
+      _viewFlipBannerText = null;
+      notifyListeners();
+    });
+  }
+
   void _handleCurlRepCommit({
     required ProfileSide side,
     required CurlCameraView view,
     required double minAngle,
     required double maxAngle,
     required Duration? concentricDuration,
+    double? minAtPeak,
   }) {
+    // Diagnostic mode: don't feed the auto-calibrator and don't write the
+    // bucket. Emit a `rep.extremes` line in the same format as the normal
+    // path so the paste workflow is identical, but tag `source=global` /
+    // `result=diagnosticSkipped` so the parser can identify diagnostic-mode
+    // reps unambiguously. Uses a private counter (NOT `_curlRepRecords`)
+    // because we're intentionally not growing that list in diagnostic mode.
+    if (diagnosticDisableAutoCalibration) {
+      _diagnosticRepIndex++;
+      // `min_at_peak` separates "user held a real peak" (≈ minAngle) from
+      // "FSM crossed the gate then noise pulled minAngle lower" (much
+      // higher than minAngle). Critical for filtering out the 2D-pose
+      // wrist-snap artifact at peak elbow flexion.
+      TelemetryLog.instance.log(
+        'rep.extremes',
+        'rep=$_diagnosticRepIndex '
+            'side=${side.name} '
+            'view=${view.name} '
+            'min=${minAngle.toStringAsFixed(1)} '
+            'max=${maxAngle.toStringAsFixed(1)} '
+            'rom=${(maxAngle - minAngle).toStringAsFixed(1)} '
+            'min_at_peak=${minAtPeak?.toStringAsFixed(1) ?? "null"} '
+            'concentric_ms=${concentricDuration?.inMilliseconds ?? -1} '
+            'source=global '
+            'result=diagnosticSkipped',
+      );
+      return;
+    }
     _autoCalibrator.recordRepExtremes(minAngle, maxAngle);
     final profile = _profile;
     if (profile == null) return;
@@ -359,6 +572,30 @@ class WorkoutViewModel extends ChangeNotifier {
     _repDtwSimilarities.add(dtwScore?.similarity);
     _currentRepAngles.clear();
 
+    // Side-view per-rep telemetry snapshot. Read straight off the umbrella
+    // `formExtras` — the side analyzer has populated the four maxes during
+    // the rep and `onRepEnd()` left them intact for read-out. Front-view
+    // and front-curl-with-asymmetric-commit reps fall through (the front
+    // analyzer's stub getters return 0.0 / null), and the persistence path
+    // gates on `ExerciseType.bicepsCurlSide` before reading these out, so
+    // the noise stays out of the wire format.
+    if (exercise == ExerciseType.bicepsCurlSide &&
+        (view == CurlCameraView.sideLeft || view == CurlCameraView.sideRight)) {
+      final extras = _repCounter.curlFormExtras;
+      if (extras != null) {
+        _bicepsSideRepMetrics.add(
+          BicepsSideRepMetrics(
+            repIndex: _bicepsSideRepMetrics.length + 1,
+            leanDeg: extras.maxTorsoLeanDegThisRep,
+            shoulderDriftRatio: extras.maxShoulderDriftRatioThisRep,
+            elbowDriftRatio: extras.maxElbowDriftRatioThisRep,
+            backLeanDeg: extras.maxBackLeanDegThisRep,
+            elbowDriftSigned: extras.signedElbowDriftRatioAtMax,
+          ),
+        );
+      }
+    }
+
     TelemetryLog.instance.log(
       'profile.update',
       'side=${side.name} view=${view.name} result=${result.name} '
@@ -366,6 +603,68 @@ class WorkoutViewModel extends ChangeNotifier {
           'min=${bucket.observedMinAngle.toStringAsFixed(1)} '
           'max=${bucket.observedMaxAngle.toStringAsFixed(1)}',
     );
+
+    // Raw per-rep extremes — the un-smoothed angles this rep actually hit.
+    // Distinct from `profile.update` above (which logs the EMA-smoothed
+    // bucket). This is the line to paste back when re-deriving global
+    // defaults: fixed-order key=value tokens so regex parsing is trivial.
+    // `source` exposes which threshold path this rep ran under so reps that
+    // ran on the very defaults we're trying to replace can be filtered out.
+    TelemetryLog.instance.log(
+      'rep.extremes',
+      'rep=${_curlRepRecords.length} '
+          'side=${side.name} '
+          'view=${view.name} '
+          'min=${minAngle.toStringAsFixed(1)} '
+          'max=${maxAngle.toStringAsFixed(1)} '
+          'rom=${(maxAngle - minAngle).toStringAsFixed(1)} '
+          'min_at_peak=${minAtPeak?.toStringAsFixed(1) ?? "null"} '
+          'concentric_ms=${concentricDuration?.inMilliseconds ?? -1} '
+          'source=${resolved.source.name} '
+          'result=${result.name}',
+    );
+
+    // Side-view form telemetry — the second canonical paste-back line.
+    // Fixed-order key=value tokens, same parser shape as `rep.extremes`.
+    // Emitted only on side-view biceps reps so the log doesn't fill with
+    // zeros from front-view / squat / push-up reps. Joins `rep.extremes`
+    // by `rep=N`. Token meanings:
+    //
+    //   lean_deg                — peak forward-lean delta (degrees)
+    //   shoulder_drift_ratio    — peak |Δ(shoulder − hip)| / torso_len
+    //   elbow_drift_ratio       — peak |perp(E − S, n̂)| / torso_len
+    //   elbow_drift_signed      — same projection at the peak frame, with
+    //                             sign preserved (split forward vs back)
+    //   back_lean_deg           — peak hyperextension (degrees)
+    //   rep_quality             — analyzer's lastRepQuality (0.0–1.0).
+    //                             Filter clean-form reps by quality > 0.85
+    //                             when computing percentile thresholds.
+    //   source                  — global / warmup / calibrated /
+    //                             autoCalibrated. Drop reps whose source
+    //                             matches the path being retuned.
+    //   concentric_ms           — duplicates `rep.extremes` for self-contained
+    //                             rows (so the side-form log is independently
+    //                             grep-able without joining back).
+    if (exercise == ExerciseType.bicepsCurlSide &&
+        (view == CurlCameraView.sideLeft || view == CurlCameraView.sideRight)) {
+      final extras = _repCounter.curlFormExtras;
+      if (extras != null) {
+        TelemetryLog.instance.log(
+          'rep.side_metrics',
+          'rep=${_curlRepRecords.length} '
+              'side=${side.name} '
+              'view=${view.name} '
+              'lean_deg=${extras.maxTorsoLeanDegThisRep.toStringAsFixed(2)} '
+              'shoulder_drift_ratio=${extras.maxShoulderDriftRatioThisRep.toStringAsFixed(4)} '
+              'elbow_drift_ratio=${extras.maxElbowDriftRatioThisRep.toStringAsFixed(4)} '
+              'elbow_drift_signed=${extras.signedElbowDriftRatioAtMax?.toStringAsFixed(4) ?? "null"} '
+              'back_lean_deg=${extras.maxBackLeanDegThisRep.toStringAsFixed(2)} '
+              'rep_quality=${extras.lastRepQuality.toStringAsFixed(3)} '
+              'concentric_ms=${concentricDuration?.inMilliseconds ?? -1} '
+              'source=${resolved.source.name}',
+        );
+      }
+    }
   }
 
   List<CurlProfileBucketSummary> _snapshotBucketsForSummary() {
@@ -503,6 +802,17 @@ class WorkoutViewModel extends ChangeNotifier {
     notifyListeners();
     Timer(const Duration(seconds: 2), () {
       _calibrationSummary = null;
+      // Settings → Recalibrate path: the user came specifically to calibrate,
+      // not to start a workout. Flag the screen to pop back to where they
+      // came from instead of advancing into setupCheck → countdown → active.
+      // Calibration resources are released here too so the camera/pose stream
+      // shut down cleanly before the screen pops.
+      if (forceCalibration) {
+        _disposeCalibrationResources();
+        _shouldExitAfterCalibration = true;
+        notifyListeners();
+        return;
+      }
       _exitCalibration(toPhase: WorkoutPhase.setupCheck);
     });
   }
@@ -544,7 +854,7 @@ class WorkoutViewModel extends ChangeNotifier {
   /// value during ACTIVE play. If the new view's bucket has fewer than the
   /// calibration minimum, show a 2s passive banner.
   void _maybeShowUncalibratedNotice(CurlCameraView newView) {
-    if (exercise != ExerciseType.bicepsCurl) return;
+    if (!exercise.isCurl) return;
     if (newView == CurlCameraView.unknown) return;
     if (_phase != WorkoutPhase.active) return;
     final profile = _profile;
@@ -624,10 +934,79 @@ class WorkoutViewModel extends ChangeNotifier {
 
   Future<void> _processFrame(CameraImage image) async {
     try {
+      // Required-landmark gate: tell the pose service which landmarks the
+      // active exercise actually depends on, so a frame missing any of
+      // them is rejected at the boundary instead of feeding the engine a
+      // partial body.
+      //
+      // Side-view curls (any locked view AND pre-detection) ALWAYS run
+      // dual-group: accept the frame if EITHER {11,13,15} OR {12,14,16}
+      // is fully present. Reason: ML Kit's anatomical labels don't
+      // reliably match the user's declared orientation in side recordings
+      // — we've observed sessions where the user turned their right side
+      // to the camera but ML Kit labeled the visible arm as
+      // `leftShoulder/leftElbow/leftWrist`. Demanding a specific arm
+      // based on declared side fails such sessions entirely. Instead the
+      // gate is arm-agnostic for side; the strategy's
+      // `computePrimaryAngle` already handles whichever arm shows up.
+      //
+      // Front view still demands both arms (asymmetry detection needs
+      // both, and 2D projection makes both reliably trackable).
+      final isSideCurl =
+          exercise == ExerciseType.bicepsCurlSide ||
+          // ignore: deprecated_member_use_from_same_package
+          exercise == ExerciseType.bicepsCurl &&
+              _detectedCurlView != CurlCameraView.front;
+      final List<int> gatePrimary;
+      final List<int>? gateAlt;
+      if (isSideCurl) {
+        gatePrimary = const [11, 13, 15]; // left arm trio
+        gateAlt = const [12, 14, 16]; // right arm trio
+      } else {
+        gatePrimary = ExerciseRequirements.forExerciseAndView(
+          exercise,
+          _detectedCurlView,
+        ).landmarkIndices;
+        gateAlt = null;
+      }
+      // Side-view curls run with a relaxed confidence floor (ML Kit can't
+      // cross-anchor against the off-camera arm so all confidences drop)
+      // and treat wrists (15, 16) as best-effort — the wrist is the noisiest
+      // landmark at peak flexion and the FSM can tolerate occasional
+      // wrist-missing frames (the angle calc returns null and the FSM
+      // simply skips that frame).
+      final double? gateFloor = isSideCurl
+          ? kPoseGateMinConfidenceSideRelaxed
+          : null;
+      final Set<int>? gateBestEffort = isSideCurl ? const {15, 16} : null;
       final result = await _pose.processCameraImage(
         image,
         _camera.sensorRotation,
+        requiredLandmarks: gatePrimary,
+        requiredLandmarksAlt: gateAlt,
+        confidenceFloor: gateFloor,
+        bestEffortLandmarks: gateBestEffort,
       );
+
+      // Camera-framing hint: track sustained nearedge during pre-active
+      // phases. We surface the hint ONLY before the workout actually
+      // starts — once active, hints would be more noise than signal.
+      // Cleared on first clean frame.
+      final preActive =
+          _phase == WorkoutPhase.setupCheck || _phase == WorkoutPhase.countdown;
+      if (preActive && _pose.lastFrameNearEdge) {
+        _nearEdgeStreak++;
+        if (_nearEdgeStreak >= _kFramingHintFrames && _framingHint == null) {
+          _framingHint = 'Step back so your full body is in frame';
+          notifyListeners();
+        }
+      } else {
+        if (_nearEdgeStreak > 0 || _framingHint != null) {
+          _nearEdgeStreak = 0;
+          _framingHint = null;
+          notifyListeners();
+        }
+      }
 
       if (result.isEmpty) return;
 
@@ -668,7 +1047,7 @@ class WorkoutViewModel extends ChangeNotifier {
 
   // ── SETUP_CHECK ────────────────────────────────────────
   void _updateSetupCheck(PoseResult result, List<PoseLandmark> smoothed) {
-    if (exercise == ExerciseType.bicepsCurl) {
+    if (exercise.isCurl) {
       final view = _repCounter.updateSetupView(result);
       if (view != _detectedCurlView) _detectedCurlView = view;
     }
@@ -727,7 +1106,7 @@ class WorkoutViewModel extends ChangeNotifier {
   }
 
   void _updateCountdownFrame(PoseResult result, List<PoseLandmark> smoothed) {
-    if (exercise == ExerciseType.bicepsCurl) {
+    if (exercise.isCurl) {
       final view = _repCounter.updateSetupView(result);
       if (view != _detectedCurlView) _detectedCurlView = view;
     }
@@ -754,7 +1133,7 @@ class WorkoutViewModel extends ChangeNotifier {
 
   // ── ACTIVE ─────────────────────────────────────────────
   void _updateActive(PoseResult result, List<PoseLandmark> smoothed) {
-    if (exercise == ExerciseType.bicepsCurl) {
+    if (exercise.isCurl) {
       final view = _repCounter.updateSetupView(result);
       if (view != _detectedCurlView) {
         _detectedCurlView = view;
@@ -794,7 +1173,7 @@ class WorkoutViewModel extends ChangeNotifier {
       // Capture angle into the DTW buffer while the rep is in progress.
       // The buffer is consumed + cleared in _handleCurlRepCommit.
       if (_dtwScoringEnabled &&
-          exercise == ExerciseType.bicepsCurl &&
+          exercise.isCurl &&
           snapshot.jointAngle != null &&
           (snapshot.state == RepState.concentric ||
               snapshot.state == RepState.peak ||
@@ -843,10 +1222,28 @@ class WorkoutViewModel extends ChangeNotifier {
     }
   }
 
+  /// Whether the given form error should be suppressed from the TTS path.
+  /// Visual highlight still fires, but no spoken cue and no cooldown slot
+  /// is consumed. The current suppression set is `{forwardKneeShift}` —
+  /// informational metric, plan flow-decision: no TTS, no quality penalty.
+  ///
+  /// Exposed for unit testing in `workout_view_model_test.dart` so the
+  /// suppression contract is locked against future enum-switch additions.
+  @visibleForTesting
+  static bool isTtsSuppressed(FormError err) =>
+      err == FormError.forwardKneeShift;
+
   // ── Form feedback coordinator ─────────────────────────
   void _onFormErrors(List<FormError> errors) {
     final now = DateTime.now();
     for (final err in errors) {
+      // forwardKneeShift is informational — visual highlight only, no TTS
+      // and no quality penalty (handled in the analyzer). Skip the cooldown
+      // bookkeeping too so it doesn't block other cues.
+      if (isTtsSuppressed(err)) {
+        _triggerHighlight(err);
+        continue;
+      }
       final cooldownKey = _cooldownKeyFor(err);
       final last = _lastFeedbackTime[cooldownKey];
       if (last != null &&
@@ -860,6 +1257,27 @@ class WorkoutViewModel extends ChangeNotifier {
     }
   }
 
+  /// Squat-only rep commit callback. Captures per-rep metrics for the
+  /// summary screen. Mirrors `_handleCurlRepCommit` but lighter — squat
+  /// has no profile/bucket bookkeeping.
+  void _handleSquatRepCommit({
+    required int repIndex,
+    required double? quality,
+    required double? leanDeg,
+    required double? kneeShiftRatio,
+    required double? heelLiftRatio,
+  }) {
+    _squatRepMetrics.add(
+      SquatRepMetrics(
+        repIndex: repIndex,
+        quality: quality,
+        leanDeg: leanDeg,
+        kneeShiftRatio: kneeShiftRatio,
+        heelLiftRatio: heelLiftRatio,
+      ),
+    );
+  }
+
   static FormError _cooldownKeyFor(FormError err) => switch (err) {
     FormError.asymmetryLeftLag ||
     FormError.asymmetryRightLag => FormError.asymmetryLeftLag,
@@ -868,11 +1286,21 @@ class WorkoutViewModel extends ChangeNotifier {
 
   static String _errorMessage(FormError err) => switch (err) {
     FormError.torsoSwing => "Don't swing",
+    FormError.depthSwing => "Don't rock toward the camera",
+    FormError.shoulderArc => "Stop pivoting at the hip",
     FormError.elbowDrift => 'Keep your elbow still',
+    FormError.shoulderShrug => 'Keep your shoulders down',
+    FormError.backLean => "Don't lean back",
     FormError.shortRomStart => 'Start from full extension',
     FormError.shortRomPeak => 'Curl all the way up',
     FormError.squatDepth => 'Go deeper',
     FormError.trunkTibia => 'Keep your chest up',
+    FormError.excessiveForwardLean => 'Chest up — keep your back tall',
+    FormError.heelLift => 'Drive your heels into the floor',
+    // forwardKneeShift intentionally has a fallback string — TTS suppression
+    // happens in `_onFormErrors`, not here. The string is still used by the
+    // visual highlight subtitle if the in-workout overlay surfaces it.
+    FormError.forwardKneeShift => 'Knees tracking forward',
     FormError.hipSag => 'Keep your body straight',
     FormError.pushUpShortRom => 'Go lower',
     FormError.eccentricTooFast => 'Lower slowly',
@@ -883,11 +1311,21 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.fatigue => "You're slowing down, stay strong",
   };
 
+  /// Per-error highlight color. `forwardKneeShift` is informational (no TTS,
+  /// no quality penalty) and uses a dimmer orange to distinguish it from
+  /// active-cue errors — plan flow-decision #6. All other errors share the
+  /// existing red palette.
+  static Color _highlightColorFor(FormError err) =>
+      err == FormError.forwardKneeShift
+      ? const Color(0xFFFFA726) // orange.shade400 equivalent
+      : Colors.redAccent;
+
   void _triggerHighlight(FormError err) {
     final landmarks = _errorLandmarks[err];
     if (landmarks == null) return;
+    final color = _highlightColorFor(err);
     _highlightTimer?.cancel();
-    _errorHighlight = {for (final idx in landmarks) idx: Colors.redAccent};
+    _errorHighlight = {for (final idx in landmarks) idx: color};
     notifyListeners();
     _highlightTimer = Timer(Duration(milliseconds: kHighlightDurationMs), () {
       _errorHighlight = {};
@@ -958,6 +1396,12 @@ class WorkoutViewModel extends ChangeNotifier {
       curlRepRecords: List.unmodifiable(_curlRepRecords),
       curlBucketSummaries: _snapshotBucketsForSummary(),
       dtwSimilarities: List<double?>.unmodifiable(_repDtwSimilarities),
+      squatVariant: _squatVariant,
+      squatLongFemurLifter: _squatLongFemurLifter,
+      squatRepMetrics: List<SquatRepMetrics>.unmodifiable(_squatRepMetrics),
+      bicepsSideRepMetrics: List<BicepsSideRepMetrics>.unmodifiable(
+        _bicepsSideRepMetrics,
+      ),
     );
     // Emit first — the UI's SummaryScreen push is latency-critical and must
     // not wait for a SQLite round-trip. Persistence is fire-and-forget; any
@@ -994,6 +1438,7 @@ class WorkoutViewModel extends ChangeNotifier {
     _countdownTimer?.cancel();
     _highlightTimer?.cancel();
     _uncalibratedNoticeTimer?.cancel();
+    _viewFlipBannerTimer?.cancel();
     _disposeCalibrationResources();
     // Best-effort persistence — fire-and-forget.
     _flushProfileIfDirty();

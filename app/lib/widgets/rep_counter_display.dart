@@ -172,11 +172,18 @@ class _RepCounterDisplayState extends State<RepCounterDisplay> {
 
   String _errorLabel(FormError err) => switch (err) {
     FormError.torsoSwing => 'Keep your torso still',
+    FormError.depthSwing => "Don't rock toward the camera",
+    FormError.shoulderArc => 'Stop pivoting at the hip',
     FormError.elbowDrift => 'Keep your elbow still',
+    FormError.shoulderShrug => 'Keep your shoulders down',
+    FormError.backLean => "Don't lean back",
     FormError.shortRomStart => 'Start from full extension',
     FormError.shortRomPeak => 'Curl all the way up',
     FormError.squatDepth => 'Go deeper',
     FormError.trunkTibia => 'Keep your chest up',
+    FormError.excessiveForwardLean => 'Chest up — keep your back tall',
+    FormError.heelLift => 'Drive your heels into the floor',
+    FormError.forwardKneeShift => 'Knees tracking forward',
     FormError.hipSag => 'Keep your body straight',
     FormError.pushUpShortRom => 'Go lower',
     FormError.eccentricTooFast => 'Lower slowly',

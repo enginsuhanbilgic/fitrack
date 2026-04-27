@@ -56,6 +56,7 @@ class _ErrorScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(),
       body: Center(
@@ -72,12 +73,18 @@ class _ErrorScaffold extends StatelessWidget {
               const SizedBox(height: 12),
               Text(
                 title,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface,
+                  fontSize: 16,
+                ),
               ),
               const SizedBox(height: 6),
               Text(
                 detail,
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+                  fontSize: 12,
+                ),
                 textAlign: TextAlign.center,
               ),
             ],

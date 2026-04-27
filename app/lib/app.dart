@@ -10,6 +10,28 @@ import 'services/db/profile_repository.dart';
 import 'services/db/session_repository.dart';
 import 'services/telemetry_log.dart';
 
+/// Exposes the app-wide [ValueNotifier<ThemeMode>] to the widget tree.
+/// Any screen can read the current mode or swap it without coupling to
+/// [AppServicesScope] or requiring a Provider rebuild.
+class ThemeModeScope extends InheritedWidget {
+  const ThemeModeScope({
+    super.key,
+    required this.notifier,
+    required super.child,
+  });
+
+  final ValueNotifier<ThemeMode> notifier;
+
+  static ValueNotifier<ThemeMode> of(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType<ThemeModeScope>();
+    assert(scope != null, 'ThemeModeScope not found in widget tree.');
+    return scope!.notifier;
+  }
+
+  @override
+  bool updateShouldNotify(ThemeModeScope old) => notifier != old.notifier;
+}
+
 class FiTrackApp extends StatefulWidget {
   const FiTrackApp({super.key});
 
@@ -20,6 +42,7 @@ class FiTrackApp extends StatefulWidget {
 class _FiTrackAppState extends State<FiTrackApp> {
   late final Future<AppServices> _servicesFuture;
   DatabaseService? _dbForDispose;
+  final ValueNotifier<ThemeMode> _themeMode = ValueNotifier(ThemeMode.system);
 
   @override
   void initState() {
@@ -39,11 +62,14 @@ class _FiTrackAppState extends State<FiTrackApp> {
         'app.bootstrap',
         'DB opened; migration outcome=${outcome.name}',
       );
+      final prefs = SqlitePreferencesRepository(handle);
+      final savedMode = await prefs.getThemeMode();
+      _themeMode.value = savedMode;
       return AppServices(
         databaseService: db,
         profileRepository: SqliteProfileRepository(handle),
         sessionRepository: SqliteSessionRepository(handle),
-        preferencesRepository: SqlitePreferencesRepository(handle),
+        preferencesRepository: prefs,
       );
     } catch (e, st) {
       // Bootstrap failure is recoverable: fall back to in-memory repos so the
@@ -64,8 +90,7 @@ class _FiTrackAppState extends State<FiTrackApp> {
 
   @override
   void dispose() {
-    // Best-effort close — fire-and-forget, matches the VM's profile-flush
-    // pattern. We don't block teardown on a DB I/O round-trip.
+    _themeMode.dispose();
     _dbForDispose?.close();
     super.dispose();
   }
@@ -76,21 +101,27 @@ class _FiTrackAppState extends State<FiTrackApp> {
       future: _servicesFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          // Black splash while the DB opens. <200ms on real devices; the
-          // FiTrackTheme.dark background matches so there's no visual flash.
           return const MaterialApp(
             debugShowCheckedModeBanner: false,
             home: Scaffold(backgroundColor: Colors.black),
           );
         }
         final services = snapshot.data!;
-        return AppServicesScope(
-          services: services,
-          child: MaterialApp(
-            title: 'FiTrack',
-            debugShowCheckedModeBanner: false,
-            theme: FiTrackTheme.dark,
-            home: const HomeScreen(),
+        return ThemeModeScope(
+          notifier: _themeMode,
+          child: AppServicesScope(
+            services: services,
+            child: ValueListenableBuilder<ThemeMode>(
+              valueListenable: _themeMode,
+              builder: (context, mode, child) => MaterialApp(
+                title: 'FiTrack',
+                debugShowCheckedModeBanner: false,
+                theme: FiTrackTheme.light,
+                darkTheme: FiTrackTheme.dark,
+                themeMode: mode,
+                home: const HomeScreen(),
+              ),
+            ),
           ),
         );
       },

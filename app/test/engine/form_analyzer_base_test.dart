@@ -1,3 +1,4 @@
+import 'package:fitrack/core/types.dart';
 import 'package:fitrack/engine/curl/curl_form_analyzer.dart';
 import 'package:fitrack/engine/form_analyzer_base.dart';
 import 'package:fitrack/engine/push_up/push_up_form_analyzer.dart';
@@ -13,7 +14,13 @@ void main() {
     });
 
     test('SquatFormAnalyzer is-a FormAnalyzerBase', () {
-      expect(SquatFormAnalyzer(), isA<FormAnalyzerBase>());
+      expect(
+        SquatFormAnalyzer(
+          variant: SquatVariant.bodyweight,
+          longFemurLifter: false,
+        ),
+        isA<FormAnalyzerBase>(),
+      );
     });
 
     test('PushUpFormAnalyzer is-a FormAnalyzerBase', () {
@@ -34,7 +41,10 @@ void main() {
     test(
       'Squat consumeCompletionErrorsWithDepth is drained after first call',
       () {
-        final analyzer = SquatFormAnalyzer();
+        final analyzer = SquatFormAnalyzer(
+          variant: SquatVariant.bodyweight,
+          longFemurLifter: false,
+        );
         analyzer.onRepStart(buildPose());
         analyzer.trackAngle(85); // below kSquatBottomAngle — clean rep.
         analyzer.consumeCompletionErrorsWithDepth(90);
@@ -44,7 +54,10 @@ void main() {
     );
 
     test('Squat base consumeCompletionErrors throws UnsupportedError', () {
-      final FormAnalyzerBase analyzer = SquatFormAnalyzer();
+      final FormAnalyzerBase analyzer = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+      );
       expect(analyzer.consumeCompletionErrors, throwsUnsupportedError);
     });
 

@@ -5,6 +5,45 @@ library;
 /// Minimum landmark confidence to use a frame for rep counting / feedback.
 const double kMinLandmarkConfidence = 0.4;
 
+/// Minimum confidence for the pose-presence gate at the ML Kit boundary —
+/// "did the model emit a position at this landmark at all?" Strictly more
+/// permissive than [kMinLandmarkConfidence] (which is the *measurement*
+/// gate inside the engine). Two layers, two concerns: this gate filters
+/// out frames where the model didn't even attempt a landmark; the engine
+/// gate then filters frames where the position is too uncertain to
+/// measure. 0.3 sits below the engine gate so we never reject a frame
+/// the engine would have accepted.
+const double kPoseGateMinConfidence = 0.3;
+
+/// Relaxed gate threshold for side-view exercises. ML Kit operates in a
+/// degraded mode when only one side of the body is visible — the
+/// off-camera arm is fully occluded so the model can't cross-anchor
+/// landmarks against each other, and on-camera landmark confidences drop
+/// across the board. 0.3 (the front-view threshold) rejects too many
+/// legitimate side-view frames; 0.15 admits the noisy reality of
+/// partial-body inputs without polluting the FSM with garbage (the
+/// `kMinLandmarkConfidence = 0.4` measurement gate inside the engine
+/// remains in place to catch frames whose landmarks made it through but
+/// aren't usable).
+const double kPoseGateMinConfidenceSideRelaxed = 0.15;
+
+// ── Joint-angle sanity clamps ───────────────────────────
+/// Minimum length of each of the two segments forming a joint angle, in
+/// normalized image coordinates (ML Kit returns landmarks in [0, 1]).
+/// Below this, the triangle is degenerate — typically because one landmark
+/// snapped onto another (occlusion, low confidence, or pose-estimation
+/// failure at peak flexion). 0.02 ≈ 2% of frame width / height — safely
+/// above pose-noise floor (~0.005) and well below any real human limb.
+const double kMinJointSegmentLength = 0.02;
+
+/// Maximum allowed ratio between the two segments of a joint-angle
+/// triangle. When `max(BA, BC) / min(BA, BC) > this`, the triangle is
+/// pathologically lopsided — likely a landmark snap. A real elbow at peak
+/// flexion gives ratios up to ~2.5 (forearm vs. upper arm). 5.0 is well
+/// above that and below the ratios produced by snapped landmarks
+/// (typically 10× or more).
+const double kMaxJointSegmentRatio = 5.0;
+
 // ── Biomechanical Logic (Index-1) ───────────────────────
 /// Mandatory lockout after state transition to prevent double-counting.
 const Duration kStateDebounce = Duration(milliseconds: 500);
@@ -43,14 +82,124 @@ const double kCurlEndAngle = 140.0;
 /// and Auto-Calibration paths are unchanged.
 ///
 /// See `T2.4_STATE.md §11.4` for the derived threshold values.
-const bool kUseDataDrivenThresholds = true;
+const bool kUseDataDrivenThresholds = false;
+
+/// When true, `RomThresholds.global(view)` consults
+/// [ManualRomOverrides.forView] before either the data-driven or legacy
+/// path. Views with a null override entry fall through to the next tier.
+///
+/// Three-tier precedence:
+///   1. Manual override (`manual_rom_overrides.dart`) — this flag
+///   2. Data-driven generated defaults (`default_rom_thresholds.dart`) —
+///      gated by [kUseDataDrivenThresholds]
+///   3. Legacy constants (`kCurlStartAngle` etc.) — always available
+///
+/// Default `true` so the diagnostic-derived front-view numbers ship.
+/// Flip to `false` to A/B test against the lower tiers without losing
+/// the manual values.
+const bool kUseManualOverrides = true;
 
 // ── Form feedback thresholds ────────────────────────────
 /// Torso swing: ΔX_shoulder / L_torso.
 const double kSwingThreshold = 0.25;
 
+/// Forward trunk lean: change in torso-to-vertical angle (degrees) relative to
+/// rep-start baseline. Only evaluated in side views (sideLeft / sideRight) where
+/// the sagittal-plane projection is faithful. 15° is permissive enough to ignore
+/// natural lean variation but catches a meaningful momentum-driven body swing.
+const double kTorsoLeanThresholdDeg = 15.0;
+
+/// Backward trunk lean threshold (degrees). Typically smaller than forward
+/// lean as hyperextension is more dangerous and clearly indicates cheat.
+const double kBackLeanThresholdDeg = 10.0;
+
+/// Shoulder shrug: vertical (Y-axis) shoulder displacement / L_torso.
+/// A positive shrug (shoulder moving UP) > this fires `shoulderShrug`.
+const double kShrugThreshold = 0.12;
+
 /// Elbow drift: ΔX_elbow / L_torso.
 const double kDriftThreshold = 0.20;
+
+// ── Sagittal sway (front view depth swing) ──────────────
+// Composite scale-invariant features over a 1€-filtered, baseline z-scored
+// signal classified by per-second velocity with N-frame hysteresis. See
+// `SagittalSwayDetector` for the full rationale and feature definitions.
+
+/// Feature weights for the composite z-scored sway signal
+///   z₁ → shoulder/hip width ratio (primary depth proxy: 1/Z scaling).
+///   z₂ → torso area normalized by hip width² (corroborates movement).
+///   z₃ → torso length over shoulder width (catches hip-thrust/compression).
+const double kSagittalWeightShoulderHipRatio = 0.65;
+const double kSagittalWeightTorsoArea = 0.30;
+const double kSagittalWeightTorsoLengthRatio = 0.05;
+
+/// Velocity threshold on the z-scored composite, in **standard-deviations
+/// per second** (signal is z-scored, time is real seconds via frame timestamps).
+/// Above +threshold = forward sway; below −threshold = backward sway.
+const double kSagittalVelocityThreshold = 1.1;
+
+/// Consecutive frames with `|v(t)| > threshold` required before the detector
+/// declares a sway event. Suppresses single-frame jitter and brief
+/// landmark-confidence dips that snuck past the visibility gate.
+const int kSagittalHysteresisFrames = 2;
+
+/// Number of FRAMES of neutral-pose samples the detector needs before it
+/// will start emitting sway decisions. The detector only ingests samples
+/// while the FSM is in IDLE or near full extension, so this is "frames
+/// observed in baseline-eligible state," not wall-clock time.
+const int kSagittalBaselineMinFrames = 30;
+
+/// Hard cap on σ adaptation: after the initial baseline window, the running
+/// σ is clamped at `cap × baselineSigma` to prevent fatigue-induced drift
+/// from gradually swallowing real form breakdown into the "neutral" range.
+const double kSagittalSigmaDriftCap = 1.5;
+
+/// Minimum landmark `inFrameLikelihood` for the detector to ingest a frame.
+/// Below this on any of the four torso landmarks (L/R shoulder, L/R hip)
+/// the detector pauses sampling rather than poisoning the EMA / baseline
+/// with degenerate values.
+const double kSagittalMinLandmarkVisibility = 0.5;
+
+/// Reject a frame's velocity computation when the sample-to-sample dt
+/// jumps to more than this multiple of the recent median dt — guards
+/// against ML Kit thermal-throttling skips that would otherwise spike v(t).
+const double kSagittalDtAnomalyFactor = 2.0;
+
+// ── Head stability corroboration (depth-swing veto) ─────
+// The head sits above the arm-over-torso occlusion zone, so its motion
+// is a clean witness for whether the spine actually moved. When the
+// SagittalSwayDetector fires but the head is stationary, the warning
+// is suppressed as occlusion artifact. See `HeadStabilityCorroborator`.
+
+/// Minimum |z-score| of the weighted head-motion signal required to
+/// corroborate a sway detection. Below this, the warning is vetoed
+/// because the head did not move with the spine — a strong signal
+/// that the shoulder/hip drift was an arm-over-torso artifact.
+const double kHeadCorroborationMinZ = 0.6;
+
+/// Min `inFrameLikelihood` for nose + both ears to participate.
+/// Below this on any required head landmark, the corroborator returns
+/// "landmarks unavailable" and the analyzer fails open (does NOT veto)
+/// — the bar is "never make detection worse than baseline."
+const double kHeadCorroborationMinVisibility = 0.6;
+
+/// Frames of neutral-pose samples needed before the corroborator emits
+/// a verdict. Mirrors `kSagittalBaselineMinFrames` so both detectors
+/// are armed at roughly the same wall-clock moment.
+const int kHeadBaselineMinFrames = 30;
+
+/// Weights for the composite head signal:
+///   weight_y * |nose.y z| + weight_s * |inter-ear distance z|
+/// Vertical motion is a more direct sagittal proxy in 2D than ear
+/// distance (which conflates lean with head turn), so it dominates.
+const double kHeadVerticalWeight = 0.7;
+const double kHeadScaleWeight = 0.3;
+
+/// Hard cap on σ adaptation for head signals — prevents long-set
+/// postural drift from swallowing real head motion. Slightly looser
+/// than `kSagittalSigmaDriftCap` because the head bobs naturally
+/// during breathing/effort.
+const double kHeadSigmaDriftCap = 2.0;
 
 // ── Timing ──────────────────────────────────────────────
 /// Minimum seconds between two audio cues of the same type.
@@ -119,8 +268,44 @@ const double kPushUpBottomAngle = 90.0;
 const double kPushUpEndAngle = 160.0;
 
 // ── Squat form thresholds ────────────────────────────────
-/// Max trunk-tibia deviation before flagging "chest up" cue (degrees).
+/// (DEPRECATED 2026-04-25, Squat Master Rebuild) Max trunk-tibia deviation
+/// before flagging the "chest up" cue. Retained as a constant — never read
+/// by new code — only to keep historic references compiling.
 const double kTrunkTibiaDeviation = 15.0;
+
+// ── Squat form thresholds (Squat Master Rebuild, 2026-04-25) ─────
+/// Lean threshold for bodyweight squat. Trunk-from-vertical > this fires
+/// `excessiveForwardLean`. Literature: Straub & Powers 2024 IJSPT (40°)
+/// + 5° measurement-noise margin for 2D RMSE (Heliyon 2024).
+const double kSquatLeanWarnDegBodyweight = 45.0;
+
+/// Lean threshold for high-bar back squat. Glassbrook 2017 + 5° margin.
+const double kSquatLeanWarnDegHBBS = 50.0;
+
+/// Long-femur lifter boost — added to active lean threshold when the
+/// "Tall lifter" Settings toggle is on. Orthogonal to the auto long-femur
+/// detection (which relaxes the BOTTOM angle, not the lean threshold).
+const double kSquatLongFemurLeanBoost = 5.0;
+
+/// Forward knee shift threshold — `(knee_x − ankle_x) / femur_len_px`.
+/// (empirical-TBD): research docs disagreed 3× (Claude 0.30, Google 0.10).
+/// Informational metric only — no TTS, no quality penalty in v1.
+const double kSquatKneeShiftWarnRatio = 0.30;
+
+/// Heel lift threshold — `(foot_index_y − heel_y) / leg_len_px`.
+/// (empirical-TBD): engineering estimate; Macrum 2012 supports 2–3% of
+/// leg length.
+const double kSquatHeelLiftWarnRatio = 0.03;
+
+// ── Squat per-rep quality scoring (multiplicative, mirrors curl) ─
+/// Maximum quality deduction for excessive forward lean. Applied
+/// proportionally to severity — see `SquatFormAnalyzer._computeQualityScore`.
+const double kQualitySquatLeanMaxDeduction = 0.20;
+
+/// Maximum quality deduction for heel lift. Applied proportionally.
+const double kQualitySquatHeelLiftMaxDeduction = 0.10;
+// `forwardKneeShift` is intentionally excluded — informational only.
+// `squatDepth` is handled via the depth_factor multiplier, not a subtraction.
 
 // ── Push-up form thresholds ──────────────────────────────
 /// Max shoulder-hip-ankle collinearity deviation for hip sag (degrees).
@@ -200,6 +385,12 @@ const double kQualitySwingMaxDeduction = 0.25;
 
 /// Maximum deduction for elbow drift (proportional to magnitude).
 const double kQualityDriftMaxDeduction = 0.20;
+
+/// Maximum deduction for shoulder shrug.
+const double kQualityShrugMaxDeduction = 0.15;
+
+/// Maximum deduction for backward lean (back hyperextension).
+const double kQualityBackLeanMaxDeduction = 0.20;
 
 /// Deduction for rushed eccentric.
 const double kQualityEccentricDeduction = 0.15;
@@ -318,3 +509,13 @@ const int kRepBoundaryMinDwellFrames = 8;
 // ── Telemetry ────────────────────────────────────────────
 /// Cap on the in-memory telemetry ring buffer (oldest entries dropped).
 const int kTelemetryRingSize = 500;
+
+// ── Feature flags ────────────────────────────────────────
+/// Front-view biceps curl is temporarily hidden from the user-facing UI
+/// while side-view accuracy is the active focus. Engine code paths
+/// (`CurlFormAnalyzer`, `CurlViewDetector` front branch, front ROM
+/// buckets) remain intact — this flag only gates surfaces the user
+/// sees: the curl view picker, calibration progress matrix, settings
+/// ROM-override rows, calibration overlay live label, and summary view
+/// label. Flip back to `true` to restore.
+const bool kCurlFrontViewEnabled = false;

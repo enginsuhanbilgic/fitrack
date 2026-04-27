@@ -177,6 +177,11 @@ void main() {
         csv.split('\n').first,
         'session_id,rep_index,quality,min_angle,max_angle,side,view,'
         'threshold_source,bucket_updated,rejected_outlier,concentric_ms,'
+        'squat_lean_deg,squat_knee_shift_ratio,squat_heel_lift_ratio,'
+        'squat_variant,'
+        'biceps_lean_deg,biceps_shoulder_drift_ratio,'
+        'biceps_elbow_drift_ratio,biceps_back_lean_deg,'
+        'biceps_elbow_drift_signed,'
         'form_errors',
       );
     });
@@ -220,7 +225,7 @@ void main() {
       expect(row, contains(',1,0,380,'));
     });
 
-    test('squat rep leaves curl-specific columns empty (NOT "null")', () {
+    test('squat rep without metrics leaves all curl + squat columns empty', () {
       final summary = SessionSummary(
         id: 9,
         exercise: ExerciseType.squat,
@@ -244,11 +249,93 @@ void main() {
         isFalse,
         reason: 'null fields must serialize as empty',
       );
-      // session_id=9, rep_index=1, quality=0.7800, then 9 empty fields
+      // session_id=9, rep_index=1, quality=0.7800, then 18 empty fields
       // (min_angle, max_angle, side, view, threshold_source, bucket_updated,
-      // rejected_outlier, concentric_ms, form_errors).
+      // rejected_outlier, concentric_ms, squat_lean_deg,
+      // squat_knee_shift_ratio, squat_heel_lift_ratio, squat_variant,
+      // biceps_lean_deg, biceps_shoulder_drift_ratio,
+      // biceps_elbow_drift_ratio, biceps_back_lean_deg,
+      // biceps_elbow_drift_signed, form_errors). 21 total columns.
       expect(row.startsWith('9,1,0.7800,'), isTrue);
-      expect(row.split(',').length, 12);
+      expect(row.split(',').length, 21);
+    });
+
+    test('squat rep WITH metrics populates the 4 squat columns', () {
+      final summary = SessionSummary(
+        id: 11,
+        exercise: ExerciseType.squat,
+        startedAt: DateTime.utc(2026, 4, 26),
+        duration: const Duration(seconds: 90),
+        totalReps: 1,
+        totalSets: 1,
+        fatigueDetected: false,
+        asymmetryDetected: false,
+      );
+      final detail = SessionDetail(
+        summary: summary,
+        eccentricTooFastCount: 0,
+        reps: const [
+          RepRow(
+            repIndex: 1,
+            quality: 0.85,
+            squatLeanDeg: 38.5,
+            squatKneeShiftRatio: 0.245,
+            squatHeelLiftRatio: 0.018,
+            squatVariant: SquatVariant.highBarBackSquat,
+          ),
+        ],
+        formErrors: const {},
+      );
+      final csv = SessionExporter.repsCsv([(session: summary, detail: detail)]);
+      final row = csv.split('\n')[1];
+      // Spot-check the 4 squat values land in the correct columns.
+      expect(row, contains(',38.50,'));
+      expect(row, contains(',0.2450,'));
+      expect(row, contains(',0.0180,'));
+      expect(row, contains(',highBarBackSquat,'));
+      // Field count must match the header (21 columns post-signed-add).
+      expect(row.split(',').length, 21);
+    });
+
+    test('bicepsCurlSide rep WITH metrics populates the 5 biceps columns', () {
+      final summary = SessionSummary(
+        id: 13,
+        exercise: ExerciseType.bicepsCurlSide,
+        startedAt: DateTime.utc(2026, 4, 26),
+        duration: const Duration(seconds: 75),
+        totalReps: 1,
+        totalSets: 1,
+        fatigueDetected: false,
+        asymmetryDetected: false,
+      );
+      final detail = SessionDetail(
+        summary: summary,
+        eccentricTooFastCount: 0,
+        reps: const [
+          RepRow(
+            repIndex: 1,
+            quality: 0.92,
+            bicepsLeanDeg: 7.50,
+            bicepsShoulderDriftRatio: 0.1234,
+            bicepsElbowDriftRatio: 0.2750,
+            bicepsBackLeanDeg: 3.25,
+            // Negative sign — elbow drifted to the −n̂ side (back).
+            bicepsElbowDriftSigned: -0.2680,
+          ),
+        ],
+        formErrors: const {},
+      );
+      final csv = SessionExporter.repsCsv([(session: summary, detail: detail)]);
+      final row = csv.split('\n')[1];
+      // Spot-check the 5 biceps values land in the correct columns.
+      expect(row, contains(',7.50,'));
+      expect(row, contains(',0.1234,'));
+      expect(row, contains(',0.2750,'));
+      expect(row, contains(',3.25,'));
+      // Negative signed value — sign must survive the round-trip.
+      expect(row, contains(',-0.2680,'));
+      // Field count must match the header (21 columns post-signed-add).
+      expect(row.split(',').length, 21);
     });
   });
 

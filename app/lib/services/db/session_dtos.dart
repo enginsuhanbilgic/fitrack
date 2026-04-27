@@ -52,7 +52,8 @@ class SessionDetail {
 }
 
 /// One `reps` table row in value form. Curl-specific fields are nullable —
-/// squat/push-up leave them NULL.
+/// squat/push-up leave them NULL. Squat-specific fields are likewise NULL on
+/// curl/push-up rows.
 class RepRow {
   const RepRow({
     required this.repIndex,
@@ -66,6 +67,15 @@ class RepRow {
     this.rejectedOutlier,
     this.concentricMs,
     this.dtwSimilarity,
+    this.squatLeanDeg,
+    this.squatKneeShiftRatio,
+    this.squatHeelLiftRatio,
+    this.squatVariant,
+    this.bicepsLeanDeg,
+    this.bicepsShoulderDriftRatio,
+    this.bicepsElbowDriftRatio,
+    this.bicepsBackLeanDeg,
+    this.bicepsElbowDriftSigned,
   });
 
   final int repIndex;
@@ -84,6 +94,49 @@ class RepRow {
   /// DTW similarity score 0.0–1.0 vs reference rep. NULL when scoring was
   /// disabled or session predates T5.3.
   final double? dtwSimilarity;
+
+  // ── Squat-only per-rep metrics (schema v3) ──
+  /// Peak forward-lean angle (degrees, signed positive) for this rep. Computed
+  /// by `SquatFormAnalyzer._signedLeanDeg`. NULL on non-squat rows AND on
+  /// squat rows written by builds older than schema v3.
+  final double? squatLeanDeg;
+
+  /// Peak knee-shift ratio for this rep — `(knee_x − ankle_x) / femur_len`.
+  /// Informational metric; same NULL semantics as `squatLeanDeg`.
+  final double? squatKneeShiftRatio;
+
+  /// Peak heel-lift ratio for this rep — `(foot_index_y − heel_y) / leg_len`.
+  /// Same NULL semantics.
+  final double? squatHeelLiftRatio;
+
+  /// `SquatVariant.name` for the variant the session ran with. NULL on
+  /// non-squat rows AND on squat rows written before schema v3.
+  final SquatVariant? squatVariant;
+
+  // ── Biceps side-view per-rep metrics (schema v5) ──
+  /// Peak forward-trunk-lean delta (degrees) for this rep — analyzer's
+  /// `_maxLeanDeltaDeg`. NULL on non-side-view rows AND on side-view rows
+  /// written by builds older than schema v5.
+  final double? bicepsLeanDeg;
+
+  /// Peak shoulder-arc displacement ratio (`disp / torso_len` in
+  /// hip-relative coords) — analyzer's `_maxShoulderArcRatio`. Same NULL
+  /// semantics as [bicepsLeanDeg].
+  final double? bicepsShoulderDriftRatio;
+
+  /// Peak absolute torso-perpendicular elbow-offset ratio — analyzer's
+  /// `_maxDriftRatio` after the PR 2 metric switch. Same NULL semantics.
+  final double? bicepsElbowDriftRatio;
+
+  /// Peak back-lean (hyperextension) degrees — analyzer's
+  /// `_maxBackLeanDeg`. Same NULL semantics.
+  final double? bicepsBackLeanDeg;
+
+  /// Signed elbow-drift ratio captured at the frame where the absolute
+  /// magnitude (`bicepsElbowDriftRatio`) peaked. Drives the retune
+  /// pipeline's split between forward-elbow and back-elbow cheats. Same
+  /// NULL semantics as the four other biceps columns.
+  final double? bicepsElbowDriftSigned;
 
   /// Rebuild a [CurlRepRecord] when every curl-specific field is present;
   /// return null for squat/push-up rows (PR3 uses `.whereType<CurlRepRecord>()`

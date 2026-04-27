@@ -78,4 +78,27 @@ abstract class LM {
     leftIndex, rightIndex, leftThumb, rightThumb,
     leftHip, rightHip,
   };
+
+  /// Body-only landmarks — excludes face (eyes, ears, mouth) and hands
+  /// (pinky, index, thumb). Used to keep the rendering clean and focused
+  /// on the large joints.
+  static const Set<int> bodyOnlyLandmarks = {
+    nose,
+    leftShoulder,
+    rightShoulder,
+    leftElbow,
+    rightElbow,
+    leftWrist,
+    rightWrist,
+    leftHip,
+    rightHip,
+    leftKnee,
+    rightKnee,
+    leftAnkle,
+    rightAnkle,
+    leftHeel,
+    rightHeel,
+    leftFootIndex,
+    rightFootIndex,
+  };
 }

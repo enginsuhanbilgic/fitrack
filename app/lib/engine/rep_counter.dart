@@ -1,6 +1,7 @@
 import '../core/constants.dart';
 import '../core/types.dart';
 import '../models/pose_result.dart';
+import 'curl/curl_form_analyzer_extras.dart';
 import 'curl/curl_strategy.dart';
 import 'curl/dtw_scorer.dart';
 import 'exercise_strategy.dart';
@@ -27,6 +28,15 @@ class RepSnapshot {
   final int eccentricTooFastCount;
   final Set<FormError> errorsTriggered;
 
+  /// Most recent peak forward-lean (deg, signed positive). Squat only.
+  final double? squatLastRepLeanDeg;
+
+  /// Most recent peak knee-shift ratio. Squat only — informational metric.
+  final double? squatLastRepKneeShiftRatio;
+
+  /// Most recent peak heel-lift ratio. Squat only.
+  final double? squatLastRepHeelLiftRatio;
+
   const RepSnapshot({
     required this.reps,
     required this.sets,
@@ -40,6 +50,9 @@ class RepSnapshot {
     this.fatigueDetected = false,
     this.eccentricTooFastCount = 0,
     this.errorsTriggered = const {},
+    this.squatLastRepLeanDeg,
+    this.squatLastRepKneeShiftRatio,
+    this.squatLastRepHeelLiftRatio,
   });
 }
 
@@ -64,6 +77,14 @@ class RepCounter {
   double? _lastAngle;
   List<FormError> _lastErrors = const [];
 
+  /// Per-rep squat quality scores accumulated this session (squat only).
+  final List<double> _squatRepQualities = [];
+
+  /// Squat-only completion callback. Fires once per committed squat rep
+  /// with the analyzer's per-rep snapshot. Squat workouts use this to
+  /// persist `reps.quality` + ratio metrics, mirroring the curl callback.
+  final SquatRepCommitCallback? _onSquatRepCommit;
+
   DateTime? _lastTransitionTime;
   DateTime? _stateStartTime;
 
@@ -75,18 +96,25 @@ class RepCounter {
     this.side = ExerciseSide.both,
     RomThresholdsProvider? curlThresholdsProvider,
     CurlRepCommitCallback? onCurlRepCommit,
+    CurlViewFlipCallback? onCurlViewFlipped,
     List<Duration> curlHistoricalConcentricDurations = const [],
     List<double>? curlReferenceRepAngleSeries,
     bool curlEnableDtwScoring = false,
-  }) {
+    SquatVariant squatVariant = SquatVariant.bodyweight,
+    bool squatLongFemurLifter = false,
+    SquatRepCommitCallback? onSquatRepCommit,
+  }) : _onSquatRepCommit = onSquatRepCommit {
     _strategy = _buildStrategy(
       exercise: exercise,
       side: side,
       curlThresholdsProvider: curlThresholdsProvider,
       onCurlRepCommit: onCurlRepCommit,
+      onCurlViewFlipped: onCurlViewFlipped,
       curlHistoricalConcentricDurations: curlHistoricalConcentricDurations,
       curlReferenceRepAngleSeries: curlReferenceRepAngleSeries,
       curlEnableDtwScoring: curlEnableDtwScoring,
+      squatVariant: squatVariant,
+      squatLongFemurLifter: squatLongFemurLifter,
     );
   }
 
@@ -95,19 +123,52 @@ class RepCounter {
     required ExerciseSide side,
     RomThresholdsProvider? curlThresholdsProvider,
     CurlRepCommitCallback? onCurlRepCommit,
+    CurlViewFlipCallback? onCurlViewFlipped,
     List<Duration> curlHistoricalConcentricDurations = const [],
     List<double>? curlReferenceRepAngleSeries,
     bool curlEnableDtwScoring = false,
+    SquatVariant squatVariant = SquatVariant.bodyweight,
+    bool squatLongFemurLifter = false,
   }) => switch (exercise) {
-    ExerciseType.bicepsCurl => CurlStrategy(
+    ExerciseType.bicepsCurlFront => CurlStrategy(
+      exerciseType: ExerciseType.bicepsCurlFront,
+      initialView: CurlCameraView.front,
       side: side,
       thresholdsProvider: curlThresholdsProvider,
       onRepCommit: onCurlRepCommit,
+      onViewFlipped: onCurlViewFlipped,
       historicalConcentricDurations: curlHistoricalConcentricDurations,
       referenceRepAngleSeries: curlReferenceRepAngleSeries,
       enableDtwScoring: curlEnableDtwScoring,
     ),
-    ExerciseType.squat => SquatStrategy(),
+    ExerciseType.bicepsCurlSide => CurlStrategy(
+      exerciseType: ExerciseType.bicepsCurlSide,
+      initialView: side == ExerciseSide.right
+          ? CurlCameraView.sideRight
+          : CurlCameraView.sideLeft,
+      side: side,
+      thresholdsProvider: curlThresholdsProvider,
+      onRepCommit: onCurlRepCommit,
+      onViewFlipped: onCurlViewFlipped,
+      historicalConcentricDurations: curlHistoricalConcentricDurations,
+      referenceRepAngleSeries: curlReferenceRepAngleSeries,
+      enableDtwScoring: curlEnableDtwScoring,
+    ),
+    // ignore: deprecated_member_use_from_same_package
+    ExerciseType.bicepsCurl => CurlStrategy(
+      exerciseType: ExerciseType.bicepsCurlFront,
+      side: side,
+      thresholdsProvider: curlThresholdsProvider,
+      onRepCommit: onCurlRepCommit,
+      onViewFlipped: onCurlViewFlipped,
+      historicalConcentricDurations: curlHistoricalConcentricDurations,
+      referenceRepAngleSeries: curlReferenceRepAngleSeries,
+      enableDtwScoring: curlEnableDtwScoring,
+    ),
+    ExerciseType.squat => SquatStrategy(
+      variant: squatVariant,
+      longFemurLifter: squatLongFemurLifter,
+    ),
     ExerciseType.pushUp => PushUpStrategy(),
   };
 
@@ -152,6 +213,7 @@ class RepCounter {
 
     if (output.repCommitted) {
       _reps++;
+      _onSquatCommit();
     }
 
     if (output.nextState != _state) {
@@ -190,6 +252,7 @@ class RepCounter {
     _lastTransitionTime = null;
     _lastErrors = const [];
     _lastAngle = null;
+    _squatRepQualities.clear();
     _strategy.onReset();
   }
 
@@ -201,6 +264,16 @@ class RepCounter {
     return strategy.scoreRep(candidate);
   }
 
+  /// Per-rep curl form telemetry (lifecycle of the analyzer's max-trackers
+  /// is `onRepStart` → `evaluate*` → `onRepEnd` — the trackers stay alive
+  /// at commit time, cleared by the *next* `onRepStart`). Non-curl
+  /// strategies return null so the caller can short-circuit.
+  CurlFormAnalyzerExtras? get curlFormExtras {
+    final strategy = _strategy;
+    if (strategy is! CurlStrategy) return null;
+    return strategy.formExtras;
+  }
+
   // ── Internals ─────────────────────────────────────────────────────
 
   void _resetToIdle() {
@@ -208,11 +281,35 @@ class RepCounter {
     _stateStartTime = null;
   }
 
+  /// Called once per committed rep, regardless of exercise. Squat-specific
+  /// bookkeeping (quality accumulation + commit callback) lives here so
+  /// the curl path is unchanged.
+  void _onSquatCommit() {
+    final strategy = _strategy;
+    if (strategy is! SquatStrategy) return;
+    final quality = strategy.lastRepQuality;
+    if (quality != null) _squatRepQualities.add(quality);
+    final cb = _onSquatRepCommit;
+    if (cb != null) {
+      cb(
+        repIndex: _reps,
+        quality: quality,
+        leanDeg: strategy.lastRepLeanDeg,
+        kneeShiftRatio: strategy.lastRepKneeShiftRatio,
+        heelLiftRatio: strategy.lastRepHeelLiftRatio,
+      );
+    }
+  }
+
   RepSnapshot _snapshot() {
-    // Surface curl-specific fields only when the active strategy is curl.
+    // Surface exercise-specific fields only when the active strategy matches.
     // One-per-frame downcast — acceptable cost for cross-layer clarity.
     final strategy = _strategy;
     final isCurl = strategy is CurlStrategy;
+    final isSquat = strategy is SquatStrategy;
+    final squatAvg = isSquat && _squatRepQualities.isNotEmpty
+        ? _squatRepQualities.reduce((a, b) => a + b) / _squatRepQualities.length
+        : null;
     return RepSnapshot(
       reps: _reps,
       sets: _sets,
@@ -220,14 +317,36 @@ class RepCounter {
       jointAngle: _lastAngle,
       formErrors: _lastErrors,
       detectedView: isCurl ? strategy.lockedView : CurlCameraView.unknown,
-      lastRepQuality: isCurl ? strategy.formExtras.lastRepQuality : null,
-      averageQuality: isCurl ? strategy.formExtras.averageQuality : null,
-      repQualities: isCurl ? strategy.formExtras.repQualities : const [],
+      lastRepQuality: isCurl
+          ? strategy.formExtras.lastRepQuality
+          : (isSquat ? strategy.lastRepQuality : null),
+      averageQuality: isCurl
+          ? strategy.formExtras.averageQuality
+          : (isSquat ? squatAvg : null),
+      repQualities: isCurl
+          ? strategy.formExtras.repQualities
+          : (isSquat ? List.unmodifiable(_squatRepQualities) : const []),
       fatigueDetected: isCurl ? strategy.formExtras.fatigueDetected : false,
       eccentricTooFastCount: isCurl
           ? strategy.formExtras.eccentricTooFastCount
           : 0,
       errorsTriggered: const {},
+      squatLastRepLeanDeg: isSquat ? strategy.lastRepLeanDeg : null,
+      squatLastRepKneeShiftRatio: isSquat
+          ? strategy.lastRepKneeShiftRatio
+          : null,
+      squatLastRepHeelLiftRatio: isSquat ? strategy.lastRepHeelLiftRatio : null,
     );
   }
 }
+
+/// Squat-only rep-commit callback. Fires once per committed rep with the
+/// analyzer's per-rep snapshot (quality + ratio metrics).
+typedef SquatRepCommitCallback =
+    void Function({
+      required int repIndex,
+      required double? quality,
+      required double? leanDeg,
+      required double? kneeShiftRatio,
+      required double? heelLiftRatio,
+    });

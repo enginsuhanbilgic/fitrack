@@ -18,7 +18,7 @@ import '../models/pose_result.dart';
 abstract class FormAnalyzerBase {
   void onRepStart(PoseResult startSnapshot);
 
-  List<FormError> evaluate(PoseResult current);
+  List<FormError> evaluate(PoseResult current, {DateTime? now});
 
   List<FormError> consumeCompletionErrors();
 

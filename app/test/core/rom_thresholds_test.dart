@@ -13,42 +13,52 @@ class _StubBucket implements RomBucketLike {
 
 void main() {
   group('RomThresholds.global', () {
-    // These tests assume the data-driven flag is on — which it is in shipping
-    // config (constants.dart). If the flag is ever flipped back to `false`
-    // (legacy `kCurl*` constants), these tests must be reworked rather than
-    // silently regress.
-    test('data-driven branch is active under kUseDataDrivenThresholds', () {
+    // Three-tier resolver: manual override > data-driven > legacy.
+    // These tests describe behavior under the SHIPPING flag config: manual
+    // overrides on, data-driven off. If either flag flips, rework the tests
+    // (with explicit acknowledgement of the new tier in scope) rather than
+    // silently regressing.
+    test('manual-override branch is active under kUseManualOverrides', () {
       expect(
-        kUseDataDrivenThresholds,
+        kUseManualOverrides,
         isTrue,
         reason:
-            'Test file assumes the data-driven branch. Flip this precondition '
-            'if the flag is intentionally set to false.',
+            'Test file assumes the manual-override branch is enabled. Flip '
+            'this precondition if the flag is intentionally set to false.',
       );
     });
 
-    test('front view returns the T2.4 front bucket', () {
+    test('front view returns the manual override bucket', () {
       final t = RomThresholds.global(CurlCameraView.front);
 
-      // Values from DefaultRomThresholds (default_rom_thresholds.dart).
-      expect(t.startAngle, closeTo(172.94, 0.01));
-      expect(t.peakAngle, closeTo(19.75, 0.01));
-      expect(t.peakExitAngle, closeTo(34.75, 0.01));
-      expect(t.endAngle, closeTo(171.94, 0.01));
+      // Values from manual_rom_overrides.dart — derived from the 2026-04-26
+      // diagnostic-mode session with generalization tolerances.
+      expect(t.startAngle, closeTo(148.0, 0.01));
+      expect(t.peakAngle, closeTo(35.0, 0.01));
+      expect(t.peakExitAngle, closeTo(50.0, 0.01));
+      expect(t.endAngle, closeTo(128.0, 0.01));
       expect(t.source, ThresholdSource.global);
     });
 
-    test('sideLeft view returns the T2.4 side-left bucket', () {
-      final t = RomThresholds.global(CurlCameraView.sideLeft);
+    test(
+      'sideLeft view falls through to legacy constants (no override yet)',
+      () {
+        // Manual override for sideLeft is null until a side-view diagnostic
+        // session is captured. Data-driven flag is off in shipping config.
+        // → Legacy constants from constants.dart.
+        final t = RomThresholds.global(CurlCameraView.sideLeft);
 
-      expect(t.startAngle, closeTo(143.85, 0.01));
-      expect(t.peakAngle, closeTo(59.62, 0.01));
-      expect(t.peakExitAngle, closeTo(74.62, 0.01));
-      expect(t.endAngle, closeTo(142.85, 0.01));
-      expect(t.source, ThresholdSource.global);
-    });
+        expect(t.startAngle, kCurlStartAngle);
+        expect(t.peakAngle, kCurlPeakAngle);
+        expect(t.peakExitAngle, kCurlPeakExitAngle);
+        expect(t.endAngle, kCurlEndAngle);
+        expect(t.source, ThresholdSource.global);
+      },
+    );
 
-    test('sideRight mirrors sideLeft (bilateral symmetry)', () {
+    test('sideRight falls through to legacy (mirrors sideLeft today)', () {
+      // Same null-override / legacy-fallback path as sideLeft. Will diverge
+      // when one or both side overrides are populated.
       final left = RomThresholds.global(CurlCameraView.sideLeft);
       final right = RomThresholds.global(CurlCameraView.sideRight);
 
@@ -58,15 +68,16 @@ void main() {
       expect(right.endAngle, left.endAngle);
     });
 
-    test('no-arg call routes unknown → sideLeft bucket', () {
+    test('unknown view falls through to legacy', () {
+      // Unknown returns null from manual overrides → falls to data-driven
+      // (off) → falls to legacy constants. Matches sideLeft/sideRight today.
       final unknown = RomThresholds.global();
-      final sideLeft = RomThresholds.global(CurlCameraView.sideLeft);
 
-      expect(unknown.startAngle, sideLeft.startAngle);
-      expect(unknown.peakAngle, sideLeft.peakAngle);
+      expect(unknown.startAngle, kCurlStartAngle);
+      expect(unknown.peakAngle, kCurlPeakAngle);
     });
 
-    test('FSM-completability holds for every data-driven bucket', () {
+    test('FSM-completability holds for every cold-start bucket', () {
       for (final v in CurlCameraView.values) {
         final t = RomThresholds.global(v);
         expect(

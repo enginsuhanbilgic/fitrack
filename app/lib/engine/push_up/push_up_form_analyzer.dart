@@ -29,7 +29,7 @@ class PushUpFormAnalyzer extends FormAnalyzerBase {
 
   /// Frame-level evaluation — returns hipSag if active.
   @override
-  List<FormError> evaluate(PoseResult current) {
+  List<FormError> evaluate(PoseResult current, {DateTime? now}) {
     final errors = <FormError>[];
 
     // Angle at hip in shoulder→hip→ankle triangle.

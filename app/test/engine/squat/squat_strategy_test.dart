@@ -269,4 +269,76 @@ void main() {
       expect(out.repCommitted, isTrue);
     });
   });
+
+  group('SquatStrategy — variant + tall-lifter constructor params', () {
+    test('default variant is bodyweight, lean threshold = 45°', () {
+      final s = SquatStrategy();
+      expect(s.variant, SquatVariant.bodyweight);
+      expect(s.longFemurLifter, isFalse);
+      expect(s.leanWarnDeg, 45.0);
+    });
+
+    test('HBBS variant raises lean threshold to 50°', () {
+      final s = SquatStrategy(variant: SquatVariant.highBarBackSquat);
+      expect(s.leanWarnDeg, 50.0);
+    });
+
+    test('tall-lifter toggle adds +5° to bodyweight threshold (50°)', () {
+      final s = SquatStrategy(longFemurLifter: true);
+      expect(s.leanWarnDeg, 50.0);
+    });
+
+    test('tall-lifter + HBBS combine to 55° (variant + boost)', () {
+      final s = SquatStrategy(
+        variant: SquatVariant.highBarBackSquat,
+        longFemurLifter: true,
+      );
+      expect(s.leanWarnDeg, 55.0);
+    });
+  });
+
+  group('SquatStrategy — long-femur orthogonality (plan flow-decision #3)', () {
+    test(
+      'tall-lifter toggle does NOT widen BOTTOM angle (only widens lean)',
+      () {
+        // Toggle ON, but auto-detect requires 3 reps in [90°, 100°].
+        final s = SquatStrategy(longFemurLifter: true);
+        expect(
+          s.effectiveBottomAngle,
+          kSquatBottomAngle,
+          reason: 'BOTTOM gate is unaffected by the user toggle',
+        );
+      },
+    );
+
+    test(
+      'auto-detected long-femur does NOT widen lean threshold (only widens BOTTOM)',
+      () {
+        // Toggle OFF — even after auto-detection, lean threshold stays at 45°
+        // (orthogonality: auto-detect targets BOTTOM, toggle targets lean).
+        final s = SquatStrategy();
+        expect(s.leanWarnDeg, 45.0);
+        // We can't easily trigger auto-detection in this test (the FSM gates
+        // on `every (a) => a > 90` AND `every (a) => a <= 100`, mutually
+        // exclusive under default thresholds). Assertion is on the static
+        // contract: the analyzer's lean threshold is captured at
+        // construction and never updated by the strategy's auto-flag.
+      },
+    );
+  });
+
+  group('SquatStrategy — quality forwarding', () {
+    test('lastRepQuality is null before first commit', () {
+      final s = SquatStrategy();
+      expect(s.lastRepQuality, isNull);
+    });
+
+    test('lastRepQuality is set after a rep commits', () {
+      final s = SquatStrategy();
+      driveRep(strategy: s, minAngle: 80);
+      expect(s.lastRepQuality, isNotNull);
+      expect(s.lastRepQuality! >= 0.0, isTrue);
+      expect(s.lastRepQuality! <= 1.0, isTrue);
+    });
+  });
 }

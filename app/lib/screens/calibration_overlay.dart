@@ -93,6 +93,27 @@ class CalibrationOverlay extends StatelessWidget {
                     textAlign: TextAlign.center,
                   ),
                 ),
+                if (errorMessage == null &&
+                    detectedView != CurlCameraView.unknown) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    !kCurlFrontViewEnabled &&
+                            detectedView == CurlCameraView.front
+                        ? 'Front view isn\'t supported yet — please turn '
+                              '90° so the camera sees you from the side.'
+                        : 'Calibrating ${_viewLabel(detectedView).toLowerCase()} profile. '
+                              'Do a ${_otherViewLabel(detectedView)} workout to calibrate that view too.',
+                    style: TextStyle(
+                      color:
+                          !kCurlFrontViewEnabled &&
+                              detectedView == CurlCameraView.front
+                          ? Colors.orangeAccent
+                          : Colors.white54,
+                      fontSize: 12,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ],
             ),
           ),
@@ -151,9 +172,15 @@ class CalibrationOverlay extends StatelessWidget {
                     _Chip(
                       icon: Icons.videocam,
                       label: viewLocked
-                          ? _viewLabel(detectedView)
+                          ? (!kCurlFrontViewEnabled &&
+                                    detectedView == CurlCameraView.front
+                                ? 'Side view needed'
+                                : _viewLabel(detectedView))
                           : 'Detecting view…',
-                      colored: viewLocked,
+                      colored:
+                          viewLocked &&
+                          !(!kCurlFrontViewEnabled &&
+                              detectedView == CurlCameraView.front),
                     ),
                     if (secondsRemaining != null)
                       _Chip(
@@ -198,6 +225,14 @@ class CalibrationOverlay extends StatelessWidget {
     CurlCameraView.sideLeft => 'Side · Left',
     CurlCameraView.sideRight => 'Side · Right',
     CurlCameraView.unknown => 'Detecting…',
+  };
+
+  // Returns a short label for the complementary view — shown in the
+  // awareness hint so the user knows the other view exists.
+  static String _otherViewLabel(CurlCameraView v) => switch (v) {
+    CurlCameraView.front => 'side-view',
+    CurlCameraView.sideLeft || CurlCameraView.sideRight => 'front-view',
+    CurlCameraView.unknown => 'other-view',
   };
 }
 

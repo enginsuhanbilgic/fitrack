@@ -143,6 +143,7 @@ void main() {
               required minAngle,
               required maxAngle,
               required concentricDuration,
+              minAtPeak,
             }) {
               commitCount++;
               committedSide = side;
@@ -200,6 +201,7 @@ void main() {
               required minAngle,
               required maxAngle,
               required concentricDuration,
+              minAtPeak,
             }) {
               commitCount++;
             },
@@ -303,6 +305,7 @@ void main() {
               required minAngle,
               required maxAngle,
               required concentricDuration,
+              minAtPeak,
             }) {
               commitCount++;
             },
@@ -325,24 +328,28 @@ void main() {
   });
 
   group('CurlStrategy — reset semantics', () {
-    test('onReset clears locked view', () {
+    // Decision A (Runtime View Re-detection plan): the locked view is
+    // STICKY across set boundaries, because a user's body orientation
+    // persists between sets. Reverting to `_initialView` would force the
+    // runtime detector to re-acquire any flip every single set.
+    test('onReset preserves locked view (sticky across reset)', () {
       final strategy = CurlStrategy();
       lockView(strategy, buildFrontPose());
       expect(strategy.lockedView, CurlCameraView.front);
 
       strategy.onReset();
 
-      expect(strategy.lockedView, CurlCameraView.unknown);
+      expect(strategy.lockedView, CurlCameraView.front);
     });
 
-    test('onNextSet clears locked view (view is re-detected per set)', () {
+    test('onNextSet preserves locked view (sticky across set boundary)', () {
       final strategy = CurlStrategy();
       lockView(strategy, buildFrontPose());
       expect(strategy.lockedView, CurlCameraView.front);
 
       strategy.onNextSet();
 
-      expect(strategy.lockedView, CurlCameraView.unknown);
+      expect(strategy.lockedView, CurlCameraView.front);
     });
   });
 

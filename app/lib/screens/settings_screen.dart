@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 
 import 'package:share_plus/share_plus.dart';
 
+import '../app.dart';
 import '../core/constants.dart';
 import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
@@ -36,6 +37,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loading = true;
   bool _showDetails = false;
   bool _dtwScoringEnabled = false;
+  bool _squatLongFemurLifter = false;
+  bool _diagnosticDisableAutoCalibration = false;
+  ThemeMode _themeMode = ThemeMode.system;
 
   @override
   void didChangeDependencies() {
@@ -52,12 +56,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final services = AppServicesScope.of(context);
     final p = await _repository.loadCurl();
     final dtw = await services.preferencesRepository.getEnableDtwScoring();
+    final longFemur = await services.preferencesRepository
+        .getSquatLongFemurLifter();
+    final diagnosticDisableAutoCal = await services.preferencesRepository
+        .getDiagnosticDisableAutoCalibration();
+    final themeMode = await services.preferencesRepository.getThemeMode();
     if (!mounted) return;
     setState(() {
       _profile = p;
       _dtwScoringEnabled = dtw;
+      _squatLongFemurLifter = longFemur;
+      _diagnosticDisableAutoCalibration = diagnosticDisableAutoCal;
+      _themeMode = themeMode;
       _loading = false;
     });
+  }
+
+  Future<void> _setThemeMode(ThemeMode mode) async {
+    // Capture both context-dependent objects before the await gap.
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    final themeModeNotifier = ThemeModeScope.of(context);
+    await prefs.setThemeMode(mode);
+    themeModeNotifier.value = mode;
+    TelemetryLog.instance.log('preferences.theme_mode_changed', mode.name);
+    if (!mounted) return;
+    setState(() => _themeMode = mode);
   }
 
   Future<void> _setDtwScoring(bool value) async {
@@ -69,6 +92,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (!mounted) return;
     setState(() => _dtwScoringEnabled = value);
+  }
+
+  Future<void> _setSquatLongFemurLifter(bool value) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setSquatLongFemurLifter(value);
+    TelemetryLog.instance.log(
+      'preferences.squat_long_femur_toggled',
+      'enabled=$value',
+    );
+    if (!mounted) return;
+    setState(() => _squatLongFemurLifter = value);
+  }
+
+  Future<void> _setDiagnosticDisableAutoCalibration(bool value) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setDiagnosticDisableAutoCalibration(value);
+    TelemetryLog.instance.log(
+      'preferences.diagnostic_disable_auto_cal_toggled',
+      'enabled=$value',
+    );
+    if (!mounted) return;
+    setState(() => _diagnosticDisableAutoCalibration = value);
   }
 
   Future<void> _confirmReset() async {
@@ -99,14 +144,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  void _recalibrate() {
+  Future<void> _recalibrate() async {
+    final surfaceColor = Theme.of(context).colorScheme.surface;
+    final selected = await showModalBottomSheet<ExerciseType>(
+      context: context,
+      backgroundColor: surfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
+              child: Text(
+                'Recalibrate — choose view',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+            /* ListTile(
+              leading: const Icon(Icons.face),
+              title: const Text('Front view'),
+              subtitle: const Text('Face the camera'),
+              onTap: () => Navigator.pop(ctx, ExerciseType.bicepsCurlFront),
+            ), */
+            ListTile(
+              leading: const Icon(Icons.rotate_90_degrees_ccw),
+              title: const Text('Side view'),
+              subtitle: const Text('Turn sideways to the camera'),
+              onTap: () => Navigator.pop(ctx, ExerciseType.bicepsCurlSide),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (_) => const WorkoutScreen(
-          exercise: ExerciseType.bicepsCurl,
-          forceCalibration: true,
-        ),
+        builder: (_) =>
+            WorkoutScreen(exercise: selected, forceCalibration: true),
       ),
     );
   }
@@ -156,6 +235,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: _loading
@@ -198,6 +278,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onTap: _exportSessions,
                 ),
                 const Divider(),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 4),
+                  child: Text(
+                    'Appearance',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withValues(
+                        alpha: 0.54,
+                      ),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: SegmentedButton<ThemeMode>(
+                    segments: const [
+                      ButtonSegment(
+                        value: ThemeMode.system,
+                        icon: Icon(Icons.brightness_auto),
+                        label: Text('System'),
+                      ),
+                      ButtonSegment(
+                        value: ThemeMode.light,
+                        icon: Icon(Icons.light_mode),
+                        label: Text('Light'),
+                      ),
+                      ButtonSegment(
+                        value: ThemeMode.dark,
+                        icon: Icon(Icons.dark_mode),
+                        label: Text('Dark'),
+                      ),
+                    ],
+                    selected: {_themeMode},
+                    onSelectionChanged: (s) => _setThemeMode(s.first),
+                  ),
+                ),
+                const Divider(),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
@@ -207,6 +326,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   value: _dtwScoringEnabled,
                   onChanged: _setDtwScoring,
+                ),
+                const Divider(),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 4),
+                  child: Text(
+                    'Squat',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withValues(
+                        alpha: 0.54,
+                      ),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Tall lifter (relax lean threshold)'),
+                  subtitle: const Text('Applies to next workout'),
+                  value: _squatLongFemurLifter,
+                  onChanged: _setSquatLongFemurLifter,
+                ),
+                const Divider(),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 4),
+                  child: Text(
+                    'Diagnostics',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withValues(
+                        alpha: 0.54,
+                      ),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Disable auto-calibration (curl)'),
+                  subtitle: const Text(
+                    'Forces every rep to use cold-start defaults. '
+                    'For tuning data collection only — turn off after.',
+                  ),
+                  value: _diagnosticDisableAutoCalibration,
+                  onChanged: _setDiagnosticDisableAutoCalibration,
                 ),
               ],
             ),
@@ -227,9 +395,10 @@ class _ProfileSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final p = profile;
     final summary = p == null ? null : ProfileSummary.of(p);
-    final overallStatus = _overallStatus(summary);
+    final overallStatus = _overallStatus(summary, theme);
 
     return Card(
       child: Padding(
@@ -251,9 +420,13 @@ class _ProfileSection extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             if (p == null || p.buckets.isEmpty)
-              const Text(
+              Text(
                 'Not calibrated. Start a workout to begin recording.',
-                style: TextStyle(color: Colors.white70),
+                style: TextStyle(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.70),
+                ),
               )
             else
               ..._allCombos().map((combo) {
@@ -281,15 +454,18 @@ class _ProfileSection extends StatelessWidget {
   }
 
   static List<(ProfileSide, CurlCameraView)> _allCombos() => const [
-    (ProfileSide.left, CurlCameraView.front),
-    (ProfileSide.right, CurlCameraView.front),
+    if (kCurlFrontViewEnabled) (ProfileSide.left, CurlCameraView.front),
+    if (kCurlFrontViewEnabled) (ProfileSide.right, CurlCameraView.front),
     (ProfileSide.left, CurlCameraView.sideLeft),
     (ProfileSide.right, CurlCameraView.sideRight),
   ];
 
-  static (String, Color) _overallStatus(ProfileSummary? s) {
+  static (String, Color) _overallStatus(ProfileSummary? s, ThemeData theme) {
     if (s == null || s.totalBuckets == 0) {
-      return ('Uncalibrated', Colors.white38);
+      return (
+        'Uncalibrated',
+        theme.colorScheme.onSurface.withValues(alpha: 0.38),
+      );
     }
     if (s.calibratedBuckets == 0) {
       return ('Auto', Colors.orangeAccent);
@@ -313,11 +489,14 @@ class _BucketRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final calibrated =
         bucket != null && bucket!.sampleCount >= kCalibrationMinReps;
     final dotColor = calibrated
         ? const Color(0xFF00E676)
-        : (bucket == null ? Colors.white24 : Colors.orangeAccent);
+        : (bucket == null
+              ? theme.colorScheme.onSurface.withValues(alpha: 0.24)
+              : Colors.orangeAccent);
     final samples = bucket?.sampleCount ?? 0;
 
     return Padding(
@@ -344,7 +523,10 @@ class _BucketRow extends StatelessWidget {
               ),
               Text(
                 '$samples ${samples == 1 ? "rep" : "reps"}',
-                style: const TextStyle(color: Colors.white60, fontSize: 13),
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.60),
+                  fontSize: 13,
+                ),
               ),
             ],
           ),
@@ -354,7 +536,10 @@ class _BucketRow extends StatelessWidget {
               child: Text(
                 'Peak ${bucket!.observedMinAngle.toStringAsFixed(0)}° · '
                 'Rest ${bucket!.observedMaxAngle.toStringAsFixed(0)}°',
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+                  fontSize: 12,
+                ),
               ),
             ),
         ],

@@ -25,6 +25,13 @@ abstract class SessionRepository {
   /// with `event.repQualities` for non-curl sessions). Any `null` entry
   /// persists as NULL in `reps.concentric_ms`. Empty list = write NULL for
   /// every rep (pre-WP5.4 behavior + non-curl sessions).
+  ///
+  /// `squatRepMetrics` is index-aligned with `event.squatRepMetrics` (which
+  /// is in turn index-aligned with the rep order). Each entry's
+  /// `leanDeg` / `kneeShiftRatio` / `heelLiftRatio` lands in the matching
+  /// schema-v3 column on the `reps` row; `event.squatVariant.name` lands in
+  /// `squat_variant`. Empty list = NULL for every rep (curl + push-up
+  /// sessions, or squat sessions on schema-v2 builds).
   Future<int> insertCompletedSession(
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
@@ -90,6 +97,11 @@ class SqliteSessionRepository implements SessionRepository {
       // Curl path: one row per CurlRepRecord with all curl columns populated.
       // Non-curl: one row per repQualities entry with only rep_index+quality.
       if (event.curlRepRecords.isNotEmpty) {
+        // Side-view per-rep biceps metrics are index-aligned with the rep
+        // order (1-based via `repIndex`), populated only for `bicepsCurlSide`
+        // sessions. Front-curl, squat, and push-up rows leave the four
+        // schema-v5 columns NULL.
+        final isCurlSide = event.exercise == ExerciseType.bicepsCurlSide;
         for (final r in event.curlRepRecords) {
           final quality =
               r.repIndex >= 1 && r.repIndex <= event.repQualities.length
@@ -101,6 +113,10 @@ class SqliteSessionRepository implements SessionRepository {
           );
           final dtwSimilarity = r.repIndex - 1 < dtwSimilarities.length
               ? dtwSimilarities[r.repIndex - 1]
+              : null;
+          final bicepsMetric =
+              isCurlSide && r.repIndex - 1 < event.bicepsSideRepMetrics.length
+              ? event.bicepsSideRepMetrics[r.repIndex - 1]
               : null;
           await txn.insert('reps', <String, Object?>{
             'session_id': sessionId,
@@ -115,15 +131,32 @@ class SqliteSessionRepository implements SessionRepository {
             'rejected_outlier': r.rejectedOutlier ? 1 : 0,
             'concentric_ms': concentricMs,
             'dtw_similarity': dtwSimilarity,
+            'biceps_lean_deg': bicepsMetric?.leanDeg,
+            'biceps_shoulder_drift_ratio': bicepsMetric?.shoulderDriftRatio,
+            'biceps_elbow_drift_ratio': bicepsMetric?.elbowDriftRatio,
+            'biceps_back_lean_deg': bicepsMetric?.backLeanDeg,
+            'biceps_elbow_drift_signed': bicepsMetric?.elbowDriftSigned,
           });
         }
       } else {
+        // Non-curl path. Squat sessions populate the schema-v3 squat columns
+        // when per-rep metrics are present; push-up + pre-rebuild squat rows
+        // leave them NULL.
+        final isSquat = event.exercise == ExerciseType.squat;
+        final variantName = isSquat ? event.squatVariant.name : null;
         for (var i = 0; i < event.repQualities.length; i++) {
+          final squatMetric = isSquat && i < event.squatRepMetrics.length
+              ? event.squatRepMetrics[i]
+              : null;
           await txn.insert('reps', <String, Object?>{
             'session_id': sessionId,
             'rep_index': i + 1,
             'quality': event.repQualities[i],
             'concentric_ms': _concentricMsAt(concentricDurations, i),
+            'squat_lean_deg': squatMetric?.leanDeg,
+            'squat_knee_shift_ratio': squatMetric?.kneeShiftRatio,
+            'squat_heel_lift_ratio': squatMetric?.heelLiftRatio,
+            'squat_variant': squatMetric == null ? null : variantName,
           });
         }
       }
@@ -144,7 +177,7 @@ class SqliteSessionRepository implements SessionRepository {
   /// always have `CurlCameraView.unknown`; store NULL for those so the column
   /// carries real information.
   String? _detectedViewFor(WorkoutCompletedEvent event) {
-    if (event.exercise != ExerciseType.bicepsCurl) return null;
+    if (!event.exercise.isCurl) return null;
     if (event.detectedView == CurlCameraView.unknown) return null;
     return event.detectedView.name;
   }
@@ -233,19 +266,26 @@ class SqliteSessionRepository implements SessionRepository {
     // rep the analyzer failed to time stay out of the baseline).
     final cutoff =
         DateTime.now().millisecondsSinceEpoch - window.inMilliseconds;
-    final rows = await _db.rawQuery(
-      '''
+    // For curl exercises, pool all three variants (front, side, legacy) so the
+    // fatigue baseline reflects all curl sessions regardless of view. The
+    // legacy name is included as a safety net for rows that missed the v4
+    // migration. Non-curl exercises query by exact name as before.
+    final exerciseClause = exercise.isCurl
+        ? "s.exercise IN ('bicepsCurlFront', 'bicepsCurlSide', 'bicepsCurl')"
+        : 's.exercise = ?';
+    final args = exercise.isCurl
+        ? <Object?>[cutoff, limitReps]
+        : <Object?>[exercise.name, cutoff, limitReps];
+    final rows = await _db.rawQuery('''
 SELECT r.concentric_ms
 FROM reps AS r
 JOIN sessions AS s ON s.id = r.session_id
-WHERE s.exercise = ?
+WHERE $exerciseClause
   AND s.started_at >= ?
   AND r.concentric_ms IS NOT NULL
 ORDER BY s.started_at DESC, r.rep_index ASC
 LIMIT ?
-''',
-      <Object?>[exercise.name, cutoff, limitReps],
-    );
+''', args);
     return rows
         .map((r) => Duration(milliseconds: r['concentric_ms'] as int))
         .toList(growable: false);
@@ -257,7 +297,7 @@ LIMIT ?
     final detectedViewName = row['detected_view'] as String?;
     return SessionSummary(
       id: row['id'] as int,
-      exercise: ExerciseType.values.byName(row['exercise'] as String),
+      exercise: _parseExerciseType(row['exercise'] as String),
       startedAt: DateTime.fromMillisecondsSinceEpoch(row['started_at'] as int),
       duration: Duration(milliseconds: row['duration_ms'] as int),
       totalReps: row['total_reps'] as int,
@@ -275,6 +315,7 @@ LIMIT ?
     final sideName = row['side'] as String?;
     final viewName = row['view'] as String?;
     final sourceName = row['threshold_source'] as String?;
+    final squatVariantName = row['squat_variant'] as String?;
     return RepRow(
       repIndex: row['rep_index'] as int,
       quality: (row['quality'] as num?)?.toDouble(),
@@ -293,7 +334,42 @@ LIMIT ?
           : (row['rejected_outlier'] as int) == 1,
       concentricMs: row['concentric_ms'] as int?,
       dtwSimilarity: (row['dtw_similarity'] as num?)?.toDouble(),
+      squatLeanDeg: (row['squat_lean_deg'] as num?)?.toDouble(),
+      squatKneeShiftRatio: (row['squat_knee_shift_ratio'] as num?)?.toDouble(),
+      squatHeelLiftRatio: (row['squat_heel_lift_ratio'] as num?)?.toDouble(),
+      // Try/catch around `byName` so an unknown variant string from a future
+      // build (e.g. `frontSquat`) doesn't poison the read path. Same pattern
+      // as `SqlitePreferencesRepository.getSquatVariant`.
+      squatVariant: squatVariantName == null
+          ? null
+          : _safeSquatVariant(squatVariantName),
+      bicepsLeanDeg: (row['biceps_lean_deg'] as num?)?.toDouble(),
+      bicepsShoulderDriftRatio: (row['biceps_shoulder_drift_ratio'] as num?)
+          ?.toDouble(),
+      bicepsElbowDriftRatio: (row['biceps_elbow_drift_ratio'] as num?)
+          ?.toDouble(),
+      bicepsBackLeanDeg: (row['biceps_back_lean_deg'] as num?)?.toDouble(),
+      bicepsElbowDriftSigned: (row['biceps_elbow_drift_signed'] as num?)
+          ?.toDouble(),
     );
+  }
+
+  static ExerciseType _parseExerciseType(String name) {
+    try {
+      return ExerciseType.values.byName(name);
+    } catch (_) {
+      // Legacy 'bicepsCurl' rows not caught by the v4 migration fall back to
+      // front-view — the only view that was reliably used before this PR.
+      return ExerciseType.bicepsCurlFront;
+    }
+  }
+
+  static SquatVariant? _safeSquatVariant(String name) {
+    try {
+      return SquatVariant.values.byName(name);
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -352,8 +428,18 @@ class InMemorySessionRepository implements SessionRepository {
     }
     final reps = s.event.curlRepRecords.isNotEmpty
         ? s.event.curlRepRecords
-              .map(
-                (r) => RepRow(
+              .map((r) {
+                // Mirror the SQLite write path so the in-memory double round-trips
+                // identically. Side-view biceps metrics are index-aligned with the
+                // rep order; non-side rows leave the four columns NULL.
+                final isCurlSide =
+                    s.event.exercise == ExerciseType.bicepsCurlSide;
+                final bicepsMetric =
+                    isCurlSide &&
+                        r.repIndex - 1 < s.event.bicepsSideRepMetrics.length
+                    ? s.event.bicepsSideRepMetrics[r.repIndex - 1]
+                    : null;
+                return RepRow(
                   repIndex: r.repIndex,
                   quality:
                       r.repIndex >= 1 &&
@@ -367,13 +453,32 @@ class InMemorySessionRepository implements SessionRepository {
                   source: r.source,
                   bucketUpdated: r.bucketUpdated,
                   rejectedOutlier: r.rejectedOutlier,
-                ),
-              )
+                  bicepsLeanDeg: bicepsMetric?.leanDeg,
+                  bicepsShoulderDriftRatio: bicepsMetric?.shoulderDriftRatio,
+                  bicepsElbowDriftRatio: bicepsMetric?.elbowDriftRatio,
+                  bicepsBackLeanDeg: bicepsMetric?.backLeanDeg,
+                  bicepsElbowDriftSigned: bicepsMetric?.elbowDriftSigned,
+                );
+              })
               .toList(growable: false)
-        : List<RepRow>.generate(
-            s.event.repQualities.length,
-            (i) => RepRow(repIndex: i + 1, quality: s.event.repQualities[i]),
-          );
+        : List<RepRow>.generate(s.event.repQualities.length, (i) {
+            // Mirror the SQLite squat write path so test doubles round-trip
+            // identically to production. Squat metrics propagate when the
+            // session is a squat AND a metric exists at this index; pushup
+            // and pre-rebuild squat sessions leave the columns NULL.
+            final isSquat = s.event.exercise == ExerciseType.squat;
+            final squatMetric = isSquat && i < s.event.squatRepMetrics.length
+                ? s.event.squatRepMetrics[i]
+                : null;
+            return RepRow(
+              repIndex: i + 1,
+              quality: s.event.repQualities[i],
+              squatLeanDeg: squatMetric?.leanDeg,
+              squatKneeShiftRatio: squatMetric?.kneeShiftRatio,
+              squatHeelLiftRatio: squatMetric?.heelLiftRatio,
+              squatVariant: squatMetric == null ? null : s.event.squatVariant,
+            );
+          });
     return SessionDetail(
       summary: _toSummary(s),
       eccentricTooFastCount: s.event.eccentricTooFastCount,
@@ -398,7 +503,10 @@ class InMemorySessionRepository implements SessionRepository {
         _sessions
             .where(
               (s) =>
-                  s.event.exercise == exercise && !s.startedAt.isBefore(cutoff),
+                  (exercise.isCurl
+                      ? s.event.exercise.isCurl
+                      : s.event.exercise == exercise) &&
+                  !s.startedAt.isBefore(cutoff),
             )
             .toList()
           ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
@@ -429,7 +537,7 @@ class InMemorySessionRepository implements SessionRepository {
     totalSets: s.event.totalSets,
     averageQuality: s.event.averageQuality,
     detectedView:
-        s.event.exercise == ExerciseType.bicepsCurl &&
+        s.event.exercise.isCurl &&
             s.event.detectedView != CurlCameraView.unknown
         ? s.event.detectedView
         : null,

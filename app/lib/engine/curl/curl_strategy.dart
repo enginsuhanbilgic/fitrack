@@ -8,6 +8,7 @@ import '../exercise_strategy.dart';
 import '../form_analyzer_base.dart';
 import 'curl_form_analyzer.dart';
 import 'curl_form_analyzer_extras.dart';
+import 'curl_side_form_analyzer.dart';
 import 'curl_view_detector.dart';
 import 'dtw_scorer.dart';
 
@@ -23,6 +24,20 @@ typedef RomThresholdsProvider =
       CurlCameraView view,
       int repIndexInSet,
     );
+
+/// Invoked when the runtime view detector commits a flip from one locked
+/// view to another (e.g. `sideRight → sideLeft` after the user rotates
+/// 180° mid-session). Fires AT MOST ONCE per FSM idle transition, never
+/// mid-rep (preserves invariant 10), and never on the initial
+/// `unknown → locked` transition (that's a "first lock", not a flip).
+///
+/// When `to == CurlCameraView.front` and `kCurlFrontViewEnabled == false`,
+/// the callback still fires (so the host can surface a "front view not
+/// supported" advisory) but the strategy does NOT switch the analyzer to
+/// the dormant front code path — `_lockedView` updates, the side analyzer
+/// keeps processing.
+typedef CurlViewFlipCallback =
+    void Function(CurlCameraView from, CurlCameraView to);
 
 /// Invoked after each successfully-counted curl rep, with the per-rep
 /// extremes and the (side, view) attribution. Caller is responsible for
@@ -41,6 +56,18 @@ typedef CurlRepCommitCallback =
       /// should treat null as "no data" and skip persistence rather than
       /// inferring a duration. Added in WP5.4.
       required Duration? concentricDuration,
+
+      /// Angle measured at CONCENTRIC → PEAK promotion (the angle when
+      /// the FSM first declared peak reached). Distinct from `minAngle`,
+      /// which is the running min over the entire rep — `minAtPeak` is
+      /// the first frame to clear the peak gate, BEFORE any post-peak
+      /// drift can pull `minAngle` lower from pose-estimator noise. Lets
+      /// diagnostics distinguish "user held a real peak" (minAtPeak ≈
+      /// minAngle) from "FSM crossed gate then noise spiked lower"
+      /// (minAtPeak ~70°, minAngle ~3° — a known 2D-pose artifact at
+      /// peak elbow flexion when the wrist projects near the shoulder).
+      /// Optional / nullable so existing callers compile unchanged.
+      double? minAtPeak,
     });
 
 /// Biceps-curl FSM encapsulated as a strategy.
@@ -59,6 +86,11 @@ class CurlStrategy extends ExerciseStrategy {
     RomThresholdsProvider? thresholdsProvider,
     CurlRepCommitCallback? onRepCommit,
 
+    /// Fires when the runtime view detector commits a view flip
+    /// (`sideRight → sideLeft`, `sideLeft → front`, etc.). See
+    /// [CurlViewFlipCallback] for the full contract.
+    CurlViewFlipCallback? onViewFlipped,
+
     /// 30-day historical concentric durations for the analyzer's fatigue
     /// baseline (WP5.4). Empty list → backward-compat pre-WP5.4 behavior.
     List<Duration> historicalConcentricDurations = const [],
@@ -66,19 +98,45 @@ class CurlStrategy extends ExerciseStrategy {
     /// Reference angle series for DTW form scoring (T5.3). Null = disabled.
     List<double>? referenceRepAngleSeries,
     bool enableDtwScoring = false,
-  }) : _thresholdsProvider = thresholdsProvider ?? _defaultGlobalProvider,
+
+    /// The exercise variant this strategy represents. Determines what
+    /// [exercise] returns and which thresholds are appropriate.
+    ExerciseType exerciseType = ExerciseType.bicepsCurlFront,
+
+    /// Pre-declared camera view. When non-unknown the view detector still
+    /// runs (for framing confirmation) but [_lockedView] is immutable —
+    /// the detector result never overrides the declared view.
+    CurlCameraView initialView = CurlCameraView.unknown,
+  }) : _exerciseType = exerciseType,
+       _initialView = initialView,
+       _thresholdsProvider = thresholdsProvider ?? _defaultGlobalProvider,
        _onRepCommit = onRepCommit,
-       _form = CurlFormAnalyzer(
+       _onViewFlipped = onViewFlipped,
+       _form = _selectAnalyzer(
+         initialView: initialView,
          historicalConcentricDurations: historicalConcentricDurations,
          referenceRepAngleSeries: referenceRepAngleSeries,
          enableDtwScoring: enableDtwScoring,
-       );
+       ) {
+    if (initialView != CurlCameraView.unknown) {
+      _lockedView = initialView;
+      _form.setView(initialView);
+    }
+  }
 
+  final ExerciseType _exerciseType;
+  final CurlCameraView _initialView;
   final ExerciseSide side;
   final RomThresholdsProvider _thresholdsProvider;
   final CurlRepCommitCallback? _onRepCommit;
+  final CurlViewFlipCallback? _onViewFlipped;
 
-  final CurlFormAnalyzer _form;
+  /// Form analyzer for the current view. Polymorphic: either
+  /// `CurlFormAnalyzer` (front, frozen battle-tested code path) or
+  /// `CurlSideFormAnalyzer` (side, isolated for independent iteration).
+  /// Typed as the [CurlAnalyzer] umbrella so all strategy call sites
+  /// compile against base + extras without downcasts.
+  final CurlAnalyzer _form;
   final CurlViewDetector _viewDetector = CurlViewDetector();
 
   CurlCameraView _lockedView = CurlCameraView.unknown;
@@ -88,6 +146,13 @@ class CurlStrategy extends ExerciseStrategy {
   bool _reachedPeak = false;
   double? _minAngleThisRep;
   double? _maxAngleAtStart;
+
+  /// Angle observed at the moment the FSM first transitions
+  /// CONCENTRIC → PEAK. Captured exactly once per rep (the first frame to
+  /// clear `peakAngle`). Distinct from `_minAngleThisRep` which keeps
+  /// dropping if pose noise pushes the angle lower after peak. Cleared in
+  /// `_resetPerRepState` and `onNextSet/onReset`.
+  double? _minAngleAtPeak;
 
   // Sentinel: overwritten on the first IDLE→CONCENTRIC tick (line 160) before
   // any state that reads `_activeThresholds` (CONCENTRIC/PEAK/ECCENTRIC) can
@@ -102,7 +167,7 @@ class CurlStrategy extends ExerciseStrategy {
   ) => RomThresholds.global(view);
 
   @override
-  ExerciseType get exercise => ExerciseType.bicepsCurl;
+  ExerciseType get exercise => _exerciseType;
 
   @override
   FormAnalyzerBase get formAnalyzer => _form;
@@ -113,7 +178,7 @@ class CurlStrategy extends ExerciseStrategy {
 
   @override
   List<int> get requiredLandmarkIndices =>
-      ExerciseRequirements.forExercise(ExerciseType.bicepsCurl).landmarkIndices;
+      ExerciseRequirements.forExercise(_exerciseType).landmarkIndices;
 
   /// Read by the RepCounter snapshot so the UI can surface the locked view.
   CurlCameraView get lockedView => _lockedView;
@@ -174,6 +239,10 @@ class CurlStrategy extends ExerciseStrategy {
 
     switch (input.state) {
       case RepState.idle:
+        // Feed IDLE frames to the analyzer so view-aware detectors (like
+        // sagittal sway) can collect baseline neutral-pose samples.
+        errors = _form.evaluate(pose, now: input.now);
+
         // Resolve thresholds NOW. Threshold-source promotion happens only
         // here (invariant 4) — never mid-rep.
         final resolved = _thresholdsProvider(
@@ -191,10 +260,14 @@ class CurlStrategy extends ExerciseStrategy {
           _form.onRepStart(pose);
         }
       case RepState.concentric:
-        errors = _form.evaluate(pose);
+        errors = _form.evaluate(pose, now: input.now);
         if (smoothed <= _activeThresholds.peakAngle) {
           nextState = RepState.peak;
           _reachedPeak = true;
+          // Capture the angle at the FIRST frame that cleared the peak
+          // gate. Don't overwrite on subsequent CONCENTRIC frames (there
+          // shouldn't be any — the state changes here — but defensive).
+          _minAngleAtPeak ??= smoothed;
           _form.onPeakReached();
         } else if (smoothed > _activeThresholds.startAngle) {
           // Abandoned rep — never reached peak.
@@ -214,7 +287,7 @@ class CurlStrategy extends ExerciseStrategy {
           _form.onEccentricStart();
         }
       case RepState.eccentric:
-        errors = _form.evaluate(pose);
+        errors = _form.evaluate(pose, now: input.now);
         if (smoothed >= _activeThresholds.endAngle) {
           // Commit the rep.
           final leftBilateral = _computeBilateralAngle(pose, left: true);
@@ -243,12 +316,21 @@ class CurlStrategy extends ExerciseStrategy {
     _reachedPeak = false;
     _minAngleThisRep = null;
     _maxAngleAtStart = null;
+    _minAngleAtPeak = null;
     _activeThresholds = RomThresholds.global();
     _viewDetector.reset();
-    _lockedView = CurlCameraView.unknown;
+    // Sticky view across set boundaries: a user's body orientation persists
+    // between sets, so reverting to the picker's _initialView would force
+    // the runtime detector to re-acquire any flip every set (~10 idle
+    // frames of hysteresis each time). Only fall back to _initialView when
+    // no view has ever locked.
+    _lockedView = _lockedView != CurlCameraView.unknown
+        ? _lockedView
+        : _initialView;
     _pendingView = CurlCameraView.unknown;
     _pendingViewStreak = 0;
     _form.reset();
+    if (_lockedView != CurlCameraView.unknown) _form.setView(_lockedView);
   }
 
   @override
@@ -256,12 +338,17 @@ class CurlStrategy extends ExerciseStrategy {
     _reachedPeak = false;
     _minAngleThisRep = null;
     _maxAngleAtStart = null;
+    _minAngleAtPeak = null;
     _activeThresholds = RomThresholds.global();
     _viewDetector.reset();
-    _lockedView = CurlCameraView.unknown;
+    // See onNextSet for sticky-view rationale.
+    _lockedView = _lockedView != CurlCameraView.unknown
+        ? _lockedView
+        : _initialView;
     _pendingView = CurlCameraView.unknown;
     _pendingViewStreak = 0;
     _form.reset();
+    if (_lockedView != CurlCameraView.unknown) _form.setView(_lockedView);
   }
 
   /// Score a completed rep's angle trace against the reference. Delegates to
@@ -280,23 +367,67 @@ class CurlStrategy extends ExerciseStrategy {
   void _maybeApplyDeferredViewSwitch() {
     if (_pendingViewStreak >= kViewRedetectHysteresisFrames &&
         _pendingView != CurlCameraView.unknown) {
-      _lockedView = _pendingView;
-      _form.setView(_lockedView);
+      final from = _lockedView;
+      _applyViewFlip(from, _pendingView);
       _pendingView = CurlCameraView.unknown;
       _pendingViewStreak = 0;
     }
+  }
+
+  /// Single chokepoint for runtime view flips. Mutates [_lockedView],
+  /// optionally switches the analyzer (gated by [kCurlFrontViewEnabled] when
+  /// `to == front`), then fires [_onViewFlipped]. Never invoked for the
+  /// initial `unknown → locked` transition — that path runs through
+  /// [updateSetupView] / the constructor and intentionally does NOT fire
+  /// the callback (per the [CurlViewFlipCallback] contract).
+  void _applyViewFlip(CurlCameraView from, CurlCameraView to) {
+    _lockedView = to;
+    // Front-analyzer dormancy gate: while the front view is hidden in the
+    // UI (kCurlFrontViewEnabled == false), a runtime flip TO front updates
+    // the locked view (so the host can show the "turn 90°" advisory) but
+    // must NOT activate the dormant `CurlFormAnalyzer` front code path.
+    // Side analyzer keeps processing — degraded but no worse than today.
+    if (to != CurlCameraView.front || kCurlFrontViewEnabled) {
+      _form.setView(to);
+    }
+    _onViewFlipped?.call(from, to);
   }
 
   void _resetPerRepState() {
     _reachedPeak = false;
     _minAngleThisRep = null;
     _maxAngleAtStart = null;
+    _minAngleAtPeak = null;
     _maybeApplyDeferredViewSwitch();
   }
 
-  /// Runs every frame once a view is locked. Pending view switches apply
-  /// ONLY when the FSM is idle (never mid-rep, invariant 10).
+  /// Runs every frame once a view is locked.
+  ///
+  /// **Pre-seeded sessions short-circuit immediately** — when the user
+  /// picked the view at home screen (`_initialView != unknown`), the view
+  /// is locked for the session and auto-flip is disabled. Auto-detect
+  /// only runs when the session started without a pre-seeded view (legacy
+  /// path — no Side picker tap).
+  ///
+  /// In auto-detect mode, pending view switches apply ONLY when the FSM
+  /// is idle (never mid-rep, invariant 10) AND only after
+  /// [kViewRedetectHysteresisFrames] consecutive agreeing frames.
   void _updateActiveViewDetection(PoseResult pose, RepState state) {
+    // Pre-seeded sessions never auto-flip. The user picked the view at
+    // session start (home-screen Side picker → `_initialView`), and that
+    // is the contract for the entire session. Auto-flipping during a
+    // session was a foot-gun: a brief framing wobble could swap to front,
+    // tearing down the side-view analyzer's baselines mid-rep. The user
+    // can always finish the workout and start a new one with a different
+    // view. Auto-detect remains active ONLY when the session started
+    // without a pre-seeded view (`_initialView == unknown`), e.g. the
+    // legacy home-screen path that didn't pick a side.
+    if (_initialView != CurlCameraView.unknown) {
+      _pendingView = CurlCameraView.unknown;
+      _pendingViewStreak = 0;
+      return;
+    }
+
     final candidate = _viewDetector.classifyFrame(
       pose,
       currentLocked: _lockedView,
@@ -317,8 +448,8 @@ class CurlStrategy extends ExerciseStrategy {
 
     if (_pendingViewStreak >= kViewRedetectHysteresisFrames &&
         state == RepState.idle) {
-      _lockedView = _pendingView;
-      _form.setView(_lockedView);
+      final from = _lockedView;
+      _applyViewFlip(from, _pendingView);
       _pendingView = CurlCameraView.unknown;
       _pendingViewStreak = 0;
     }
@@ -364,6 +495,8 @@ class CurlStrategy extends ExerciseStrategy {
     // internal state shifting between invocations).
     final concentricDuration = _form.lastConcentricDuration;
 
+    final minAtPeak = _minAngleAtPeak;
+
     if (symmetric) {
       commit(
         side: ProfileSide.left,
@@ -371,6 +504,7 @@ class CurlStrategy extends ExerciseStrategy {
         minAngle: minAngle,
         maxAngle: maxAngle,
         concentricDuration: concentricDuration,
+        minAtPeak: minAtPeak,
       );
       commit(
         side: ProfileSide.right,
@@ -378,15 +512,69 @@ class CurlStrategy extends ExerciseStrategy {
         minAngle: minAngle,
         maxAngle: maxAngle,
         concentricDuration: concentricDuration,
+        minAtPeak: minAtPeak,
       );
     } else {
+      // Side-view attribution: prefer the arm ML Kit actually localized
+      // this rep, not the user's pre-declared side. ML Kit's anatomical
+      // labels don't always match the user's orientation in side
+      // recordings — committing to the declared side when the visible
+      // arm is the OTHER one would corrupt that bucket. When both arms
+      // happen to have bilateral angles (rare in side view), fall back
+      // to the declared side. When neither has an angle (shouldn't
+      // happen since the rep counted), fall back to declared side too.
+      final ProfileSide attributedSide;
+      if (leftBilateral != null && rightBilateral == null) {
+        attributedSide = ProfileSide.left;
+      } else if (rightBilateral != null && leftBilateral == null) {
+        attributedSide = ProfileSide.right;
+      } else {
+        attributedSide = _profileSideForRep();
+      }
       commit(
-        side: _profileSideForRep(),
+        side: attributedSide,
         view: _lockedView,
         minAngle: minAngle,
         maxAngle: maxAngle,
         concentricDuration: concentricDuration,
+        minAtPeak: minAtPeak,
       );
     }
+  }
+
+  /// Pick the right analyzer flavor for the given initial view.
+  ///
+  /// Front (and `unknown`) → [CurlFormAnalyzer]: the battle-tested
+  /// implementation. Frozen — never edited as part of side-view fixes.
+  ///
+  /// Side variants → [CurlSideFormAnalyzer]: independent implementation
+  /// that can be iterated freely without touching the front code path.
+  ///
+  /// `unknown` defaults to the front analyzer because (a) the view
+  /// detector hasn't settled yet, (b) front is the more common starting
+  /// case, and (c) front analyzer's view-conditionals do gracefully
+  /// degrade if the view never resolves to side. The view detector will
+  /// re-set the view on the chosen analyzer once it locks.
+  static CurlAnalyzer _selectAnalyzer({
+    required CurlCameraView initialView,
+    required List<Duration> historicalConcentricDurations,
+    required List<double>? referenceRepAngleSeries,
+    required bool enableDtwScoring,
+  }) {
+    final isSide =
+        initialView == CurlCameraView.sideLeft ||
+        initialView == CurlCameraView.sideRight;
+    if (isSide) {
+      return CurlSideFormAnalyzer(
+        historicalConcentricDurations: historicalConcentricDurations,
+        referenceRepAngleSeries: referenceRepAngleSeries,
+        enableDtwScoring: enableDtwScoring,
+      );
+    }
+    return CurlFormAnalyzer(
+      historicalConcentricDurations: historicalConcentricDurations,
+      referenceRepAngleSeries: referenceRepAngleSeries,
+      enableDtwScoring: enableDtwScoring,
+    );
   }
 }

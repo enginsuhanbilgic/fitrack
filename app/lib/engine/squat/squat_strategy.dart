@@ -16,10 +16,31 @@ import 'squat_form_analyzer.dart';
 ///
 /// The session scope is load-bearing — long-femur classification needs
 /// cumulative evidence across sets (mirrors original RepCounter behavior).
+///
+/// Constructor params (Squat Master Rebuild, 2026-04-25):
+///   - `variant` — Bodyweight or Barbell back squat. Toggles the
+///     analyzer's lean threshold (45° vs 50°).
+///   - `longFemurLifter` — "Tall lifter" Settings toggle. Adds +5° to
+///     the lean threshold inside the analyzer.
+///
+/// Long-femur orthogonality: the auto-detected `_longFemurDetected` flag
+/// (this class) widens the BOTTOM gate from 90° → 100°. The
+/// user-facing `longFemurLifter` toggle (analyzer) widens the lean
+/// threshold by +5°. The two flags target different thresholds — they
+/// never stack on the same one.
 class SquatStrategy extends ExerciseStrategy {
-  SquatStrategy();
+  SquatStrategy({
+    this.variant = SquatVariant.bodyweight,
+    this.longFemurLifter = false,
+  }) : _form = SquatFormAnalyzer(
+         variant: variant,
+         longFemurLifter: longFemurLifter,
+       );
 
-  final SquatFormAnalyzer _form = SquatFormAnalyzer();
+  final SquatVariant variant;
+  final bool longFemurLifter;
+
+  final SquatFormAnalyzer _form;
 
   // Per-rep.
   double? _prevHipY;
@@ -40,9 +61,26 @@ class SquatStrategy extends ExerciseStrategy {
   List<int> get requiredLandmarkIndices =>
       ExerciseRequirements.forExercise(ExerciseType.squat).landmarkIndices;
 
-  /// Current effective bottom angle — relaxed if long-femur detected.
+  /// Current effective bottom angle — relaxed if long-femur auto-detected.
   /// Exposed primarily for tests and for the summary screen.
   double get effectiveBottomAngle => _effectiveBottomAngle;
+
+  /// Quality score for the most recently committed rep. Null until the
+  /// first rep commits in the current session.
+  double? get lastRepQuality => _form.lastRepQuality;
+
+  /// Most recent peak forward-lean (deg). Null until first commit.
+  double? get lastRepLeanDeg => _form.lastRepLeanDeg;
+
+  /// Most recent peak knee-shift ratio. Null until first commit.
+  double? get lastRepKneeShiftRatio => _form.lastRepKneeShiftRatio;
+
+  /// Most recent peak heel-lift ratio. Null until first commit.
+  double? get lastRepHeelLiftRatio => _form.lastRepHeelLiftRatio;
+
+  /// Active lean warning threshold (variant + tall-lifter boost). Useful
+  /// for tests asserting orthogonality of long-femur signals.
+  double get leanWarnDeg => _form.leanWarnDeg;
 
   @override
   double? computePrimaryAngle(PoseResult pose) {
@@ -80,6 +118,16 @@ class SquatStrategy extends ExerciseStrategy {
     var repCommitted = false;
     var errors = <FormError>[];
 
+    // Frame-level form evaluation runs in all three active phases. Lean +
+    // heel-lift + knee-shift express themselves throughout the descent,
+    // not only on the way up — so we evaluate during DESCENDING + BOTTOM
+    // + ASCENDING to catch the worst-frame in each metric.
+    if (input.state == RepState.descending ||
+        input.state == RepState.bottom ||
+        input.state == RepState.ascending) {
+      errors = _form.evaluate(pose, now: input.now);
+    }
+
     switch (input.state) {
       case RepState.idle:
         if (smoothed < kSquatStartAngle) {
@@ -100,7 +148,6 @@ class SquatStrategy extends ExerciseStrategy {
           nextState = RepState.ascending;
         }
       case RepState.ascending:
-        errors = _form.evaluate(pose);
         if (smoothed >= kSquatEndAngle) {
           final completionErrors = _form.consumeCompletionErrorsWithDepth(
             _effectiveBottomAngle,

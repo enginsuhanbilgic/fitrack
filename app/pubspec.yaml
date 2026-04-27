@@ -18,6 +18,7 @@ dependencies:
   provider: ^6.1.2
   share_plus: ^10.1.0
   sqflite: ^2.3.3
+  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_test:

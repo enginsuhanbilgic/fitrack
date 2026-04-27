@@ -69,12 +69,12 @@ class PushUpStrategy extends ExerciseStrategy {
           nextState = RepState.idle;
         }
       case RepState.bottom:
-        errors = _form.evaluate(pose);
+        errors = _form.evaluate(pose, now: input.now);
         if (smoothed > kPushUpBottomAngle) {
           nextState = RepState.ascending;
         }
       case RepState.ascending:
-        errors = _form.evaluate(pose);
+        errors = _form.evaluate(pose, now: input.now);
         if (smoothed >= kPushUpEndAngle) {
           final completionErrors = _form.consumeCompletionErrors();
           errors = [...errors, ...completionErrors];
