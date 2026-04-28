@@ -105,20 +105,44 @@ const double kSwingThreshold = 0.25;
 
 /// Forward trunk lean: change in torso-to-vertical angle (degrees) relative to
 /// rep-start baseline. Only evaluated in side views (sideLeft / sideRight) where
-/// the sagittal-plane projection is faithful. 15° is permissive enough to ignore
-/// natural lean variation but catches a meaningful momentum-driven body swing.
-const double kTorsoLeanThresholdDeg = 15.0;
+/// the sagittal-plane projection is faithful. Reduced from 15° (2026-04-28) —
+/// field testing showed 15° was too permissive; 8° catches momentum-driven
+/// body swing while ignoring minor postural wobble (≤3–4°).
+const double kTorsoLeanThresholdDeg = 8.0;
 
 /// Backward trunk lean threshold (degrees). Typically smaller than forward
 /// lean as hyperextension is more dangerous and clearly indicates cheat.
-const double kBackLeanThresholdDeg = 10.0;
+/// Reduced from 10° (2026-04-28) alongside forward lean tightening.
+const double kBackLeanThresholdDeg = 6.0;
 
 /// Shoulder shrug: vertical (Y-axis) shoulder displacement / L_torso.
 /// A positive shrug (shoulder moving UP) > this fires `shoulderShrug`.
-const double kShrugThreshold = 0.12;
+///
+/// Tuned from `kShrugThreshold = 0.12` (2026-04-27) — natural scapular
+/// elevation during peak elbow flexion (3–4 cm on a ~50 cm torso ≈
+/// 0.06–0.08) was firing the cue on clean reps. 0.16 leaves ~2×
+/// headroom over normal scapular activity while still catching real
+/// "shoulders to ears" shrugs (8–12 cm ≈ 0.16–0.24). Will be re-derived
+/// from the 95th percentile of clean reps once diagnostic-mode telemetry
+/// produces a real distribution; this is a first-principles guard, not
+/// a final number.
+const double kShrugThreshold = 0.16;
 
 /// Elbow drift: ΔX_elbow / L_torso.
 const double kDriftThreshold = 0.20;
+
+/// Elbow rise: (elbow_y − shoulder_y) relative upward shift / L_torso.
+/// Fires when the upper arm swings forward and the elbow lifts away from
+/// the torso during the curl (side view only). Positive = elbow moving up.
+///
+/// Tuned from `kElbowRiseThreshold = 0.12` (2026-04-27) — at peak
+/// flexion the upper arm naturally tilts forward 5–10° even with strict
+/// form, translating to ~0.08–0.12 elbow rise on a typical torso. The
+/// old threshold sat right at the upper bound of natural form,
+/// producing constant warnings on textbook reps. 0.18 keeps real
+/// front-delt cheats (typical 0.24–0.36) flagged while permitting the
+/// natural arc. Same retune-from-real-data caveat as `kShrugThreshold`.
+const double kElbowRiseThreshold = 0.18;
 
 // ── Sagittal sway (front view depth swing) ──────────────
 // Composite scale-invariant features over a 1€-filtered, baseline z-scored
@@ -246,6 +270,19 @@ const int kCalibrationFrameIntervalMs = 66; // ~15 FPS
 /// Number of consecutive frames all required landmarks must pass the confidence
 /// gate before transitioning from SETUP_CHECK to COUNTDOWN.
 const int kSetupCheckFrames = 10;
+
+/// Stricter landmark confidence required during SETUP_CHECK for curl exercises.
+/// Higher than [kMinLandmarkConfidence] (0.4) to reject bystanders whose
+/// landmarks are partially visible at the edges of frame. A person standing
+/// at arm's length facing the camera passes easily; someone walking past in
+/// the background does not.
+const double kSetupCurlMinConfidence = 0.65;
+
+/// Elbow angle range that counts as a "resting arm" for the curl setup posture
+/// check. Arms hanging naturally sit at ~160°–180°. A bystander mid-walk,
+/// reaching, or gesturing will typically be outside this window.
+const double kSetupRestingArmMinDeg = 130.0;
+const double kSetupRestingArmMaxDeg = 185.0;
 
 // ── Squat FSM thresholds (degrees) ──────────────────────
 /// IDLE → DESCENDING when knee angle drops below this.
@@ -392,6 +429,9 @@ const double kQualityShrugMaxDeduction = 0.15;
 /// Maximum deduction for backward lean (back hyperextension).
 const double kQualityBackLeanMaxDeduction = 0.20;
 
+/// Maximum deduction for elbow rise (upper arm swinging forward/up).
+const double kQualityElbowRiseMaxDeduction = 0.15;
+
 /// Deduction for rushed eccentric.
 const double kQualityEccentricDeduction = 0.15;
 
@@ -519,3 +559,48 @@ const int kTelemetryRingSize = 500;
 /// ROM-override rows, calibration overlay live label, and summary view
 /// label. Flip back to `true` to restore.
 const bool kCurlFrontViewEnabled = false;
+
+/// Exposes the "Curl Debug Session" entry on the home screen and the
+/// matching toggle in Settings. When `true`, the user can launch a
+/// silent observation session that:
+///   - records every committed rep's `rep.extremes` / `rep.side_metrics`
+///     / `rep.arm_resolved` lines (same format as a normal session,
+///     `source=global` enforced),
+///   - emits a periodic `pose.frame_metrics` line at
+///     [kDebugFrameMetricsHz] so per-frame angle / confidence
+///     distributions are visible even when no rep commits (the path
+///     we kept hitting when landmarks were marginal),
+///   - suppresses all user-facing feedback (TTS, haptics, banners) so
+///     the user can pose without the app reacting,
+///   - bypasses the regular summary screen in favor of a minimal
+///     "session ended" view with a copy-log shortcut.
+/// Flip to `false` for production builds — the flag is read at compile
+/// time so unreachable code is tree-shaken.
+const bool kCurlDebugSessionEnabled = true;
+
+/// Frame-metrics emission rate during a curl debug session. 2 Hz =
+/// one `pose.frame_metrics` line every ~500 ms. Low enough that a
+/// 60-second session produces ~120 lines (well under the boosted
+/// [kDebugRingBufferSize]); high enough to capture the rise-and-fall
+/// shape of an elbow angle through a curl. Increase if you need finer
+/// granularity (e.g. for tempo analysis); decrease if the buffer is
+/// filling too fast.
+const double kDebugFrameMetricsHz = 2.0;
+
+/// Ring-buffer size in effect during a debug session — reverts to
+/// [kTelemetryRingSize] when the session ends. Larger because debug
+/// sessions emit ~5× more entries per minute than normal sessions
+/// (frame metrics + arm-resolved + side-metrics + extremes per rep).
+const int kDebugRingBufferSize = 2000;
+
+/// Compile-time gate for squat debug sessions. Ships false.
+/// Set true only on dev builds when collecting squat threshold telemetry.
+const bool kSquatDebugSessionEnabled = false;
+
+/// Ring-buffer size for squat debug sessions.
+/// Overrides [kTelemetryRingSize] for the session lifetime; resetCap() restores it.
+const int kSquatDebugRingBufferSize = 2000;
+
+/// Target frequency (Hz) for squat frame-metric telemetry.
+/// 3 Hz (vs curl's 2 Hz) — squat reps are slower so slightly higher density is useful.
+const double kSquatDebugFrameMetricsHz = 3.0;

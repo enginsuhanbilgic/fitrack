@@ -1,0 +1,72 @@
+[2026-04-28T04:28:52.657425] pose.quality_warn: missing_landmarks ids=13,15 conf=0.05,0.00 nearedge=true inference_ms=35
+[2026-04-28T04:28:51.652072] pose.quality_warn: missing_landmarks ids=16 conf=0.04 nearedge=true inference_ms=30
+[2026-04-28T04:28:48.677212] pose.frame_metrics: fsm=concentric angle_raw=158.3 l_sh=1.00 l_el=1.00 l_wr=0.97 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=0.97 r_hip=1.00
+[2026-04-28T04:28:48.176746] pose.frame_metrics: fsm=idle angle_raw=161.1 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:47.586642] pose.frame_metrics: fsm=idle angle_raw=169.0 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:47.086491] pose.frame_metrics: fsm=idle angle_raw=167.9 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:46.584010] pose.frame_metrics: fsm=idle angle_raw=168.1 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:46.052374] pose.frame_metrics: fsm=idle angle_raw=169.2 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:45.551963] pose.frame_metrics: fsm=concentric angle_raw=139.5 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-04-28T04:28:45.051270] pose.frame_metrics: fsm=concentric angle_raw=121.6 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-04-28T04:28:44.471127] pose.frame_metrics: fsm=concentric angle_raw=112.8 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-04-28T04:28:43.966781] pose.frame_metrics: fsm=concentric angle_raw=113.2 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:43.386765] pose.frame_metrics: fsm=concentric angle_raw=133.3 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-04-28T04:28:42.883452] pose.frame_metrics: fsm=idle angle_raw=162.7 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:42.376384] pose.frame_metrics: fsm=idle angle_raw=167.0 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:41.803460] pose.frame_metrics: fsm=concentric angle_raw=161.3 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:41.296072] pose.frame_metrics: fsm=concentric angle_raw=132.7 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.99
+[2026-04-28T04:28:40.722408] pose.frame_metrics: fsm=concentric angle_raw=111.7 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:40.132136] pose.frame_metrics: fsm=concentric angle_raw=112.3 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:39.629322] pose.frame_metrics: fsm=concentric angle_raw=111.2 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:39.054036] pose.frame_metrics: fsm=concentric angle_raw=125.4 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:38.547326] pose.frame_metrics: fsm=concentric angle_raw=145.7 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:37.967113] pose.frame_metrics: fsm=idle angle_raw=166.4 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:37.466823] pose.frame_metrics: fsm=concentric angle_raw=157.6 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:36.885030] pose.frame_metrics: fsm=concentric angle_raw=138.7 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-04-28T04:28:36.384236] pose.frame_metrics: fsm=concentric angle_raw=117.6 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:35.804189] pose.frame_metrics: fsm=concentric angle_raw=116.0 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:35.303028] pose.frame_metrics: fsm=concentric angle_raw=118.4 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:34.717823] pose.frame_metrics: fsm=concentric angle_raw=117.1 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=0.98 r_wr=0.99 r_hip=0.98
+[2026-04-28T04:28:34.208847] pose.frame_metrics: fsm=concentric angle_raw=146.7 l_sh=1.00 l_el=1.00 l_wr=0.98 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-04-28T04:28:33.636815] pose.frame_metrics: fsm=idle angle_raw=159.6 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-04-28T04:28:33.052233] pose.frame_metrics: fsm=concentric angle_raw=150.3 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-04-28T04:28:32.470791] pose.frame_metrics: fsm=concentric angle_raw=122.9 l_sh=1.00 l_el=1.00 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=0.97 r_hip=0.98
+[2026-04-28T04:28:31.970148] pose.frame_metrics: fsm=concentric angle_raw=110.9 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-04-28T04:28:31.470134] pose.frame_metrics: fsm=concentric angle_raw=110.3 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=0.99 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.99
+[2026-04-28T04:28:30.969230] pose.frame_metrics: fsm=concentric angle_raw=111.0 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:30.466931] pose.frame_metrics: fsm=concentric angle_raw=114.8 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:29.966581] pose.frame_metrics: fsm=concentric angle_raw=132.4 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=1.00
+[2026-04-28T04:28:29.386288] pose.frame_metrics: fsm=idle angle_raw=163.2 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:28.883306] pose.frame_metrics: fsm=idle angle_raw=163.4 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:28.304426] pose.frame_metrics: fsm=concentric angle_raw=145.5 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:27.717450] pose.frame_metrics: fsm=concentric angle_raw=122.5 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:27.217396] pose.frame_metrics: fsm=concentric angle_raw=111.3 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:26.636373] pose.frame_metrics: fsm=concentric angle_raw=110.7 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:26.051982] pose.frame_metrics: fsm=concentric angle_raw=113.2 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:25.550787] pose.frame_metrics: fsm=concentric angle_raw=122.5 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:25.049554] pose.frame_metrics: fsm=idle angle_raw=157.0 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:24.468984] pose.frame_metrics: fsm=idle angle_raw=166.6 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:23.883556] pose.frame_metrics: fsm=concentric angle_raw=161.9 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:23.382856] pose.frame_metrics: fsm=concentric angle_raw=133.5 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=1.00
+[2026-04-28T04:28:22.881658] pose.frame_metrics: fsm=concentric angle_raw=114.1 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:22.375961] pose.frame_metrics: fsm=concentric angle_raw=112.3 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:21.800689] pose.frame_metrics: fsm=concentric angle_raw=108.3 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:21.219352] pose.frame_metrics: fsm=concentric angle_raw=116.2 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:20.719138] pose.frame_metrics: fsm=concentric angle_raw=136.7 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-04-28T04:28:20.133303] pose.frame_metrics: fsm=idle angle_raw=165.9 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:19.631382] pose.frame_metrics: fsm=idle angle_raw=164.0 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:19.053909] pose.frame_metrics: fsm=concentric angle_raw=166.1 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:18.551939] pose.frame_metrics: fsm=concentric angle_raw=135.3 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:17.967024] pose.frame_metrics: fsm=concentric angle_raw=120.3 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:17.465595] pose.frame_metrics: fsm=concentric angle_raw=113.4 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:16.885751] pose.frame_metrics: fsm=concentric angle_raw=114.3 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:16.303951] pose.frame_metrics: fsm=concentric angle_raw=110.4 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:15.793671] pose.frame_metrics: fsm=concentric angle_raw=113.5 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:15.218019] pose.frame_metrics: fsm=concentric angle_raw=126.6 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:14.646673] pose.frame_metrics: fsm=concentric angle_raw=158.0 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:14.083938] pose.frame_metrics: fsm=concentric angle_raw=156.4 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=1.00
+[2026-04-28T04:28:08.946555] diagnostic.mode_active: auto-calibration disabled — every rep will run on source=global
+[2026-04-28T04:28:08.946494] curl_debug.session_start: ts=2026-04-28T04:28:08.946437 exercise=bicepsCurlSide side=right view=sideRight sensitivity=medium thresholds_start=160.0 thresholds_peak=70.0 thresholds_peak_exit=85.0 thresholds_end=140.0 use_manual_overrides=true use_data_driven=false
+[2026-04-28T04:28:08.945981] curl_debug.session_active: silent observation mode — feedback suppressed; frame_metrics @ 2.0Hz; ring_buffer=2000
+[2026-04-28T04:27:59.905667] preferences.curl_debug_session_toggled: enabled=true
+[2026-04-28T04:27:33.261684] app.bootstrap: DB opened; migration outcome=noLegacyFile

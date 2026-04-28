@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
+import '../core/constants.dart';
 import '../core/theme.dart';
 import '../core/types.dart';
 import '../services/db/session_dtos.dart';
@@ -15,6 +17,10 @@ class SummaryScreen extends StatefulWidget {
   final bool asymmetryDetected;
   final int eccentricTooFastCount;
   final Set<FormError> errorsTriggered;
+
+  /// How many times each error fired this session. Used to show "×N" counts
+  /// on the Form Issues chips. Empty for live sessions that don't supply counts.
+  final Map<FormError, int> errorCounts;
 
   /// Per-rep detail for the curl session (optional — non-curl or pre-plumbing
   /// flows pass empty). Populates the "Details" panel.
@@ -40,6 +46,25 @@ class SummaryScreen extends StatefulWidget {
   /// reconstructed (history) squat sessions where ratios aren't persisted.
   final List<SquatRepMetrics> squatRepMetrics;
 
+  /// Per-rep biceps side-view metrics — lean, shoulder arc, elbow drift,
+  /// back lean, shrug, elbow rise. Index-aligned with the rep order.
+  /// Empty for front curl, squat, push-up, and reconstructed sessions
+  /// predating schema v5.
+  final List<BicepsSideRepMetrics> bicepsSideRepMetrics;
+
+  /// Per-rep concentric duration in milliseconds. NULL elements are reps
+  /// with no captured tempo (rare — abandoned reps; or non-curl live
+  /// sessions where the live VM doesn't surface duration). Drives the
+  /// summary's TEMPO stat (`avg of non-null / 1000`, formatted "X.Xs").
+  final List<int?> repConcentricMs;
+
+  /// Per-rep depth as a fraction (0.0–1.0) of the user's reference range.
+  /// Reference range is the calibrated bucket's peak ROM when available
+  /// (curl, live path); otherwise the session's max ROM (fallback /
+  /// reconstructed path). NULL elements are reps with no usable angles.
+  /// Drives the summary's DEPTH stat (`avg of non-null × 100%`).
+  final List<double?> repDepthPercents;
+
   const SummaryScreen({
     super.key,
     required this.exercise,
@@ -53,12 +78,16 @@ class SummaryScreen extends StatefulWidget {
     this.asymmetryDetected = false,
     this.eccentricTooFastCount = 0,
     this.errorsTriggered = const {},
+    this.errorCounts = const {},
     this.curlRepRecords = const [],
     this.curlBucketSummaries = const [],
     this.dtwSimilarities = const [],
     this.squatVariant = SquatVariant.bodyweight,
     this.squatLongFemurLifter = false,
     this.squatRepMetrics = const [],
+    this.bicepsSideRepMetrics = const [],
+    this.repConcentricMs = const [],
+    this.repDepthPercents = const [],
   });
 
   /// Rebuild a SummaryScreen from a persisted [SessionDetail] — used by the
@@ -79,6 +108,59 @@ class SummaryScreen extends StatefulWidget {
     final qualities = d.reps
         .map((r) => r.quality ?? 0.0)
         .toList(growable: false);
+    final concentricMs = d.reps
+        .map((r) => r.concentricMs)
+        .toList(growable: false);
+    // Reconstructed depth: normalize per-rep ROM to the session's max ROM.
+    // The calibrated-bucket path used live isn't available here (bucket
+    // state isn't persisted), so session-best is the honest fallback —
+    // identical to the cold-start branch in `_computeLiveRepDepthPercents`.
+    final romPerRep = d.reps
+        .map((r) {
+          final mn = r.minAngle;
+          final mx = r.maxAngle;
+          if (mn == null || mx == null) return null;
+          final rom = mx - mn;
+          return rom > 0 ? rom : null;
+        })
+        .toList(growable: false);
+    final sessionMaxRom = romPerRep.fold<double>(
+      0,
+      (a, b) => (b != null && b > a) ? b : a,
+    );
+    final depthPercents = romPerRep
+        .map<double?>((rom) {
+          if (rom == null || sessionMaxRom <= 0) return null;
+          return (rom / sessionMaxRom).clamp(0.0, 1.0);
+        })
+        .toList(growable: false);
+    // Side-view per-rep averages — available for bicepsCurlSide sessions
+    // written on schema v5+ builds. Returns empty for all other exercises
+    // and pre-v5 rows (all 7 fields will be null → empty list after filter).
+    final bicepsSideMetrics = d.reps
+        .where(
+          (r) =>
+              r.bicepsLeanDeg != null ||
+              r.bicepsShoulderDriftRatio != null ||
+              r.bicepsElbowDriftRatio != null ||
+              r.bicepsBackLeanDeg != null ||
+              r.bicepsShrugRatio != null ||
+              r.bicepsElbowRiseRatio != null,
+        )
+        .map(
+          (r) => BicepsSideRepMetrics(
+            repIndex: r.repIndex,
+            leanDeg: r.bicepsLeanDeg,
+            shoulderDriftRatio: r.bicepsShoulderDriftRatio,
+            elbowDriftRatio: r.bicepsElbowDriftRatio,
+            backLeanDeg: r.bicepsBackLeanDeg,
+            elbowDriftSigned: r.bicepsElbowDriftSigned,
+            shrugRatio: r.bicepsShrugRatio,
+            elbowRiseRatio: r.bicepsElbowRiseRatio,
+          ),
+        )
+        .toList(growable: false);
+
     return SummaryScreen(
       key: key,
       exercise: s.exercise,
@@ -92,10 +174,14 @@ class SummaryScreen extends StatefulWidget {
       asymmetryDetected: s.asymmetryDetected,
       eccentricTooFastCount: d.eccentricTooFastCount,
       errorsTriggered: d.formErrors.keys.toSet(),
+      errorCounts: d.formErrors,
       curlRepRecords: curlRecords,
       dtwSimilarities: d.reps
           .map((r) => r.dtwSimilarity)
           .toList(growable: false),
+      repConcentricMs: concentricMs,
+      repDepthPercents: depthPercents,
+      bicepsSideRepMetrics: bicepsSideMetrics,
       // Bucket summaries are live-only state; no persisted source exists.
       // Squat per-rep ratios are also live-only; reconstructed sessions
       // pass an empty list and the per-rep strip collapses gracefully.
@@ -120,10 +206,13 @@ class _SummaryScreenState extends State<SummaryScreen> {
   bool get asymmetryDetected => widget.asymmetryDetected;
   int get eccentricTooFastCount => widget.eccentricTooFastCount;
   Set<FormError> get errorsTriggered => widget.errorsTriggered;
+  Map<FormError, int> get errorCounts => widget.errorCounts;
   List<CurlRepRecord> get curlRepRecords => widget.curlRepRecords;
   List<CurlProfileBucketSummary> get curlBucketSummaries =>
       widget.curlBucketSummaries;
   List<double?> get dtwSimilarities => widget.dtwSimilarities;
+  List<int?> get repConcentricMs => widget.repConcentricMs;
+  List<double?> get repDepthPercents => widget.repDepthPercents;
 
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -138,16 +227,61 @@ class _SummaryScreenState extends State<SummaryScreen> {
     return const Color(0xFFFF5252); // red
   }
 
+  String _gradeLabel(double? q) {
+    if (q == null) return '—';
+    if (q >= 0.90) return 'A';
+    if (q >= 0.80) return 'B';
+    if (q >= 0.70) return 'C';
+    if (q >= 0.60) return 'D';
+    return 'F';
+  }
+
   String _qualitySubtitle(double? q) {
-    if (q == null) return 'No quality data.';
+    if (q == null) {
+      // Distinguish "no reps committed" (the common case — bad framing,
+      // ML Kit lost landmarks, FSM never armed) from "reps committed
+      // but no quality computed" (rare — diagnostic mode short-circuits
+      // before _curlRepRecords populates). The first is actionable for
+      // the user; the second is an internal-state edge case.
+      if (totalReps == 0) {
+        return 'No reps were counted — see the coaching tip below.';
+      }
+      return 'No quality data captured for this session.';
+    }
     if (q >= 0.85) return 'Excellent control. Maintain this pace and range.';
     if (q >= 0.70) return 'Good effort. Minor form deductions noted.';
     if (q >= 0.60) return 'Room for improvement. Review the insights below.';
     return 'Several form issues detected. Focus on the coaching tips.';
   }
 
+  double? _avgSideMetric(double? Function(BicepsSideRepMetrics) pick) {
+    final vals = widget.bicepsSideRepMetrics
+        .map(pick)
+        .whereType<double>()
+        .toList();
+    if (vals.isEmpty) return null;
+    return vals.reduce((a, b) => a + b) / vals.length;
+  }
+
   List<String> _buildInsights() {
     final insights = <String>[];
+
+    // No-rep sessions get a single clear message and skip every other
+    // template. Fixes the prior contradiction where a 0-rep session
+    // showed "Form Issues Detected" + "Great session!" simultaneously
+    // because the cheerful template fired on `errorsTriggered.isEmpty`
+    // without checking whether any rep actually counted. Frame-level
+    // errors can fire on partial rep attempts that never committed,
+    // and `errorsTriggered` accumulates them — so a 0-rep session can
+    // still have non-empty errors.
+    if (totalReps == 0) {
+      insights.add(
+        'No reps were counted. Make sure your full arm — shoulder, '
+        'elbow, and wrist — stays in frame throughout the curl. Try '
+        'stepping back from the camera or rotating to landscape.',
+      );
+      return insights;
+    }
 
     if (eccentricTooFastCount > totalReps * 0.5) {
       insights.add(
@@ -171,6 +305,47 @@ class _SummaryScreenState extends State<SummaryScreen> {
       );
     }
 
+    // Side-view specific coaching — only fires when metrics were recorded.
+    // Camera-frame → user-frame flip: sideLeft = camera's left = user's RIGHT
+    // arm (front-camera mirroring). Falls back to generic "arm" when unknown.
+    final armLabel = switch (detectedView) {
+      CurlCameraView.sideLeft => 'right arm',
+      CurlCameraView.sideRight => 'left arm',
+      _ => 'arm',
+    };
+
+    final avgElbowRise = _avgSideMetric((r) => r.elbowRiseRatio);
+    if (avgElbowRise != null && avgElbowRise > kElbowRiseThreshold) {
+      insights.add(
+        'Your elbow rose on your $armLabel during the curl. Keep it pinned '
+        'to your side — lifting it shifts load away from the bicep.',
+      );
+    }
+
+    final avgShoulderArc = _avgSideMetric((r) => r.shoulderDriftRatio);
+    if (avgShoulderArc != null && avgShoulderArc > kSwingThreshold) {
+      insights.add(
+        'You swung your $armLabel shoulder into the lift. Start each rep '
+        'with the elbow still and use only forearm flexion.',
+      );
+    }
+
+    final avgBackLean = _avgSideMetric((r) => r.backLeanDeg);
+    if (avgBackLean != null && avgBackLean > kBackLeanThresholdDeg) {
+      insights.add(
+        'You leaned back to complete the $armLabel curl. Reduce the weight '
+        'and keep your torso upright throughout.',
+      );
+    }
+
+    final avgShrug = _avgSideMetric((r) => r.shrugRatio);
+    if (avgShrug != null && avgShrug > kShrugThreshold) {
+      insights.add(
+        'Your $armLabel shoulder shrugged on most reps. Depress your '
+        'shoulder blade before curling to isolate the bicep.',
+      );
+    }
+
     if (errorsTriggered.isEmpty ||
         averageQuality != null && averageQuality! >= 0.85) {
       insights.add('Great session! Keep this tempo and range of motion.');
@@ -189,10 +364,20 @@ class _SummaryScreenState extends State<SummaryScreen> {
     return insights;
   }
 
+  /// Human-readable label for the camera view.
+  ///
+  /// **User-frame, not camera-frame.** `CurlCameraView.sideLeft` /
+  /// `sideRight` are camera-coordinate enums — they describe which side
+  /// of the camera frame the user occupies. Front-camera mirroring
+  /// inverts this: when the user's PHYSICAL left arm is being tracked,
+  /// it appears on the camera's RIGHT side, so the engine sees
+  /// `CurlCameraView.sideRight`. The label flips that back so users
+  /// see their own body's left/right, not the mirrored camera view.
+  /// Matches the home-screen Side picker, which is also user-frame.
   String _viewLabel(CurlCameraView v) => switch (v) {
     CurlCameraView.front => 'Front view',
-    CurlCameraView.sideLeft => 'Side view · Left',
-    CurlCameraView.sideRight => 'Side view · Right',
+    CurlCameraView.sideLeft => 'Side view · Right',
+    CurlCameraView.sideRight => 'Side view · Left',
     CurlCameraView.unknown => 'Unknown',
   };
 
@@ -201,6 +386,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
     FormError.depthSwing => Icons.zoom_in_map,
     FormError.shoulderArc => Icons.sync,
     FormError.elbowDrift => Icons.open_with,
+    FormError.elbowRise => Icons.arrow_upward_rounded,
     FormError.shoulderShrug => Icons.upload_rounded,
     FormError.backLean => Icons.undo,
     FormError.shortRomStart => Icons.unfold_more,
@@ -219,17 +405,18 @@ class _SummaryScreenState extends State<SummaryScreen> {
   };
 
   String _errorLabel(FormError err) => switch (err) {
-    FormError.torsoSwing => 'Torso Swing',
-    FormError.depthSwing => 'Depth Swing',
-    FormError.shoulderArc => 'Shoulder Arc',
-    FormError.elbowDrift => 'Elbow Drift',
+    FormError.torsoSwing => 'Body Swinging',
+    FormError.depthSwing => 'Rocking Toward Camera',
+    FormError.shoulderArc => 'Hip Rotation',
+    FormError.elbowDrift => 'Elbow Moving Out',
+    FormError.elbowRise => 'Elbow Rising Up',
     FormError.shoulderShrug => 'Shoulder Shrug',
-    FormError.backLean => 'Backward Lean',
-    FormError.shortRomStart => 'Short ROM (Start)',
-    FormError.shortRomPeak => 'Short ROM (Peak)',
-    FormError.eccentricTooFast => 'Rushed Lowering',
-    FormError.concentricTooFast => 'Rushed Lift',
-    FormError.tempoInconsistent => 'Inconsistent Tempo',
+    FormError.backLean => 'Leaning Back',
+    FormError.shortRomStart => 'Arm Not Fully Extended',
+    FormError.shortRomPeak => 'Not Curling All the Way Up',
+    FormError.eccentricTooFast => 'Lowering Too Fast',
+    FormError.concentricTooFast => 'Lifting Too Fast',
+    FormError.tempoInconsistent => 'Unsteady Pace',
     FormError.asymmetryLeftLag => 'Left Arm Lagging',
     FormError.asymmetryRightLag => 'Right Arm Lagging',
     FormError.fatigue => 'Fatigue',
@@ -322,17 +509,35 @@ class _SummaryScreenState extends State<SummaryScreen> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: List.generate(repQualities.length, (i) {
                 final v = repQualities[i];
+                final dtw = i < dtwSimilarities.length
+                    ? dtwSimilarities[i]
+                    : null;
                 final Color barColor = v >= 0.95
-                    ? ft
-                          .accent // excellent
+                    ? ft.accent
                     : v >= 0.80
-                    ? ft
-                          .cyan // good
-                    : FiTrackTheme.red; // needs work
+                    ? ft.cyan
+                    : FiTrackTheme.red;
                 return Expanded(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
+                      // DTW badge above bar — only shown when score exists.
+                      if (dtw != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Text(
+                            '${(dtw * 100).round()}',
+                            style: TextStyle(
+                              fontSize: 7,
+                              fontWeight: FontWeight.w700,
+                              color: dtw >= 0.80
+                                  ? ft.accent
+                                  : dtw >= 0.60
+                                  ? Colors.orangeAccent
+                                  : FiTrackTheme.red,
+                            ),
+                          ),
+                        ),
                       Flexible(
                         child: FractionallySizedBox(
                           heightFactor: v.clamp(0.0, 1.0),
@@ -380,12 +585,33 @@ class _SummaryScreenState extends State<SummaryScreen> {
                 value:
                     '${((repQualities.reduce((a, b) => a + b) / repQualities.length) * 100).round()}%',
               ),
-              _RepStat(label: 'Reps', value: '${repQualities.length}'),
+              _RepStat(label: 'Tempo', value: _avgTempoLabel()),
+              _RepStat(label: 'Depth', value: _avgDepthLabel(), color: ft.cyan),
             ],
           ),
         ],
       ),
     );
+  }
+
+  /// Average concentric duration across reps that captured one. Returns
+  /// `'—'` when no rep has a tempo (cold-start non-curl live session, or
+  /// pre-WP5.4 reconstructed sessions where `concentricMs` was NULL).
+  String _avgTempoLabel() {
+    final tempos = repConcentricMs.whereType<int>().where((ms) => ms > 0);
+    if (tempos.isEmpty) return '—';
+    final avgMs = tempos.reduce((a, b) => a + b) / tempos.length;
+    return '${(avgMs / 1000).toStringAsFixed(1)}s';
+  }
+
+  /// Average per-rep depth as a percentage. `'—'` when no rep had usable
+  /// angles to compute depth (e.g. squat live sessions today, or all
+  /// reconstructed reps with NULL min/max).
+  String _avgDepthLabel() {
+    final depths = repDepthPercents.whereType<double>();
+    if (depths.isEmpty) return '—';
+    final avg = depths.reduce((a, b) => a + b) / depths.length;
+    return '${(avg * 100).round()}%';
   }
 
   void _showShareSheet() {
@@ -882,6 +1108,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
     final theme = Theme.of(context);
     final quality = _meanRepQuality();
     final qualityColor = _qualityColor(quality);
+    final insights = _buildInsights();
     final hasLegacy = errorsTriggered.contains(FormError.trunkTibia);
     // The new squat error set, in display order. Drives the "Form Issues"
     // chip wrap. trunkTibia is rendered separately under a legacy subhead.
@@ -1014,6 +1241,75 @@ class _SummaryScreenState extends State<SummaryScreen> {
             const SizedBox(height: 16),
           ],
 
+          // Coaching Insights
+          Container(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.lightbulb_outline_rounded,
+                      color: Color(0xFF00E676),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Coaching Insights',
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurface.withValues(
+                          alpha: 0.54,
+                        ),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: insights.map((insight) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 4,
+                            height: 4,
+                            margin: const EdgeInsets.only(top: 6),
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Color(0xFF00E676),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              insight,
+                              style: TextStyle(
+                                color: theme.colorScheme.onSurface.withValues(
+                                  alpha: 0.70,
+                                ),
+                                fontSize: 14,
+                                height: 1.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+
           // Done button
           const SizedBox(height: 16),
           SizedBox(
@@ -1120,6 +1416,29 @@ class _SummaryScreenState extends State<SummaryScreen> {
                     height: 1,
                   ),
                 ),
+                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: qualityColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: qualityColor.withValues(alpha: 0.50),
+                    ),
+                  ),
+                  child: Text(
+                    _gradeLabel(quality),
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      color: qualityColor,
+                      height: 1,
+                    ),
+                  ),
+                ),
               ],
             )
           else
@@ -1130,26 +1449,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
                 fontSize: 14,
               ),
             ),
-          if (hasData) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFF7CB342).withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFFC3F400), width: 1.5),
-              ),
-              child: Text(
-                '+2% VS LAST SESSION',
-                style: const TextStyle(
-                  color: Color(0xFFC3F400),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -1385,6 +1684,116 @@ class _SummaryScreenState extends State<SummaryScreen> {
     );
   }
 
+  Widget _buildBicepsSideRatioStrip(BuildContext context) {
+    final theme = Theme.of(context);
+    final m = widget.bicepsSideRepMetrics;
+
+    double? avg(double? Function(BicepsSideRepMetrics) pick) {
+      final vals = m.map(pick).whereType<double>().toList();
+      if (vals.isEmpty) return null;
+      return vals.reduce((a, b) => a + b) / vals.length;
+    }
+
+    final avgLean = avg((r) => r.leanDeg);
+    final avgShoulderArc = avg((r) => r.shoulderDriftRatio);
+    final avgElbowDrift = avg((r) => r.elbowDriftRatio);
+    final avgBackLean = avg((r) => r.backLeanDeg);
+    final avgShrug = avg((r) => r.shrugRatio);
+    final avgElbowRise = avg((r) => r.elbowRiseRatio);
+
+    if ([
+      avgLean,
+      avgShoulderArc,
+      avgElbowDrift,
+      avgBackLean,
+      avgShrug,
+      avgElbowRise,
+    ].every((v) => v == null)) {
+      return const SizedBox.shrink();
+    }
+
+    final viewLabel = switch (detectedView) {
+      CurlCameraView.sideLeft => 'Side view · Right',
+      CurlCameraView.sideRight => 'Side view · Left',
+      _ => 'Side view',
+    };
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.insights_rounded,
+                color: Color(0xFF64B5F6),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Side-View Form — $viewLabel',
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (avgLean != null)
+            _SideMetricRow(
+              label: 'Trunk lean',
+              value: avgLean,
+              threshold: kTorsoLeanThresholdDeg,
+              unit: '°',
+            ),
+          if (avgShoulderArc != null)
+            _SideMetricRow(
+              label: 'Shoulder arc',
+              value: avgShoulderArc,
+              threshold: kSwingThreshold,
+              unit: '',
+            ),
+          if (avgElbowDrift != null)
+            _SideMetricRow(
+              label: 'Elbow drift',
+              value: avgElbowDrift,
+              threshold: kDriftThreshold,
+              unit: '',
+            ),
+          if (avgBackLean != null)
+            _SideMetricRow(
+              label: 'Back lean',
+              value: avgBackLean,
+              threshold: kBackLeanThresholdDeg,
+              unit: '°',
+            ),
+          if (avgShrug != null)
+            _SideMetricRow(
+              label: 'Shoulder shrug',
+              value: avgShrug,
+              threshold: kShrugThreshold,
+              unit: '',
+            ),
+          if (avgElbowRise != null)
+            _SideMetricRow(
+              label: 'Elbow rise',
+              value: avgElbowRise,
+              threshold: kElbowRiseThreshold,
+              unit: '',
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildLegacyTrunkTibiaRow(BuildContext context) {
     final theme = Theme.of(context);
     // The caller only renders this widget when `errorsTriggered` contains
@@ -1435,6 +1844,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
           // [1] AI Form Accuracy hero — cyan-bordered card with radial glow
           _AiAccuracyHero(
             qualityPct: qualityPct,
+            grade: _gradeLabel(quality),
             subtitle: _qualitySubtitle(quality),
             ft: ft,
           ),
@@ -1477,115 +1887,21 @@ class _SummaryScreenState extends State<SummaryScreen> {
             const SizedBox(height: 16),
           ],
 
-          // [4] Per-Rep Quality Bar Chart
-          if (repQualities.isNotEmpty) ...[
-            Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surface,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.bar_chart_rounded,
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.54,
-                        ),
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Rep Quality',
-                        style: TextStyle(
-                          color: theme.colorScheme.onSurface.withValues(
-                            alpha: 0.54,
-                          ),
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Column(
-                    children: repQualities.asMap().entries.map((entry) {
-                      final repNum = entry.key + 1;
-                      final repQuality = entry.value;
-                      final barColor = _qualityColor(repQuality);
-
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: 28,
-                              child: Text(
-                                'R$repNum',
-                                style: TextStyle(
-                                  color: theme.colorScheme.onSurface.withValues(
-                                    alpha: 0.54,
-                                  ),
-                                  fontSize: 12,
-                                ),
-                                textAlign: TextAlign.right,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: LayoutBuilder(
-                                builder: (ctx, constraints) => Stack(
-                                  children: [
-                                    Container(
-                                      width: constraints.maxWidth,
-                                      height: 14,
-                                      decoration: BoxDecoration(
-                                        color: theme.colorScheme.onSurface
-                                            .withValues(alpha: 0.07),
-                                        borderRadius: BorderRadius.circular(7),
-                                      ),
-                                    ),
-                                    Container(
-                                      width: constraints.maxWidth * repQuality,
-                                      height: 14,
-                                      decoration: BoxDecoration(
-                                        color: barColor,
-                                        borderRadius: BorderRadius.circular(7),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            SizedBox(
-                              width: 36,
-                              child: Text(
-                                '${(repQuality * 100).round()}%',
-                                style: TextStyle(color: barColor, fontSize: 11),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // [4.5] Accuracy by Rep bar chart (new design card)
+          // [4] Accuracy by Rep bar chart
           if (repQualities.isNotEmpty) ...[
             _buildRepAccuracyCard(context),
             const SizedBox(height: 16),
           ],
 
-          // [5] Form Analysis Card
-          if (errorsTriggered.isNotEmpty) ...[
+          // [5] Form Analysis Card — hidden when no reps committed.
+          // Frame-level errors (`elbowRise`, `torsoSwing`, etc.) can fire
+          // during partial rep attempts that abort back to IDLE before
+          // committing, leaving `errorsTriggered` non-empty even when
+          // `totalReps == 0`. Showing those errors with no rep context
+          // is misleading: the user has nothing to compare them against
+          // and no way to act on them. The "no reps" insight from
+          // `_buildInsights()` covers the actual problem (framing).
+          if (errorsTriggered.isNotEmpty && totalReps > 0) ...[
             Container(
               decoration: BoxDecoration(
                 color: theme.colorScheme.surface,
@@ -1657,6 +1973,27 @@ class _SummaryScreenState extends State<SummaryScreen> {
                                     fontSize: 13,
                                   ),
                                 ),
+                                if ((errorCounts[err] ?? 0) > 1) ...[
+                                  const SizedBox(width: 5),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 5,
+                                      vertical: 1,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: chipColor.withValues(alpha: 0.20),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      '×${errorCounts[err]}',
+                                      style: TextStyle(
+                                        color: chipColor,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           );
@@ -1742,6 +2079,12 @@ class _SummaryScreenState extends State<SummaryScreen> {
           // [6.5] Details panel — per-bucket / per-arm / threshold sources.
           if (curlRepRecords.isNotEmpty || curlBucketSummaries.isNotEmpty) ...[
             _buildDetailsCard(context),
+            const SizedBox(height: 16),
+          ],
+
+          // [6.6] Side-view per-rep averages — only for bicepsCurlSide sessions
+          if (widget.bicepsSideRepMetrics.isNotEmpty) ...[
+            _buildBicepsSideRatioStrip(context),
             const SizedBox(height: 16),
           ],
 
@@ -1882,11 +2225,7 @@ class _StatChip extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.check_circle_outline,
-            color: Color(0xFF00E676),
-            size: 20,
-          ),
+          Icon(icon, color: const Color(0xFF00E676), size: 20),
           const SizedBox(height: 6),
           Text(
             value,
@@ -2100,6 +2439,77 @@ class _RatioRow extends StatelessWidget {
   }
 }
 
+class _SideMetricRow extends StatelessWidget {
+  const _SideMetricRow({
+    required this.label,
+    required this.value,
+    required this.threshold,
+    required this.unit,
+  });
+
+  final String label;
+  final double value;
+  final double threshold;
+  final String unit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final ratio = value / threshold;
+    final (badge, badgeColor) = ratio <= 1.0
+        ? ('OK', const Color(0xFF4CAF50))
+        : ratio <= 1.5
+        ? ('Elevated', const Color(0xFFFFA726))
+        : ('High', const Color(0xFFEF5350));
+
+    final displayValue = unit == '°'
+        ? '${value.toStringAsFixed(1)}°'
+        : value.toStringAsFixed(2);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.60),
+                fontSize: 13,
+              ),
+            ),
+          ),
+          Text(
+            displayValue,
+            style: TextStyle(
+              color: theme.colorScheme.onSurface,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: badgeColor.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: badgeColor.withValues(alpha: 0.40)),
+            ),
+            child: Text(
+              badge,
+              style: TextStyle(
+                color: badgeColor,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BucketStat extends StatelessWidget {
   final String label;
   final String value;
@@ -2293,7 +2703,20 @@ class _ShareCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () async {
+                    final lines = [
+                      '🏋️ FiTrack — ${exercise.label}',
+                      ?quality != null
+                          ? '${(quality * 100).round()}% form accuracy'
+                          : null,
+                      'Reps: $totalReps  •  Time: ${_fmtDuration()}',
+                    ];
+                    await Share.share(
+                      lines.join('\n'),
+                      subject: 'My FiTrack ${exercise.label} session',
+                    );
+                    if (context.mounted) Navigator.pop(context);
+                  },
                   icon: const Icon(Icons.ios_share, size: 16),
                   label: const Text('SHARE'),
                   style: ElevatedButton.styleFrom(
@@ -2356,11 +2779,13 @@ class _ShareStat extends StatelessWidget {
 class _AiAccuracyHero extends StatelessWidget {
   const _AiAccuracyHero({
     required this.qualityPct,
+    required this.grade,
     required this.subtitle,
     required this.ft,
   });
 
   final int? qualityPct;
+  final String grade;
   final String subtitle;
   final FiTrackColors ft;
 
@@ -2443,6 +2868,29 @@ class _AiAccuracyHero extends StatelessWidget {
                           color: ft.cyan,
                         ),
                       ),
+                    if (qualityPct != null) ...[
+                      const SizedBox(width: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: ft.cyan.withAlpha(0x26),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: ft.cyan.withAlpha(0x80)),
+                        ),
+                        child: Text(
+                          grade,
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                            color: ft.cyan,
+                            height: 1,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 10),

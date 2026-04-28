@@ -47,5 +47,13 @@ post_install do |installer|
         config.build_settings['SWIFT_OPTIMIZATION_LEVEL'] = '-Onone'
       end
     end
+
+    # MLKit pods (beta13) ship fat binaries with arm64 (device) + x86_64 (Intel sim)
+    # but no arm64-iphonesimulator slice. On Apple Silicon Macs the simulator runs as
+    # arm64, which collides with the device slice. Exclude arm64 from simulator builds
+    # so the linker falls back to Rosetta (x86_64) for those pods only.
+    target.build_configurations.each do |config|
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
+    end
   end
 end

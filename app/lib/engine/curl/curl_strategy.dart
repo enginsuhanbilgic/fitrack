@@ -1,4 +1,5 @@
 import '../../core/constants.dart';
+import '../../core/form_thresholds.dart';
 import '../../core/rom_thresholds.dart';
 import '../../core/types.dart';
 import '../../models/landmark_types.dart';
@@ -99,6 +100,9 @@ class CurlStrategy extends ExerciseStrategy {
     List<double>? referenceRepAngleSeries,
     bool enableDtwScoring = false,
 
+    /// Form/ROM coaching sensitivity for biceps curl (cold-start reps only).
+    FormThresholds formThresholds = FormThresholds.medium,
+
     /// The exercise variant this strategy represents. Determines what
     /// [exercise] returns and which thresholds are appropriate.
     ExerciseType exerciseType = ExerciseType.bicepsCurlFront,
@@ -117,6 +121,7 @@ class CurlStrategy extends ExerciseStrategy {
          historicalConcentricDurations: historicalConcentricDurations,
          referenceRepAngleSeries: referenceRepAngleSeries,
          enableDtwScoring: enableDtwScoring,
+         formThresholds: formThresholds,
        ) {
     if (initialView != CurlCameraView.unknown) {
       _lockedView = initialView;
@@ -523,6 +528,17 @@ class CurlStrategy extends ExerciseStrategy {
       // happen to have bilateral angles (rare in side view), fall back
       // to the declared side. When neither has an angle (shouldn't
       // happen since the rep counted), fall back to declared side too.
+      //
+      // 2026-04-27 — DO NOT replace the declared-side fallback with
+      // `_form.activeArmIsLeftThisRep`. The analyzer's resolved arm is
+      // in ML Kit anatomical landmark space, which under front-camera
+      // mirroring is the OPPOSITE of the user's intent. The declared
+      // side (`_profileSideForRep()`) already accounts for the
+      // mirroring (the home-screen picker bakes it in), so trusting
+      // the declared side here keeps the bucket aligned with what the
+      // user actually curled. The analyzer's resolution remains useful
+      // for telemetry — it's logged in `rep.arm_resolved` — but it
+      // must not drive bucket attribution.
       final ProfileSide attributedSide;
       if (leftBilateral != null && rightBilateral == null) {
         attributedSide = ProfileSide.left;
@@ -560,18 +576,21 @@ class CurlStrategy extends ExerciseStrategy {
     required List<Duration> historicalConcentricDurations,
     required List<double>? referenceRepAngleSeries,
     required bool enableDtwScoring,
+    FormThresholds formThresholds = FormThresholds.medium,
   }) {
     final isSide =
         initialView == CurlCameraView.sideLeft ||
         initialView == CurlCameraView.sideRight;
     if (isSide) {
       return CurlSideFormAnalyzer(
+        formThresholds: formThresholds,
         historicalConcentricDurations: historicalConcentricDurations,
         referenceRepAngleSeries: referenceRepAngleSeries,
         enableDtwScoring: enableDtwScoring,
       );
     }
     return CurlFormAnalyzer(
+      formThresholds: formThresholds,
       historicalConcentricDurations: historicalConcentricDurations,
       referenceRepAngleSeries: referenceRepAngleSeries,
       enableDtwScoring: enableDtwScoring,

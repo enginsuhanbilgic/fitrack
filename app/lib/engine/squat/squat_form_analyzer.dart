@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import '../../core/constants.dart';
-import '../../core/default_squat_thresholds.dart';
+import '../../core/squat_form_thresholds.dart';
 import '../../core/types.dart';
 import '../../models/landmark_types.dart';
 import '../../models/pose_landmark.dart';
@@ -35,10 +35,15 @@ import '../form_analyzer_base.dart';
 /// signals during a side-on recording — picking the high-visibility
 /// side avoids flickering between low-confidence false-positives.
 class SquatFormAnalyzer extends FormAnalyzerBase {
-  SquatFormAnalyzer({required this.variant, required this.longFemurLifter})
-    : _leanWarnDeg =
-          DefaultSquatThresholds.leanWarnFor(variant) +
-          (longFemurLifter ? kSquatLongFemurLeanBoost : 0.0);
+  SquatFormAnalyzer({
+    required this.variant,
+    required this.longFemurLifter,
+    SquatFormThresholds formThresholds = SquatFormThresholds.defaults,
+  }) : _formThresholds = formThresholds,
+       _leanWarnDeg = formThresholds.leanWarnFor(
+         variant,
+         longFemur: longFemurLifter,
+       );
 
   final SquatVariant variant;
 
@@ -46,6 +51,8 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   /// long-femur flag in `SquatStrategy` (which relaxes BOTTOM angle, not
   /// the lean threshold). The two never stack on the same threshold.
   final bool longFemurLifter;
+
+  final SquatFormThresholds _formThresholds;
 
   /// Active lean threshold (variant-specific + optional +5° boost).
   /// Frozen at construction so a mid-session Settings change cannot affect
@@ -130,7 +137,7 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       if (_maxKneeShiftRatio == null || kneeShift > _maxKneeShiftRatio!) {
         _maxKneeShiftRatio = kneeShift;
       }
-      if (kneeShift > kSquatKneeShiftWarnRatio) {
+      if (kneeShift > _formThresholds.kneeShiftWarnRatio) {
         errors.add(FormError.forwardKneeShift);
       }
     }
@@ -141,7 +148,7 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       if (_maxHeelLiftRatio == null || heelLift > _maxHeelLiftRatio!) {
         _maxHeelLiftRatio = heelLift;
       }
-      if (heelLift > kSquatHeelLiftWarnRatio) {
+      if (heelLift > _formThresholds.heelLiftWarnRatio) {
         errors.add(FormError.heelLift);
       }
     }
@@ -351,7 +358,7 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     // Heel lift — proportional. Severity 1.0 reached at ratio 0.05
     // (~67% above the warning floor).
     final maxHeel = _maxHeelLiftRatio;
-    if (maxHeel != null && maxHeel > kSquatHeelLiftWarnRatio) {
+    if (maxHeel != null && maxHeel > _formThresholds.heelLiftWarnRatio) {
       final severity = (maxHeel / 0.05).clamp(0.0, 1.0);
       score *= 1.0 - severity * kQualitySquatHeelLiftMaxDeduction;
     }

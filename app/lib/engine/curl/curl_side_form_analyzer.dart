@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import '../../core/constants.dart';
+import '../../core/form_thresholds.dart';
 import '../../core/rom_thresholds.dart';
 import '../../core/types.dart';
 import '../../models/landmark_types.dart';
@@ -44,16 +45,20 @@ import 'dtw_scorer.dart';
 ///     which the trunk-lean angle check covers.
 class CurlSideFormAnalyzer extends CurlAnalyzer {
   CurlSideFormAnalyzer({
+    FormThresholds formThresholds = FormThresholds.medium,
     List<Duration> historicalConcentricDurations = const [],
     List<double>? referenceRepAngleSeries,
     bool enableDtwScoring = false,
     DtwScorer? dtwScorer,
-  }) : _historicalConcentricDurations = List<Duration>.unmodifiable(
+  }) : _formThresholds = formThresholds,
+       _historicalConcentricDurations = List<Duration>.unmodifiable(
          historicalConcentricDurations,
        ),
        _referenceRepAngleSeries = referenceRepAngleSeries,
        _enableDtwScoring = enableDtwScoring,
        _dtwScorer = dtwScorer ?? DtwScorer();
+
+  final FormThresholds _formThresholds;
 
   // ── View ──────────────────────────────────────────────
   /// User-declared / view-detector hint of which side faces the camera.
@@ -112,6 +117,7 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
   double _maxShoulderArcRatio = 0.0;
   double _maxShrugRatio = 0.0;
   double _maxBackLeanDeg = 0.0;
+  double _maxElbowRiseRatio = 0.0;
 
   /// Most recent signed perpendicular elbow-offset ratio. Sign convention:
   /// positive = elbow on the side of n̂ where n̂ = (−u_y, u_x) and
@@ -132,7 +138,17 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
   double? _baselineTorsoAngleSigned;
   double? _baselineShoulderRelX;
   double? _baselineShoulderRelY;
+  double? _baselineElbowRelY;
   bool? _facingRight;
+
+  // ── Arm-resolution telemetry (snapshot at rep start) ─
+  // Captured so `CurlStrategy` can emit a `rep.arm_resolved` log line
+  // showing exactly why `_activeArmIsLeft` flipped — without this, a
+  // user-vs-analyzer side mismatch is undebuggable. Updated only at
+  // `onRepStart`; preserved across the rep so the commit-time logger
+  // sees the same numbers `_resolveActiveArm` did.
+  double _leftArmConfSum = 0.0;
+  double _rightArmConfSum = 0.0;
 
   // ── Quality bookkeeping ──────────────────────────────
   double _lastRepQuality = 1.0;
@@ -173,6 +189,7 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     _maxShoulderArcRatio = 0.0;
     _maxShrugRatio = 0.0;
     _maxBackLeanDeg = 0.0;
+    _maxElbowRiseRatio = 0.0;
     _lastSignedElbowDriftRatio = null;
     _signedElbowDriftRatioAtMax = null;
     // Resolve the active arm BEFORE reading any per-side baselines.
@@ -193,12 +210,21 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
       useLeft ? LM.leftHip : LM.rightHip,
       minConfidence: kMinLandmarkConfidence,
     );
+    final elbow = snapshot.landmark(
+      useLeft ? LM.leftElbow : LM.rightElbow,
+      minConfidence: kMinLandmarkConfidence,
+    );
     if (shoulder != null && hip != null) {
       _baselineShoulderRelX = shoulder.x - hip.x;
       _baselineShoulderRelY = shoulder.y - hip.y;
     } else {
       _baselineShoulderRelX = null;
       _baselineShoulderRelY = null;
+    }
+    if (shoulder != null && elbow != null) {
+      _baselineElbowRelY = elbow.y - shoulder.y;
+    } else {
+      _baselineElbowRelY = null;
     }
   }
 
@@ -300,7 +326,9 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     if (swing != null) {
       final ratio = swing / torsoLen;
       if (ratio > _maxSwingRatio) _maxSwingRatio = ratio;
-      if (ratio > kSwingThreshold) errors.add(FormError.torsoSwing);
+      if (ratio > _formThresholds.swingThreshold) {
+        errors.add(FormError.torsoSwing);
+      }
     }
 
     // Forward trunk lean angle — side-view sagittal projection.
@@ -310,7 +338,7 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
       if (currentAngle != null) {
         final delta = (currentAngle - baseline).abs();
         if (delta > _maxLeanDeltaDeg) _maxLeanDeltaDeg = delta;
-        if (delta > kTorsoLeanThresholdDeg &&
+        if (delta > _formThresholds.torsoLeanThresholdDeg &&
             !errors.contains(FormError.torsoSwing)) {
           errors.add(FormError.torsoSwing);
         }
@@ -335,7 +363,9 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
         final disp = math.sqrt(dx * dx + dy * dy);
         final ratio = disp / torsoLen;
         if (ratio > _maxShoulderArcRatio) _maxShoulderArcRatio = ratio;
-        if (ratio > kSwingThreshold) errors.add(FormError.shoulderArc);
+        if (ratio > _formThresholds.swingThreshold) {
+          errors.add(FormError.shoulderArc);
+        }
       }
     }
 
@@ -381,7 +411,9 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
           // survives and the sign is lost at rep commit.
           _signedElbowDriftRatioAtMax = signedRatio;
         }
-        if (ratio > kDriftThreshold) errors.add(FormError.elbowDrift);
+        if (ratio > _formThresholds.driftThreshold) {
+          errors.add(FormError.elbowDrift);
+        }
       }
     }
 
@@ -402,7 +434,9 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
         final shrugValue = -dy; // positive = moving up
         final ratio = shrugValue / torsoLen;
         if (ratio > _maxShrugRatio) _maxShrugRatio = ratio;
-        if (ratio > kShrugThreshold) errors.add(FormError.shoulderShrug);
+        if (ratio > _formThresholds.shrugThreshold) {
+          errors.add(FormError.shoulderShrug);
+        }
       }
     }
 
@@ -415,8 +449,31 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
         // Facing left: backward lean is shoulder moving RIGHT (x increases) -> delta positive.
         final backLeanDeg = _facingRight! ? -delta : delta;
         if (backLeanDeg > _maxBackLeanDeg) _maxBackLeanDeg = backLeanDeg;
-        if (backLeanDeg > kBackLeanThresholdDeg) {
+        if (backLeanDeg > _formThresholds.backLeanThresholdDeg) {
           errors.add(FormError.backLean);
+        }
+      }
+    }
+
+    // Elbow rise — upper arm swinging forward/up during the curl.
+    // Measures how much the elbow moves upward relative to the shoulder
+    // compared to the rep-start baseline, normalised by torso length.
+    if (_baselineElbowRelY != null) {
+      final riseElbow = current.landmark(
+        useLeft ? LM.leftElbow : LM.rightElbow,
+        minConfidence: kMinLandmarkConfidence,
+      );
+      final riseShoulder = current.landmark(
+        useLeft ? LM.leftShoulder : LM.rightShoulder,
+        minConfidence: kMinLandmarkConfidence,
+      );
+      if (riseElbow != null && riseShoulder != null) {
+        final currentElbowRelY = riseElbow.y - riseShoulder.y;
+        // Negative dy = elbow moved UP relative to shoulder (screen-Y decreases upward).
+        final rise = (_baselineElbowRelY! - currentElbowRelY) / torsoLen;
+        if (rise > _maxElbowRiseRatio) _maxElbowRiseRatio = rise;
+        if (rise > _formThresholds.elbowRiseThreshold) {
+          errors.add(FormError.elbowRise);
         }
       }
     }
@@ -488,13 +545,17 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     _maxShoulderArcRatio = 0.0;
     _maxShrugRatio = 0.0;
     _maxBackLeanDeg = 0.0;
+    _maxElbowRiseRatio = 0.0;
     _lastSignedElbowDriftRatio = null;
     _signedElbowDriftRatioAtMax = null;
     _baselineTorsoAngle = null;
     _baselineTorsoAngleSigned = null;
     _baselineShoulderRelX = null;
     _baselineShoulderRelY = null;
+    _baselineElbowRelY = null;
     _facingRight = null;
+    _leftArmConfSum = 0.0;
+    _rightArmConfSum = 0.0;
     _lastRepQuality = 1.0;
     _repQualities.clear();
     _eccentricTooFastCount = 0;
@@ -572,47 +633,101 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
   @override
   double get maxBackLeanDegThisRep => _maxBackLeanDeg;
 
+  /// Max shoulder-shrug ratio observed during the current rep.
+  /// Telemetry-only; the flag uses the same value compared to
+  /// [kShrugThreshold]. Cleared on rep boundary.
+  @override
+  double get maxShrugRatioThisRep => _maxShrugRatio;
+
+  /// Max elbow-rise ratio observed during the current rep.
+  /// Telemetry-only; the flag uses the same value compared to
+  /// [kElbowRiseThreshold]. Cleared on rep boundary.
+  @override
+  double get maxElbowRiseRatioThisRep => _maxElbowRiseRatio;
+
+  /// Anatomical arm the analyzer locked onto for the most recent rep.
+  /// Resolved at [onRepStart] from per-arm landmark-confidence sums and
+  /// frozen for the rep. Read by `CurlStrategy._commitRepSamples` so the
+  /// `side=` token in `rep.extremes` reflects the arm actually measured.
+  @override
+  bool get activeArmIsLeftThisRep => _activeArmIsLeft;
+
+  /// Summed left-arm landmark confidences captured at the most recent
+  /// [onRepStart]. Telemetry-only — exposes the input to
+  /// [_resolveActiveArm].
+  @override
+  double get leftArmConfidenceSumThisRep => _leftArmConfSum;
+
+  /// Summed right-arm landmark confidences captured at the most recent
+  /// [onRepStart]. Telemetry-only — counterpart to
+  /// [leftArmConfidenceSumThisRep].
+  @override
+  double get rightArmConfidenceSumThisRep => _rightArmConfSum;
+
+  /// Facing direction detected at the most recent [onRepStart]. Surfaces
+  /// the analyzer's `_facingRight` to the strategy so the rep-commit
+  /// telemetry can show whether the pose-detected facing agrees with
+  /// the user's home-screen declared side.
+  @override
+  bool? get facingRightThisRep => _facingRight;
+
   // ─────────────────────────────────────────────────────
   // Internals
   // ─────────────────────────────────────────────────────
 
   double _computeQualityScore() {
     var score = 1.0;
+    final ft = _formThresholds;
 
-    if (_maxSwingRatio > kSwingThreshold) {
-      final severity = ((_maxSwingRatio - kSwingThreshold) / kSwingThreshold)
-          .clamp(0.0, 1.0);
-      score -= severity * kQualitySwingMaxDeduction;
-    }
-    if (_maxLeanDeltaDeg > kTorsoLeanThresholdDeg) {
+    if (_maxSwingRatio > ft.swingThreshold) {
       final severity =
-          ((_maxLeanDeltaDeg - kTorsoLeanThresholdDeg) / kTorsoLeanThresholdDeg)
-              .clamp(0.0, 1.0);
-      score -= severity * kQualitySwingMaxDeduction;
-    }
-    if (_maxShoulderArcRatio > kSwingThreshold) {
-      final severity =
-          ((_maxShoulderArcRatio - kSwingThreshold) / kSwingThreshold).clamp(
+          ((_maxSwingRatio - ft.swingThreshold) / ft.swingThreshold).clamp(
             0.0,
             1.0,
           );
       score -= severity * kQualitySwingMaxDeduction;
     }
-    if (_maxDriftRatio > kDriftThreshold) {
-      final severity = ((_maxDriftRatio - kDriftThreshold) / kDriftThreshold)
-          .clamp(0.0, 1.0);
+    if (_maxLeanDeltaDeg > ft.torsoLeanThresholdDeg) {
+      final severity =
+          ((_maxLeanDeltaDeg - ft.torsoLeanThresholdDeg) /
+                  ft.torsoLeanThresholdDeg)
+              .clamp(0.0, 1.0);
+      score -= severity * kQualitySwingMaxDeduction;
+    }
+    if (_maxShoulderArcRatio > ft.swingThreshold) {
+      final severity =
+          ((_maxShoulderArcRatio - ft.swingThreshold) / ft.swingThreshold)
+              .clamp(0.0, 1.0);
+      score -= severity * kQualitySwingMaxDeduction;
+    }
+    if (_maxDriftRatio > ft.driftThreshold) {
+      final severity =
+          ((_maxDriftRatio - ft.driftThreshold) / ft.driftThreshold).clamp(
+            0.0,
+            1.0,
+          );
       score -= severity * kQualityDriftMaxDeduction;
     }
-    if (_maxShrugRatio > kShrugThreshold) {
-      final severity = ((_maxShrugRatio - kShrugThreshold) / kShrugThreshold)
-          .clamp(0.0, 1.0);
+    if (_maxShrugRatio > ft.shrugThreshold) {
+      final severity =
+          ((_maxShrugRatio - ft.shrugThreshold) / ft.shrugThreshold).clamp(
+            0.0,
+            1.0,
+          );
       score -= severity * kQualityShrugMaxDeduction;
     }
-    if (_maxBackLeanDeg > kBackLeanThresholdDeg) {
+    if (_maxBackLeanDeg > ft.backLeanThresholdDeg) {
       final severity =
-          ((_maxBackLeanDeg - kBackLeanThresholdDeg) / kBackLeanThresholdDeg)
+          ((_maxBackLeanDeg - ft.backLeanThresholdDeg) /
+                  ft.backLeanThresholdDeg)
               .clamp(0.0, 1.0);
       score -= severity * kQualityBackLeanMaxDeduction;
+    }
+    if (_maxElbowRiseRatio > ft.elbowRiseThreshold) {
+      final severity =
+          ((_maxElbowRiseRatio - ft.elbowRiseThreshold) / ft.elbowRiseThreshold)
+              .clamp(0.0, 1.0);
+      score -= severity * kQualityElbowRiseMaxDeduction;
     }
     if (_lastEccentricDuration != null &&
         _lastEccentricDuration!.inMilliseconds < kMinEccentricSec * 1000) {
@@ -712,6 +827,10 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
         conf(LM.leftShoulder) + conf(LM.leftHip) + conf(LM.leftElbow);
     final rightTotal =
         conf(LM.rightShoulder) + conf(LM.rightHip) + conf(LM.rightElbow);
+    // Snapshot for telemetry. Both branches below capture the same numbers
+    // so the rep-commit logger always has the input that drove the decision.
+    _leftArmConfSum = leftTotal;
+    _rightArmConfSum = rightTotal;
     if (leftTotal == 0 && rightTotal == 0) {
       // No landmarks at all — fall back to the declared hint.
       return _view != CurlCameraView.sideRight;

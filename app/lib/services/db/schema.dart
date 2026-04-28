@@ -21,6 +21,9 @@
 ///     cheat) vs. back-elbow (rare; setup) without ambiguity. Opens the
 ///     telemetry channel for the future Phase D-v2 side-view threshold
 ///     retune (plan `federated-tickling-sunset` PR 4).
+/// v6 (biceps side-view shrug/elbow-rise): adds 2 nullable biceps columns
+///     (`biceps_shrug_ratio`, `biceps_elbow_rise_ratio`). Completes the
+///     retune telemetry channel for kShrugThreshold and kElbowRiseThreshold.
 ///
 /// Five tables (v1) + one table (v2):
 ///   - `profiles`         — JSON-blob per-exercise ROM profile (PR1)
@@ -40,7 +43,7 @@ import 'package:sqflite/sqflite.dart';
 /// On-disk schema version. Bump when any CREATE/ALTER landing in `onCreate` or
 /// `onUpgrade` changes. Independent of `CurlRomProfile.schemaVersion` which
 /// tags the JSON blob inside `profiles.profile_json`.
-const int kDbSchemaVersion = 5;
+const int kDbSchemaVersion = 6;
 
 const String ddlProfiles = '''
 CREATE TABLE profiles (
@@ -168,6 +171,12 @@ Future<void> onCreate(Database db, int version) async {
   await db.execute(
     'ALTER TABLE reps ADD COLUMN biceps_elbow_drift_signed   REAL',
   );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN biceps_shrug_ratio          REAL',
+  );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN biceps_elbow_rise_ratio     REAL',
+  );
   for (final idx in ddlIndexes) {
     await db.execute(idx);
   }
@@ -221,6 +230,17 @@ Future<void> onUpgrade(Database db, int oldVersion, int newVersion) async {
     );
     await db.execute(
       'ALTER TABLE reps ADD COLUMN biceps_elbow_drift_signed   REAL',
+    );
+  }
+  if (oldVersion < 6) {
+    // v5 → v6: peak shrug + elbow-rise ratios. Nullable; NULL for all
+    // pre-v6 rows AND for non-side-view rows. Opens the data-driven retune
+    // channel for kShrugThreshold and kElbowRiseThreshold.
+    await db.execute(
+      'ALTER TABLE reps ADD COLUMN biceps_shrug_ratio          REAL',
+    );
+    await db.execute(
+      'ALTER TABLE reps ADD COLUMN biceps_elbow_rise_ratio     REAL',
     );
   }
 }

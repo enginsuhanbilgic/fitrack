@@ -7,6 +7,7 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fitrack/core/constants.dart';
 import 'package:fitrack/core/types.dart';
 import 'package:fitrack/engine/curl/curl_side_form_analyzer.dart';
 import 'package:fitrack/models/landmark_types.dart';
@@ -706,6 +707,469 @@ void main() {
       expect(a.signedElbowDriftRatioAtMax, isNotNull);
       a.reset();
       expect(a.signedElbowDriftRatioAtMax, isNull);
+    });
+  });
+
+  group('shoulderArc detection', () {
+    test('shoulder stays at baseline → no shoulderArc', () {
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      a.onRepStart(ref);
+      expect(a.evaluate(ref), isNot(contains(FormError.shoulderArc)));
+    });
+
+    test('shoulder shifts 0.12 laterally → fires shoulderArc', () {
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      a.onRepStart(ref);
+      // relX_curr=0.12, dy=0 → disp=0.12, torsoLen=0.40, ratio=0.30 > 0.25
+      final evaluated = buildSidePose(
+        shoulderX: 0.62,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.62,
+        elbowY: 0.50,
+      );
+      expect(a.evaluate(evaluated), contains(FormError.shoulderArc));
+    });
+
+    test(
+      'elbow drifts but shoulder stays fixed → shoulderArc absent, elbowDrift present',
+      () {
+        final ref = buildSidePose(
+          shoulderX: 0.50,
+          shoulderY: 0.30,
+          hipX: 0.50,
+          hipY: 0.70,
+          elbowX: 0.50,
+          elbowY: 0.50,
+        );
+        a.onRepStart(ref);
+        // elbowX shifts far past kDriftThreshold but shoulder/hip unchanged
+        final evaluated = buildSidePose(
+          shoulderX: 0.50,
+          shoulderY: 0.30,
+          hipX: 0.50,
+          hipY: 0.70,
+          elbowX: 0.62,
+          elbowY: 0.50,
+        );
+        final errors = a.evaluate(evaluated);
+        expect(errors, isNot(contains(FormError.shoulderArc)));
+        expect(errors, contains(FormError.elbowDrift));
+      },
+    );
+  });
+
+  group('shoulderShrug detection', () {
+    test('shoulder Y unchanged → no shoulderShrug', () {
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      a.onRepStart(ref);
+      expect(a.evaluate(ref), isNot(contains(FormError.shoulderShrug)));
+    });
+
+    test('shoulder rises by 0.128 screen units → fires shoulderShrug', () {
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      a.onRepStart(ref);
+      // 2× threshold: ratio=0.32 → Δ=0.32×0.40=0.128 → shoulderY = 0.30−0.128 = 0.172
+      // relY_curr = 0.172−0.70 = −0.528, dy = −0.528−(−0.40) = −0.128
+      // shrugValue = 0.128, ratio = 0.128/0.40 = 0.32 > 0.16
+      final evaluated = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.172,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      expect(a.evaluate(evaluated), contains(FormError.shoulderShrug));
+    });
+
+    test('shoulder drops (negative shrugValue) → no shoulderShrug', () {
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      a.onRepStart(ref);
+      // shoulderY increases (moves down in screen space) → shrugValue negative → no flag
+      final evaluated = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.42,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      expect(a.evaluate(evaluated), isNot(contains(FormError.shoulderShrug)));
+    });
+  });
+
+  group('backLean detection', () {
+    // Use a slightly forward-tilted baseline (shoulder.x=0.55) so the
+    // baseline angle sits away from the ±180° branch-cut of atan2.
+    test('facing right + forward lean (shoulder moves right) → no backLean', () {
+      // nose.x (0.70) > shoulder.x (0.55) → _facingRight = true
+      final ref = buildSidePose(
+        shoulderX: 0.55,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.55,
+        elbowY: 0.50,
+        noseX: 0.70,
+      );
+      a.onRepStart(ref);
+      // shoulder moves right → forward lean for a right-facing user → backLeanDeg < 0
+      final evaluated = buildSidePose(
+        shoulderX: 0.65,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.65,
+        elbowY: 0.50,
+        noseX: 0.70,
+      );
+      expect(a.evaluate(evaluated), isNot(contains(FormError.backLean)));
+    });
+
+    test(
+      'facing right + backward lean (shoulder moves left) → fires backLean',
+      () {
+        final ref = buildSidePose(
+          shoulderX: 0.55,
+          shoulderY: 0.30,
+          hipX: 0.50,
+          hipY: 0.70,
+          elbowX: 0.55,
+          elbowY: 0.50,
+          noseX: 0.70,
+        );
+        a.onRepStart(ref);
+        // Large leftward shift → backward lean → backLeanDeg > 10°
+        final evaluated = buildSidePose(
+          shoulderX: 0.35,
+          shoulderY: 0.30,
+          hipX: 0.50,
+          hipY: 0.70,
+          elbowX: 0.35,
+          elbowY: 0.50,
+          noseX: 0.70,
+        );
+        expect(a.evaluate(evaluated), contains(FormError.backLean));
+      },
+    );
+
+    test('facing left + shoulder moves right → fires backLean', () {
+      // nose.x (0.30) < shoulder.x (0.55) → _facingRight = false
+      final ref = buildSidePose(
+        shoulderX: 0.55,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.55,
+        elbowY: 0.50,
+        noseX: 0.30,
+      );
+      a.onRepStart(ref);
+      // Large rightward shift → backward lean for left-facing → backLeanDeg > 10°
+      final evaluated = buildSidePose(
+        shoulderX: 0.75,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.75,
+        elbowY: 0.50,
+        noseX: 0.30,
+      );
+      expect(a.evaluate(evaluated), contains(FormError.backLean));
+    });
+
+    test('reset() clears _baselineTorsoAngleSigned and _facingRight', () {
+      final ref = buildSidePose(
+        shoulderX: 0.55,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.55,
+        elbowY: 0.50,
+        noseX: 0.70,
+      );
+      a.onRepStart(ref);
+      // Confirm the flag fires before reset.
+      final leaned = buildSidePose(
+        shoulderX: 0.35,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.35,
+        elbowY: 0.50,
+        noseX: 0.70,
+      );
+      expect(a.evaluate(leaned), contains(FormError.backLean));
+
+      // After reset, re-start with the same ref and evaluate the same pose —
+      // baseline is freshly snapshotted so delta is zero → no backLean.
+      a.reset();
+      a.onRepStart(ref);
+      expect(a.evaluate(ref), isNot(contains(FormError.backLean)));
+    });
+  });
+
+  group('elbowRise detection', () {
+    test('elbow stays at baseline y → no elbowRise', () {
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      a.onRepStart(ref);
+      expect(a.evaluate(ref), isNot(contains(FormError.elbowRise)));
+    });
+
+    test('elbow rises by 0.144 screen units → fires elbowRise', () {
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      a.onRepStart(ref);
+      // baselineElbowRelY = 0.50 − 0.30 = 0.20
+      // 2× threshold: rise=0.36 → Δ=0.36×0.40=0.144 → elbowY = 0.50−0.144 = 0.356
+      // currentElbowRelY = 0.356−0.30 = 0.056, rise=(0.20−0.056)/0.40 = 0.36 > 0.18
+      final evaluated = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.356,
+      );
+      expect(a.evaluate(evaluated), contains(FormError.elbowRise));
+    });
+
+    test('elbow drops below baseline → no elbowRise', () {
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      a.onRepStart(ref);
+      // elbowY increases (elbow moves down) → rise negative → no flag
+      final evaluated = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.62,
+      );
+      expect(a.evaluate(evaluated), isNot(contains(FormError.elbowRise)));
+    });
+  });
+
+  group('quality score — side-view', () {
+    test('clean rep scores 1.0', () async {
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      a.onRepStart(ref);
+      // Wait past kMinConcentricSec (0.3 s) so concentric is in-spec.
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      a.evaluate(ref);
+      a.onPeakReached();
+      a.onEccentricStart();
+      // Wait past kMinEccentricSec (0.8 s) so eccentric is in-spec.
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      a.onRepEnd();
+      expect(a.lastRepQuality, closeTo(1.0, 1e-9));
+    });
+
+    test(
+      'shoulderShrug above threshold → fires deduction, score < 1.0',
+      () async {
+        final ref = buildSidePose(
+          shoulderX: 0.50,
+          shoulderY: 0.30,
+          hipX: 0.50,
+          hipY: 0.70,
+          elbowX: 0.50,
+          elbowY: 0.50,
+        );
+        // shoulder rises by 0.128 → shrug ratio > kShrugThreshold (0.16).
+        // torsoLen in the shrug pose = hipY − shoulderY = 0.70 − 0.172 = 0.528,
+        // so ratio = 0.128 / 0.528 ≈ 0.242. severity = (0.242−0.16)/0.16 ≈ 0.515.
+        // deduction = 0.515 × kQualityShrugMaxDeduction (0.15) ≈ 0.077.
+        // Expected score (no concentric/eccentric ding) ≈ 0.923.
+        final shrugPose = buildSidePose(
+          shoulderX: 0.50,
+          shoulderY: 0.172,
+          hipX: 0.50,
+          hipY: 0.70,
+          elbowX: 0.50,
+          elbowY: 0.50,
+        );
+        a.onRepStart(ref);
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        a.evaluate(shrugPose);
+        a.onPeakReached();
+        a.onRepEnd();
+        // Score must be strictly below 1.0 (deduction applied) and above 0.0.
+        expect(a.lastRepQuality, lessThan(1.0));
+        expect(a.lastRepQuality, greaterThan(0.0));
+      },
+    );
+
+    test('elbowRise at 2× threshold → score 0.85', () async {
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      // Shoulder.y stays 0.30 → torsoLen_curr = 0.40 (unchanged).
+      // baselineElbowRelY = 0.20. currentElbowRelY = 0.356 − 0.30 = 0.056.
+      // rise = (0.20 − 0.056) / 0.40 = 0.36 = 2× kElbowRiseThreshold (0.18).
+      // severity = 1.0, deduction = 1.0 × 0.15 = 0.15. Score = 1.0 − 0.15 = 0.85.
+      final risePose = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.356,
+      );
+      a.onRepStart(ref);
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      a.evaluate(risePose);
+      a.onPeakReached();
+      a.onRepEnd();
+      expect(a.lastRepQuality, closeTo(0.85, 1e-9));
+    });
+
+    test('stacked deductions clamp to 0.0 lower bound', () async {
+      // Drive every deduction at once: shrug + elbowRise + lateral swing
+      // + elbowDrift + shoulderArc.
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      // Shoulder rises (shrug) AND shifts laterally (shoulderArc) AND elbow
+      // drifts perpendicularly (elbowDrift) AND elbow rises — all at or above
+      // their respective thresholds.
+      final worstPose = buildSidePose(
+        shoulderX: 0.62,
+        shoulderY: 0.172,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.30,
+        elbowY: 0.356,
+      );
+      a.onRepStart(ref);
+      a.evaluate(worstPose);
+      a.onPeakReached();
+      a.onRepEnd();
+      expect(a.lastRepQuality, greaterThanOrEqualTo(0.0));
+      expect(a.lastRepQuality, lessThanOrEqualTo(1.0));
+    });
+  });
+
+  group('fatigue detection — side view', () {
+    test(
+      'emits fatigue once when last 3 reps average > 1.4× first 3 average',
+      () async {
+        final ref = buildSidePose(
+          shoulderX: 0.50,
+          shoulderY: 0.30,
+          hipX: 0.50,
+          hipY: 0.70,
+          elbowX: 0.50,
+          elbowY: 0.50,
+        );
+        for (var i = 0; i < kFatigueMinReps; i++) {
+          a.onRepStart(ref);
+          final ms = i < 3 ? 20 : 60; // lastAvg/firstAvg ≈ 3.0 > 1.4
+          await Future<void>.delayed(Duration(milliseconds: ms));
+          a.onPeakReached();
+          a.onEccentricStart();
+          a.onRepEnd();
+        }
+        expect(a.consumeCompletionErrors(), contains(FormError.fatigue));
+        expect(a.fatigueDetected, isTrue);
+      },
+    );
+
+    test('reset() clears fatigueDetected', () async {
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      for (var i = 0; i < kFatigueMinReps; i++) {
+        a.onRepStart(ref);
+        final ms = i < 3 ? 20 : 60;
+        await Future<void>.delayed(Duration(milliseconds: ms));
+        a.onPeakReached();
+        a.onEccentricStart();
+        a.onRepEnd();
+      }
+      a.consumeCompletionErrors(); // drain so fatigue fires
+      expect(a.fatigueDetected, isTrue);
+      a.reset();
+      expect(a.fatigueDetected, isFalse);
     });
   });
 }

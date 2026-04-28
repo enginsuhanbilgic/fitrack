@@ -1,0 +1,56 @@
+
+Parsed sessions:
+    #  view          side      reps
+  ───  ────────────  ────────  ────
+    1  sideRight     right        7
+  ───  ────────────  ────────  ────
+       total                      7
+
+============================================================
+  ❌  view=sideRight  side=right
+  reps: 7 raw → 5 kept (2 rejected by MAD)
+  sessions: 1   ICC=0.000   deff=1.00   eff_n=5
+
+  Personal medians (HD percentile before tolerances):
+    peak   P5  =  108.4°  CI [128.3°, 130.4°]
+    start  P95 =  167.0°  CI [161.4°, 162.0°]
+
+  Threshold             HIGH    MEDIUM       LOW
+  ──────────────────────────────────────────────
+  startAngle           162.0     159.0     155.0
+  endAngle             148.4     156.4     154.0
+  peakExitAngle        143.4     151.4     161.4
+  peakAngle            128.4     136.4     146.4
+
+  ⚠  INVARIANT VIOLATIONS (low):
+      • end (154.0°) must be > peakExit (161.4°)
+
+  ── Dart snippet ─────────────────────────────────────
+  // Derived sideRight — 5 reps (of 7 raw), 1 session(s)
+  // ICC=0.000  deff=1.00  eff_n=5
+  // personal median: peak=108.4°  start=167.0°
+
+  /// HIGH sensitivity (peak_tol +20°, start_tol −5°)
+  static const CurlRomThresholdSet sideRightStrict = CurlRomThresholdSet(
+    startAngle: 162.0,
+    peakAngle: 128.4,
+    peakExitAngle: 143.4,
+    endAngle: 148.4,
+  );
+
+  /// MEDIUM sensitivity (peak_tol +28°, start_tol −8°)
+  static const CurlRomThresholdSet sideRightDefault = CurlRomThresholdSet(
+    startAngle: 159.0,
+    peakAngle: 136.4,
+    peakExitAngle: 151.4,
+    endAngle: 156.4,
+  );
+
+  /// LOW sensitivity (peak_tol +38°, start_tol −12°)  // ⚠ INVARIANT VIOLATION
+  static const CurlRomThresholdSet sideRightPermissive = CurlRomThresholdSet(
+    startAngle: 155.0,
+    peakAngle: 146.4,
+    peakExitAngle: 161.4,
+    endAngle: 154.0,
+  );
+  ─────────────────────────────────────────────────────

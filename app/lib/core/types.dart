@@ -47,6 +47,7 @@ enum FormError {
   elbowDrift, // elbow moving forward/backward
   shoulderShrug, // lifting shoulders up (trapezius involvement)
   backLean, // excessive backward lean (hyperextension)
+  elbowRise, // upper arm swings forward/up during curl — elbow lifts away from torso (side view only)
   shortRomStart, // rep started without reaching full extension (maxAngle < startAngle − tol)
   shortRomPeak, // abandoned rep — never reached peak (minAngle > peakAngle + tol)
   // Squat
@@ -83,6 +84,27 @@ enum SquatVariant {
 
   final String label;
   const SquatVariant(this.label);
+}
+
+/// Form/ROM coaching sensitivity for biceps curl.
+///
+/// Affects only [ThresholdSource.global] (cold-start) reps. Calibrated and
+/// auto-calibrated paths are personal and are never modified by sensitivity.
+enum CurlSensitivity {
+  high('High'),
+  medium('Medium');
+
+  final String label;
+  const CurlSensitivity(this.label);
+}
+
+enum SquatSensitivity {
+  high('High'),
+  medium('Medium'),
+  low('Low');
+
+  final String label;
+  const SquatSensitivity(this.label);
 }
 
 /// Top-level session lifecycle state.
@@ -232,6 +254,8 @@ class BicepsSideRepMetrics {
     required this.elbowDriftRatio,
     required this.backLeanDeg,
     this.elbowDriftSigned,
+    this.shrugRatio,
+    this.elbowRiseRatio,
   });
 
   final int repIndex;
@@ -260,6 +284,16 @@ class BicepsSideRepMetrics {
   /// back-elbow ones — the magnitude alone collapses both into one bucket.
   /// Null on side-view rows from before this column shipped.
   final double? elbowDriftSigned;
+
+  /// Peak shoulder-shrug ratio this rep (`shrugValue / torsoLen`). Drives
+  /// the data-derived retune channel for [kShrugThreshold]. Null on rows
+  /// written before schema v6 and on non-side-view rows.
+  final double? shrugRatio;
+
+  /// Peak elbow-rise ratio this rep (`rise / torsoLen`). Drives the
+  /// data-derived retune channel for [kElbowRiseThreshold]. Null on rows
+  /// written before schema v6 and on non-side-view rows.
+  final double? elbowRiseRatio;
 }
 
 /// Required ML Kit landmark indices per exercise.

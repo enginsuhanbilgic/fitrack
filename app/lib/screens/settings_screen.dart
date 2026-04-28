@@ -8,6 +8,9 @@
 /// by default so the user isn't tempted to optimize the numbers themselves.
 library;
 
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -39,7 +42,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _dtwScoringEnabled = false;
   bool _squatLongFemurLifter = false;
   bool _diagnosticDisableAutoCalibration = false;
+  bool _curlDebugSession = false;
+  bool _squatDebugSession = false;
   ThemeMode _themeMode = ThemeMode.system;
+  CurlSensitivity _curlSensitivity = CurlSensitivity.medium;
+  SquatSensitivity _squatSensitivity = SquatSensitivity.medium;
 
   @override
   void didChangeDependencies() {
@@ -60,14 +67,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
         .getSquatLongFemurLifter();
     final diagnosticDisableAutoCal = await services.preferencesRepository
         .getDiagnosticDisableAutoCalibration();
+    final curlDebug = await services.preferencesRepository
+        .getCurlDebugSession();
+    final squatDebug = kSquatDebugSessionEnabled
+        ? await services.preferencesRepository.getSquatDebugSession()
+        : false;
     final themeMode = await services.preferencesRepository.getThemeMode();
+    final curlSensitivity = await services.preferencesRepository
+        .getCurlSensitivity();
+    final squatSensitivity = await services.preferencesRepository
+        .getSquatSensitivity();
     if (!mounted) return;
     setState(() {
       _profile = p;
       _dtwScoringEnabled = dtw;
       _squatLongFemurLifter = longFemur;
       _diagnosticDisableAutoCalibration = diagnosticDisableAutoCal;
+      _curlDebugSession = curlDebug;
+      _squatDebugSession = squatDebug;
       _themeMode = themeMode;
+      _curlSensitivity = curlSensitivity;
+      _squatSensitivity = squatSensitivity;
       _loading = false;
     });
   }
@@ -114,6 +134,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (!mounted) return;
     setState(() => _diagnosticDisableAutoCalibration = value);
+  }
+
+  Future<void> _setCurlDebugSession(bool value) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setCurlDebugSession(value);
+    TelemetryLog.instance.log(
+      'preferences.curl_debug_session_toggled',
+      'enabled=$value',
+    );
+    if (!mounted) return;
+    setState(() => _curlDebugSession = value);
+  }
+
+  Future<void> _setSquatDebugSession(bool value) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setSquatDebugSession(value);
+    TelemetryLog.instance.log(
+      'preferences.squat_debug_session_toggled',
+      'enabled=$value',
+    );
+    if (!mounted) return;
+    setState(() => _squatDebugSession = value);
+  }
+
+  Future<void> _setCurlSensitivity(CurlSensitivity sensitivity) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setCurlSensitivity(sensitivity);
+    TelemetryLog.instance.log(
+      'preferences.curl_sensitivity_changed',
+      sensitivity.name,
+    );
+    if (!mounted) return;
+    setState(() => _curlSensitivity = sensitivity);
+  }
+
+  Future<void> _setSquatSensitivity(SquatSensitivity sensitivity) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setSquatSensitivity(sensitivity);
+    TelemetryLog.instance.log(
+      'preferences.squat_sensitivity_changed',
+      sensitivity.name,
+    );
+    if (!mounted) return;
+    setState(() => _squatSensitivity = sensitivity);
   }
 
   Future<void> _confirmReset() async {
@@ -354,6 +418,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8, bottom: 4),
                   child: Text(
+                    'Biceps Curl',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withValues(
+                        alpha: 0.54,
+                      ),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+                const ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text('Feedback sensitivity'),
+                  subtitle: Text(
+                    'How strict the form and rep-gate coaching is',
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SegmentedButton<CurlSensitivity>(
+                    segments: [
+                      for (final s in CurlSensitivity.values)
+                        ButtonSegment(value: s, label: Text(s.label)),
+                    ],
+                    selected: {_curlSensitivity},
+                    onSelectionChanged: (s) => _setCurlSensitivity(s.first),
+                  ),
+                ),
+                const Divider(),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 4),
+                  child: Text(
+                    'Squat',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withValues(
+                        alpha: 0.54,
+                      ),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+                const ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text('Feedback sensitivity'),
+                  subtitle: Text(
+                    'How strict the form and rep-gate coaching is',
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SegmentedButton<SquatSensitivity>(
+                    segments: [
+                      for (final s in SquatSensitivity.values)
+                        ButtonSegment(value: s, label: Text(s.label)),
+                    ],
+                    selected: {_squatSensitivity},
+                    onSelectionChanged: (s) => _setSquatSensitivity(s.first),
+                  ),
+                ),
+                const Divider(),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 4),
+                  child: Text(
                     'Diagnostics',
                     style: TextStyle(
                       color: theme.colorScheme.onSurface.withValues(
@@ -376,6 +508,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   value: _diagnosticDisableAutoCalibration,
                   onChanged: _setDiagnosticDisableAutoCalibration,
                 ),
+                if (kCurlDebugSessionEnabled)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Curl debug session'),
+                    subtitle: const Text(
+                      'Silent observation: no TTS / haptics / banners. '
+                      'Logs frame-level pose metrics for threshold tuning. '
+                      'Forces auto-calibration off. Turn on, run a session, '
+                      'paste Diagnostics, turn off.',
+                    ),
+                    value: _curlDebugSession,
+                    onChanged: _setCurlDebugSession,
+                  ),
+                if (kSquatDebugSessionEnabled)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Squat debug session'),
+                    subtitle: const Text(
+                      'Silent observation: no TTS / haptics / banners. '
+                      'Logs frame-level pose metrics for threshold tuning. '
+                      'Turn on, run a session, paste Diagnostics, turn off.',
+                    ),
+                    value: _squatDebugSession,
+                    onChanged: _setSquatDebugSession,
+                  ),
               ],
             ),
     );
@@ -628,14 +787,56 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
   static const int _maxShown = 100;
 
   void _copy() {
-    final entries = TelemetryLog.instance.entries
-        .take(_maxShown)
-        .map((e) => e.toString())
-        .join('\n');
-    Clipboard.setData(ClipboardData(text: entries));
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
+    // Copy ALL entries — no truncation. The display cap (_maxShown) is for
+    // rendering only; the paste-back workflow needs the full ring buffer.
+    final all = TelemetryLog.instance.entries;
+    final text = all.map((e) => e.toString()).join('\n');
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Copied ${all.length} entries to clipboard')),
+    );
+  }
+
+  Future<void> _share() async {
+    final all = TelemetryLog.instance.entries.toList().reversed.toList();
+    if (all.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No telemetry to export.')));
+      return;
+    }
+
+    final stamp = DateTime.now()
+        .toIso8601String()
+        .replaceAll(':', '-')
+        .replaceAll('.', '-')
+        .substring(0, 19);
+    final dir = Directory.systemTemp;
+
+    // .txt — one line per entry, chronological (oldest first), for Python paste
+    final txtFile = File('${dir.path}/fitrack_telemetry_$stamp.txt');
+    await txtFile.writeAsString(all.map((e) => e.toString()).join('\n'));
+
+    // .json — array of objects, same chronological order
+    final jsonList = all
+        .map(
+          (e) => {
+            'timestamp': e.timestamp.toIso8601String(),
+            'tag': e.tag,
+            'message': e.message,
+            if (e.data != null) 'data': e.data,
+          },
+        )
+        .toList();
+    final jsonFile = File('${dir.path}/fitrack_telemetry_$stamp.json');
+    await jsonFile.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(jsonList),
+    );
+
+    await Share.shareXFiles([
+      XFile(txtFile.path),
+      XFile(jsonFile.path),
+    ], subject: 'FiTrack telemetry $stamp');
   }
 
   void _clear() {
@@ -651,6 +852,11 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
         title: const Text('Diagnostics'),
         actions: [
           IconButton(icon: const Icon(Icons.copy), onPressed: _copy),
+          IconButton(
+            icon: const Icon(Icons.ios_share),
+            tooltip: 'Export as files',
+            onPressed: _share,
+          ),
           IconButton(icon: const Icon(Icons.delete_outline), onPressed: _clear),
         ],
       ),

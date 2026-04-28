@@ -136,6 +136,8 @@ class SqliteSessionRepository implements SessionRepository {
             'biceps_elbow_drift_ratio': bicepsMetric?.elbowDriftRatio,
             'biceps_back_lean_deg': bicepsMetric?.backLeanDeg,
             'biceps_elbow_drift_signed': bicepsMetric?.elbowDriftSigned,
+            'biceps_shrug_ratio': bicepsMetric?.shrugRatio,
+            'biceps_elbow_rise_ratio': bicepsMetric?.elbowRiseRatio,
           });
         }
       } else {
@@ -203,7 +205,39 @@ class SqliteSessionRepository implements SessionRepository {
       limit: limit,
       offset: offset,
     );
-    return rows.map(_summaryFromRow).toList(growable: false);
+    if (rows.isEmpty) return const [];
+
+    final sessionIds = rows.map((r) => r['id'] as int).toList();
+    final placeholders = List.filled(sessionIds.length, '?').join(', ');
+    // One batch query — no N+1. Ranks errors by count desc within each session;
+    // the RANK() emulation via ROW_NUMBER isn't available in old SQLite so we
+    // fetch all and trim to top-3 in Dart.
+    final errorRows = await _db.rawQuery(
+      'SELECT session_id, error, count FROM form_errors '
+      'WHERE session_id IN ($placeholders) '
+      'ORDER BY session_id, count DESC',
+      sessionIds,
+    );
+
+    // Build map: sessionId → top-3 errors (already ordered desc by count).
+    final topErrorsMap = <int, List<FormError>>{};
+    for (final r in errorRows) {
+      final sid = r['session_id'] as int;
+      final list = topErrorsMap.putIfAbsent(sid, () => []);
+      if (list.length >= 3) continue;
+      try {
+        list.add(FormError.values.byName(r['error'] as String));
+      } catch (_) {
+        // Unknown enum name from a future schema version — skip gracefully.
+      }
+    }
+
+    return rows
+        .map((r) {
+          final id = r['id'] as int;
+          return _summaryFromRow(r, topErrors: topErrorsMap[id] ?? const []);
+        })
+        .toList(growable: false);
   }
 
   @override
@@ -293,7 +327,10 @@ LIMIT ?
 
   // ── Row mappers ─────────────────────────────────────────
 
-  static SessionSummary _summaryFromRow(Map<String, Object?> row) {
+  static SessionSummary _summaryFromRow(
+    Map<String, Object?> row, {
+    List<FormError> topErrors = const [],
+  }) {
     final detectedViewName = row['detected_view'] as String?;
     return SessionSummary(
       id: row['id'] as int,
@@ -308,6 +345,7 @@ LIMIT ?
           : CurlCameraView.values.byName(detectedViewName),
       fatigueDetected: (row['fatigue_detected'] as int) == 1,
       asymmetryDetected: (row['asymmetry_detected'] as int) == 1,
+      topErrors: topErrors,
     );
   }
 
@@ -350,6 +388,9 @@ LIMIT ?
           ?.toDouble(),
       bicepsBackLeanDeg: (row['biceps_back_lean_deg'] as num?)?.toDouble(),
       bicepsElbowDriftSigned: (row['biceps_elbow_drift_signed'] as num?)
+          ?.toDouble(),
+      bicepsShrugRatio: (row['biceps_shrug_ratio'] as num?)?.toDouble(),
+      bicepsElbowRiseRatio: (row['biceps_elbow_rise_ratio'] as num?)
           ?.toDouble(),
     );
   }
@@ -458,6 +499,8 @@ class InMemorySessionRepository implements SessionRepository {
                   bicepsElbowDriftRatio: bicepsMetric?.elbowDriftRatio,
                   bicepsBackLeanDeg: bicepsMetric?.backLeanDeg,
                   bicepsElbowDriftSigned: bicepsMetric?.elbowDriftSigned,
+                  bicepsShrugRatio: bicepsMetric?.shrugRatio,
+                  bicepsElbowRiseRatio: bicepsMetric?.elbowRiseRatio,
                 );
               })
               .toList(growable: false)
@@ -528,22 +571,36 @@ class InMemorySessionRepository implements SessionRepository {
       )
       .toList(growable: false);
 
-  SessionSummary _toSummary(_InMemorySession s) => SessionSummary(
-    id: s.id,
-    exercise: s.event.exercise,
-    startedAt: s.startedAt,
-    duration: s.event.sessionDuration,
-    totalReps: s.event.totalReps,
-    totalSets: s.event.totalSets,
-    averageQuality: s.event.averageQuality,
-    detectedView:
-        s.event.exercise.isCurl &&
-            s.event.detectedView != CurlCameraView.unknown
-        ? s.event.detectedView
-        : null,
-    fatigueDetected: s.event.fatigueDetected,
-    asymmetryDetected: s.event.asymmetryDetected,
-  );
+  SessionSummary _toSummary(_InMemorySession s) {
+    // Mirror the SQLite batch-query logic: sort errors by count desc, take top 3.
+    final counts = <FormError, int>{};
+    for (final e in s.event.errorsTriggered) {
+      counts[e] = (counts[e] ?? 0) + 1;
+    }
+    final topErrors =
+        (counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value)))
+            .take(3)
+            .map((e) => e.key)
+            .toList(growable: false);
+
+    return SessionSummary(
+      id: s.id,
+      exercise: s.event.exercise,
+      startedAt: s.startedAt,
+      duration: s.event.sessionDuration,
+      totalReps: s.event.totalReps,
+      totalSets: s.event.totalSets,
+      averageQuality: s.event.averageQuality,
+      detectedView:
+          s.event.exercise.isCurl &&
+              s.event.detectedView != CurlCameraView.unknown
+          ? s.event.detectedView
+          : null,
+      fatigueDetected: s.event.fatigueDetected,
+      asymmetryDetected: s.event.asymmetryDetected,
+      topErrors: topErrors,
+    );
+  }
 }
 
 class _InMemorySession {

@@ -192,5 +192,6 @@ class _RepCounterDisplayState extends State<RepCounterDisplay> {
     FormError.asymmetryLeftLag => 'Left arm is lagging',
     FormError.asymmetryRightLag => 'Right arm is lagging',
     FormError.fatigue => "You're slowing down, stay strong",
+    FormError.elbowRise => 'Keep your elbow pinned to your side',
   };
 }

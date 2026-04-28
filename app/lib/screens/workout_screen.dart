@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -76,11 +77,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     super.dispose();
   }
 
-  /// VM-state listener for one-shot navigation events. Currently only handles
-  /// the post-recalibrate exit (Settings → Recalibrate path): when the VM
-  /// flips `shouldExitAfterCalibration`, pop this Workout route so the user
-  /// returns to the screen they came from instead of being dumped into a
-  /// countdown they didn't ask for.
   void _onVmTick() {
     if (_exitPopped) return;
     if (!_vm.shouldExitAfterCalibration) return;
@@ -105,57 +101,53 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           asymmetryDetected: e.asymmetryDetected,
           eccentricTooFastCount: e.eccentricTooFastCount,
           errorsTriggered: e.errorsTriggered,
+          errorCounts: e.errorCounts,
           curlRepRecords: e.curlRepRecords,
           curlBucketSummaries: e.curlBucketSummaries,
           dtwSimilarities: e.dtwSimilarities,
           squatVariant: e.squatVariant,
           squatLongFemurLifter: e.squatLongFemurLifter,
           squatRepMetrics: e.squatRepMetrics,
+          bicepsSideRepMetrics: e.bicepsSideRepMetrics,
+          repConcentricMs: e.repConcentricMs,
+          repDepthPercents: e.repDepthPercents,
         ),
       ),
     );
   }
 
-  /// Phase-aware uniform skeleton color. Null during IDLE keeps overlay quiet
-  /// between reps (SkeletonPainter falls back to its default cyan/green).
   Color? _skeletonPhaseColor(RepState state) => switch (state) {
     RepState.idle => null,
-    RepState.concentric => const Color(0xFFC3F400), // accent
-    RepState.peak => const Color(0xFF00EEFC), // cyan
-    RepState.eccentric => const Color(0xFFC3F400), // accent
-    RepState.descending => const Color(0xFFC3F400), // accent
-    RepState.bottom => const Color(0xFF00EEFC), // cyan
-    RepState.ascending => const Color(0xFFC3F400), // accent
+    RepState.concentric => const Color(0xFFC3F400),
+    RepState.peak => const Color(0xFF00EEFC),
+    RepState.eccentric => const Color(0xFFC3F400),
+    RepState.descending => const Color(0xFFC3F400),
+    RepState.bottom => const Color(0xFF00EEFC),
+    RepState.ascending => const Color(0xFFC3F400),
   };
 
-  /// Returns the elbow landmark index for the active curl side, used to
-  /// anchor the angle arc annotation in the Overlay skeleton style.
+  // `curlSide == ExerciseSide.right` is camera-frame for the user's physical
+  // LEFT arm (home screen swaps left↔right for front-camera mirroring).
+  // `sideRight` in camera-frame also means the user's physical left arm is
+  // the near-side arm being tracked.
   int _elbowLandmarkForSide() {
     if (widget.curlSide == ExerciseSide.right ||
         _vm.detectedCurlView == CurlCameraView.sideRight) {
-      return LM.rightElbow;
+      return LM.leftElbow;
     }
-    return LM.leftElbow;
+    return LM.rightElbow;
   }
 
+  // Camera-frame → user-frame flip: sideLeft = camera's left = user's RIGHT
+  // physical arm; sideRight = camera's right = user's LEFT physical arm.
+  // Matches the identical flip in summary_screen.dart _viewLabel.
   String _viewLabel(CurlCameraView v) => switch (v) {
     CurlCameraView.front => 'Front view',
-    CurlCameraView.sideLeft => 'Side view · Left',
-    CurlCameraView.sideRight => 'Side view · Right',
+    CurlCameraView.sideLeft => 'Side view · Right',
+    CurlCameraView.sideRight => 'Side view · Left',
     CurlCameraView.unknown => 'Detecting…',
   };
 
-  /// Filter the rendered skeleton to only landmarks that are actually
-  /// visible to the camera in the given view. ML Kit always emits all 33
-  /// landmarks regardless of orientation; in side view the off-camera
-  /// arm's positions are low-confidence guesses behind the body that
-  /// cause the rendered skeleton to "glitch" into empty space. Hiding
-  /// them produces a clean visible-side-only skeleton that matches what
-  /// the user sees in the camera preview.
-  ///
-  /// Front and unknown views fall through unchanged — both arms are
-  /// visible (or detection hasn't settled, in which case showing
-  /// everything is the safer default).
   List<PoseLandmark> _filterSkeletonForView(
     List<PoseLandmark> all,
     CurlCameraView view,
@@ -164,7 +156,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       return all;
     }
     final hideIds = view == CurlCameraView.sideLeft
-        // Hide the user's anatomical RIGHT side (off-camera in sideLeft).
         ? <int>{
             LM.rightShoulder,
             LM.rightElbow,
@@ -175,7 +166,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             LM.rightHeel,
             LM.rightFootIndex,
           }
-        // Hide the user's anatomical LEFT side (off-camera in sideRight).
         : <int>{
             LM.leftShoulder,
             LM.leftElbow,
@@ -189,8 +179,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     return all.where((lm) => !hideIds.contains(lm.type)).toList();
   }
 
-  /// Bottom sheet from AppBar gear. Needs BuildContext for modal routing so it
-  /// stays in the widget layer; calls back into the VM for the action.
   void _showCalibrationSheet() {
     final needsCal = _vm.needsCalibrationHint();
     final sheetBg = Theme.of(context).colorScheme.surface;
@@ -313,71 +301,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // `.value` is mandatory: the widget's `dispose()` already owns VM
-    // teardown. The `create:` constructor would dispose the VM a second
-    // time and throw "ChangeNotifier was disposed twice".
     return ChangeNotifierProvider<WorkoutViewModel>.value(
       value: _vm,
       child: Scaffold(
         backgroundColor: Colors.black,
-        // AppBar only depends on phase + calibration-hint — split it out so
-        // the 15–20 Hz pose-frame rebuild of the body never re-renders the
-        // title, gear icon, or action buttons.
-        appBar: PreferredSize(
-          preferredSize: const Size.fromHeight(kToolbarHeight),
-          child:
-              Selector<WorkoutViewModel, ({WorkoutPhase phase, bool needsCal})>(
-                selector: (_, vm) =>
-                    (phase: vm.phase, needsCal: vm.needsCalibrationHint()),
-                builder: (_, s, _) => _buildAppBar(s.phase, s.needsCal),
-              ),
-        ),
+        // No AppBar — replaced by a floating glassmorphic top HUD bar.
+        extendBodyBehindAppBar: true,
         body: Consumer<WorkoutViewModel>(builder: (_, _, _) => _buildBody()),
       ),
-    );
-  }
-
-  AppBar _buildAppBar(WorkoutPhase phase, bool needsCal) {
-    final ft = FiTrackColors.of(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return AppBar(
-      backgroundColor: isDark
-          ? const Color(0xD90A0A0A) // dark mode: ~85% opacity black
-          : const Color(0xEBF3F2EE), // light mode: ~92% opacity warm ivory
-      elevation: 0,
-      scrolledUnderElevation: 0,
-      title: Text(
-        widget.exercise.label,
-        style: TextStyle(
-          color: ft.textStrong,
-          fontSize: 18,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      iconTheme: IconThemeData(color: ft.textStrong),
-      actions: [
-        if (widget.exercise.isCurl && phase != WorkoutPhase.calibration)
-          IconButton(
-            icon: _WorkoutGearIcon(needsCalibration: needsCal),
-            tooltip: 'Calibration',
-            onPressed: _showCalibrationSheet,
-          ),
-        if (phase == WorkoutPhase.active) ...[
-          IconButton(
-            icon: const Icon(Icons.replay),
-            tooltip: 'New set',
-            onPressed: _vm.startNextSet,
-          ),
-          IconButton(
-            icon: const Icon(
-              Icons.stop_circle_outlined,
-              color: Colors.redAccent,
-            ),
-            tooltip: 'Finish workout',
-            onPressed: _vm.finishWorkout,
-          ),
-        ],
-      ],
     );
   }
 
@@ -420,13 +351,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     final allLandmarks = _vm.landmarks;
     final calibrationSummary = _vm.calibrationSummary;
 
-    // Side-view skeleton filter: hide the off-camera arm's hallucinated
-    // landmarks. ML Kit always emits all 33 landmarks; in side view the
-    // off-camera arm is invisible to the camera and the model produces
-    // low-confidence guesses behind the body. Rendering them confuses the
-    // user (skeleton "glitches" into the void). For sideLeft we keep
-    // left-side body landmarks + face + hips/legs; for sideRight, mirror.
-    // Front view and unknown render the full skeleton unchanged.
     final landmarks = _filterSkeletonForView(
       allLandmarks,
       _vm.detectedCurlView,
@@ -435,7 +359,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Camera preview + skeleton overlay — identical FittedBox transform.
+        // ── Camera preview + skeleton overlay ──────────────────────────────
         if (camera.controller != null)
           ClipRect(
             child: FittedBox(
@@ -448,15 +372,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                     CameraPreview(camera.controller!),
                     if (landmarks.isNotEmpty)
                       Positioned.fill(
-                        // Isolates the 15–20 Hz skeleton repaint into its own
-                        // compositor layer so sibling Positioned banners
-                        // (rep counter, occlusion banner) aren't re-rasterized
-                        // every frame.
                         child: RepaintBoundary(
                           child: CustomPaint(
                             painter: SkeletonPainter(
                               landmarks: landmarks,
-                              mirror: false, // already mirrored in VM
+                              mirror: false,
                               boneColor: FiTrackColors.of(context).accent,
                               landmarkColors: () {
                                 final phaseColor = _skeletonPhaseColor(
@@ -496,7 +416,30 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             ),
           ),
 
-        // CALIBRATION overlay (or post-cal 2s summary card).
+        // ── Cinematic camera vignette / gradient scrim ────────────────────
+        // Top → transparent fade so the HUD bar is always readable.
+        // Bottom → dark fade so the stats card text is legible.
+        Positioned.fill(
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: const [0.0, 0.22, 0.60, 1.0],
+                  colors: [
+                    Colors.black.withValues(alpha: 0.65),
+                    Colors.transparent,
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.88),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // ── CALIBRATION overlay ─────────────────────────────────────────────
         if (phase == WorkoutPhase.calibration && calibrationSummary == null)
           CalibrationOverlay(
             repsDetected: _vm.calibrationReps,
@@ -563,36 +506,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             ),
           ),
 
-        // SETUP_CHECK banner.
+        // ── SETUP_CHECK banner ──────────────────────────────────────────────
         if (phase == WorkoutPhase.setupCheck)
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              decoration: BoxDecoration(
-                color: const Color(0xCC0A0A0A),
-                border: Border(
-                  bottom: BorderSide(color: FiTrackColors.of(context).stroke),
-                ),
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-              child: Text(
-                _vm.setupOkFrames > 0
-                    ? 'Almost there… (${_vm.setupOkFrames} / $kSetupCheckFrames)'
-                    : widget.exercise == ExerciseType.squat
-                    ? 'Stand sideways — left or right side to the camera'
-                    : 'Step back until your full body is visible',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  fontSize: 16,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
+          _SetupBanner(vm: _vm, exercise: widget.exercise),
 
-        // COUNTDOWN — centered big number.
+        // ── COUNTDOWN — centered big number ────────────────────────────────
         if (phase == WorkoutPhase.countdown)
           Center(
             child: Text(
@@ -605,157 +523,32 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             ),
           ),
 
-        // SETUP / COUNTDOWN — camera framing hint when body is too close
-        // to frame edges. Reuses the same passive-banner styling as the
-        // uncalibrated-view notice for visual consistency.
+        // ── SETUP/COUNTDOWN framing hint ────────────────────────────────────
         if ((phase == WorkoutPhase.setupCheck ||
                 phase == WorkoutPhase.countdown) &&
             _vm.framingHint != null)
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              decoration: BoxDecoration(
-                color: const Color(0xCC0A0A0A),
-                border: Border(
-                  bottom: BorderSide(color: FiTrackColors.of(context).stroke),
-                ),
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.crop_free,
-                    color: Color(0xFFFFB300),
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      _vm.framingHint!,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _FramingHintBanner(hint: _vm.framingHint!),
 
-        // ACTIVE — passive uncalibrated-view notice (Hole #1).
+        // ── ACTIVE — uncalibrated-view notice ───────────────────────────────
         if (phase == WorkoutPhase.active && _vm.uncalibratedViewNotice != null)
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: AnimatedOpacity(
-              opacity: 1.0,
-              duration: const Duration(milliseconds: 200),
-              child: Container(
-                color: Colors.black87,
-                padding: const EdgeInsets.symmetric(
-                  vertical: 12,
-                  horizontal: 20,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.straighten,
-                      color: Color(0xFF00E676),
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        _vm.uncalibratedViewNotice!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          _InfoBanner(
+            icon: Icons.straighten,
+            text: _vm.uncalibratedViewNotice!,
+            tone: _BannerTone.cyan,
           ),
 
-        // ACTIVE — runtime view-flip advisory. Shown for 2s after the
-        // engine commits a re-detection at FSM idle. Reuses the same
-        // transient-banner template as the framing-hint notice; amber
-        // tone matches the "advisory" semantic. The cameraswitch icon
-        // signals the rotate-detection meaning.
+        // ── ACTIVE — runtime view-flip advisory ─────────────────────────────
         if (phase == WorkoutPhase.active && _vm.viewFlipBanner != null)
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: AnimatedOpacity(
-              opacity: 1.0,
-              duration: const Duration(milliseconds: 200),
-              child: Container(
-                color: Colors.black87,
-                padding: const EdgeInsets.symmetric(
-                  vertical: 12,
-                  horizontal: 20,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.cameraswitch,
-                      color: Color(0xFFFFB300),
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        _vm.viewFlipBanner!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          _InfoBanner(
+            icon: Icons.cameraswitch,
+            text: _vm.viewFlipBanner!,
+            tone: _BannerTone.amber,
           ),
 
-        // ACTIVE — mid-session occlusion banner.
-        if (phase == WorkoutPhase.active && _vm.isOccluded)
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              color: const Color(0xDDFF8A3D),
-              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
-              child: const Text(
-                'Move into frame — keep all joints visible',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
+        // ── ACTIVE — mid-session occlusion banner ────────────────────────────
+        if (phase == WorkoutPhase.active && _vm.isOccluded) _OcclusionBanner(),
 
-        // Curl view indicator chip — bottom right, setup/countdown only.
+        // ── Curl view indicator chip ─────────────────────────────────────────
         if (widget.exercise.isCurl &&
             (phase == WorkoutPhase.setupCheck ||
                 phase == WorkoutPhase.countdown) &&
@@ -763,49 +556,17 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           Positioned(
             bottom: 32,
             right: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.videocam,
-                    color: Color(0xFF00E676),
-                    size: 16,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    _viewLabel(_vm.detectedCurlView),
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                  ),
-                ],
-              ),
+            child: _GlassPill(
+              icon: Icons.videocam,
+              label: _viewLabel(_vm.detectedCurlView),
+              iconColor: const Color(0xFF00E676),
             ),
           ),
 
-        // ACTIVE — AI coach toast (cycles tips every 4 s).
+        // ── ACTIVE — AI coach toast ──────────────────────────────────────────
         if (phase == WorkoutPhase.active) const _CoachToast(),
 
-        // ACTIVE — rep counter overlay.
-        //
-        // Wrapped in a `Selector<WorkoutViewModel, RepSnapshot>` so the
-        // counter's widget construction skips on frames where the snapshot
-        // didn't change (rep counter typically changes 1–2× per second; the
-        // pose pipeline notifies at 15–20 Hz). Without this, the
-        // `RepCounterDisplay` subtree was rebuilt on every pose frame even
-        // when only `landmarks` advanced.
-        //
-        // Note: the skeleton overlay above is intentionally NOT wrapped in
-        // a Selector. The VM publishes a fresh `landmarks` list every pose
-        // frame (via `LandmarkSmoother.smooth` returning a new List), so the
-        // `==` short-circuit would never fire. The skeleton's perf hedge is
-        // the existing `RepaintBoundary` (line 300+) which isolates the
-        // 15–20 Hz repaint into its own compositor layer.
-        // ACTIVE — Minimal HUD: large reps/target at ~38% height (design Minimal variant).
+        // ── ACTIVE — rep counter + bottom stats HUD ──────────────────────────
         if (phase == WorkoutPhase.active)
           Positioned.fill(
             child: Selector<WorkoutViewModel, RepSnapshot>(
@@ -813,14 +574,603 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
               builder: (context, snap, _) => _MinimalHud(snapshot: snap),
             ),
           ),
+
+        // ── Floating top HUD bar (replaces AppBar) ───────────────────────────
+        Selector<WorkoutViewModel, ({WorkoutPhase phase, bool needsCal})>(
+          selector: (_, vm) =>
+              (phase: vm.phase, needsCal: vm.needsCalibrationHint()),
+          builder: (_, s, _) => _TopHudBar(
+            exercise: widget.exercise,
+            phase: s.phase,
+            needsCalibration: s.needsCal,
+            vm: _vm,
+            onCalibration: _showCalibrationSheet,
+          ),
+        ),
       ],
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// Coach Toast — rotates 5 tips every 4 s during WorkoutPhase.active.
-// ---------------------------------------------------------------------------
+// ──────────────────────────────────────────────────────────────────────────────
+// Top HUD bar — glassmorphic, replaces AppBar.
+// ──────────────────────────────────────────────────────────────────────────────
+
+class _TopHudBar extends StatelessWidget {
+  final ExerciseType exercise;
+  final WorkoutPhase phase;
+  final bool needsCalibration;
+  final WorkoutViewModel vm;
+  final VoidCallback onCalibration;
+
+  const _TopHudBar({
+    required this.exercise,
+    required this.phase,
+    required this.needsCalibration,
+    required this.vm,
+    required this.onCalibration,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final topPad = MediaQuery.of(context).padding.top;
+
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: Container(
+            padding: EdgeInsets.fromLTRB(12, topPad + 10, 12, 10),
+            decoration: BoxDecoration(
+              color: isLight
+                  ? const Color(0xDEF4F2EC) // --overlay-bg light
+                  : const Color(0xD9141414), // --overlay-bg dark
+              border: Border(
+                bottom: BorderSide(
+                  color: isLight
+                      ? const Color(0x33D8D6CD)
+                      : const Color(0x332D2D30),
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                // Back button
+                _HudIconButton(
+                  icon: Icons.arrow_back_ios_new_rounded,
+                  onTap: () => Navigator.of(context).maybePop(),
+                  isLight: isLight,
+                ),
+                const SizedBox(width: 8),
+                // Center — Live pill + exercise label
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _LivePill(),
+                      const SizedBox(height: 3),
+                      Text(
+                        exercise.label.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.4,
+                          color: isLight
+                              ? const Color(0xFF4A4E3D)
+                              : const Color(0xFFC4C9AC),
+                          height: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Right action buttons
+                if (exercise.isCurl && phase != WorkoutPhase.calibration)
+                  _HudIconButton(
+                    icon: needsCalibration ? Icons.tune : Icons.tune,
+                    onTap: onCalibration,
+                    badge: needsCalibration,
+                    isLight: isLight,
+                  ),
+                if (phase == WorkoutPhase.active) ...[
+                  const SizedBox(width: 6),
+                  _HudIconButton(
+                    icon: Icons.replay,
+                    onTap: vm.startNextSet,
+                    isLight: isLight,
+                  ),
+                  const SizedBox(width: 6),
+                  _HudIconButton(
+                    icon: Icons.stop_circle_outlined,
+                    onTap: vm.finishWorkout,
+                    isLight: isLight,
+                    danger: true,
+                  ),
+                ],
+                if (!(exercise.isCurl && phase != WorkoutPhase.calibration) &&
+                    phase != WorkoutPhase.active)
+                  // Spacer to balance the back button on the left
+                  const SizedBox(width: 40),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Glassmorphic 40×40 circular button for the top HUD.
+class _HudIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool isLight;
+  final bool badge;
+  final bool danger;
+
+  const _HudIconButton({
+    required this.icon,
+    required this.onTap,
+    required this.isLight,
+    this.badge = false,
+    this.danger = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = isLight ? const Color(0x28000000) : const Color(0x28FFFFFF);
+    final iconColor = danger
+        ? Colors.redAccent
+        : (isLight ? const Color(0xFF1A1C14) : Colors.white);
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: bg,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: isLight
+                    ? const Color(0x22000000)
+                    : const Color(0x22FFFFFF),
+              ),
+            ),
+            child: Icon(icon, size: 18, color: iconColor),
+          ),
+          if (badge)
+            Positioned(
+              right: -2,
+              top: -2,
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: Colors.redAccent,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isLight
+                        ? const Color(0xFFF4F2EC)
+                        : const Color(0xFF141414),
+                    width: 1.5,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Animated "● LIVE" pill with a pulsing green dot.
+class _LivePill extends StatefulWidget {
+  const _LivePill();
+
+  @override
+  State<_LivePill> createState() => _LivePillState();
+}
+
+class _LivePillState extends State<_LivePill>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _opacity;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _opacity = Tween<double>(
+      begin: 1.0,
+      end: 0.35,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final accentColor = isLight
+        ? const Color(0xFF5A8C00)
+        : const Color(0xFFC3F400);
+    final bgColor = isLight ? const Color(0x1F5A8C00) : const Color(0x1FC3F400);
+    final borderColor = isLight
+        ? const Color(0x665A8C00)
+        : const Color(0x66C3F400);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FadeTransition(
+            opacity: _opacity,
+            child: Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: accentColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            'LIVE',
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+              color: accentColor,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Setup check banner — frosted glass bottom-anchored at top.
+// ──────────────────────────────────────────────────────────────────────────────
+
+class _SetupBanner extends StatelessWidget {
+  final WorkoutViewModel vm;
+  final ExerciseType exercise;
+
+  const _SetupBanner({required this.vm, required this.exercise});
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final topPad = MediaQuery.of(context).padding.top;
+
+    final text = vm.setupOkFrames > 0
+        ? 'Almost there… (${vm.setupOkFrames} / $kSetupCheckFrames)'
+        : exercise == ExerciseType.squat
+        ? 'Stand sideways — left or right side to the camera'
+        : 'Step back until your full body is visible';
+
+    return Positioned(
+      top: topPad + 62, // below top HUD bar
+      left: 16,
+      right: 16,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            decoration: BoxDecoration(
+              color: isLight
+                  ? const Color(0xB8F4F2EC)
+                  : const Color(0xB8141414),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isLight
+                    ? const Color(0x33D8D6CD)
+                    : const Color(0x332D2D30),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.person_search_rounded,
+                  color: isLight
+                      ? const Color(0xFF5A8C00)
+                      : const Color(0xFFC3F400),
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    text,
+                    style: TextStyle(
+                      color: isLight ? const Color(0xFF1A1C14) : Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Framing hint banner — amber warning pill.
+// ──────────────────────────────────────────────────────────────────────────────
+
+class _FramingHintBanner extends StatelessWidget {
+  final String hint;
+
+  const _FramingHintBanner({required this.hint});
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final topPad = MediaQuery.of(context).padding.top;
+
+    return Positioned(
+      top: topPad + 62,
+      left: 16,
+      right: 16,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+            decoration: BoxDecoration(
+              color: isLight
+                  ? const Color(0xB8FFF3E0)
+                  : const Color(0xB8251800),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0x66FFB300)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.crop_free, color: Color(0xFFFFB300), size: 16),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    hint,
+                    style: TextStyle(
+                      color: isLight ? const Color(0xFF5A3A00) : Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Generic info banner (cyan = uncalibrated notice, amber = view flip).
+// ──────────────────────────────────────────────────────────────────────────────
+
+enum _BannerTone { cyan, amber }
+
+class _InfoBanner extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final _BannerTone tone;
+
+  const _InfoBanner({
+    required this.icon,
+    required this.text,
+    required this.tone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final topPad = MediaQuery.of(context).padding.top;
+
+    final (iconColor, bgDark, bgLight, borderColor) = switch (tone) {
+      _BannerTone.cyan => (
+        isLight ? const Color(0xFF007A85) : const Color(0xFF00EEFC),
+        const Color(0xB8001C20),
+        const Color(0xB8E0F7FA),
+        const Color(0x6600EEFC),
+      ),
+      _BannerTone.amber => (
+        const Color(0xFFFFB300),
+        const Color(0xB8251800),
+        const Color(0xB8FFF8E1),
+        const Color(0x66FFB300),
+      ),
+    };
+
+    return Positioned(
+      top: topPad + 62,
+      left: 16,
+      right: 16,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+            decoration: BoxDecoration(
+              color: isLight ? bgLight : bgDark,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: borderColor),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: iconColor, size: 16),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    text,
+                    style: TextStyle(
+                      color: isLight ? const Color(0xFF1A1C14) : Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Occlusion banner — full-width orange warning at top.
+// ──────────────────────────────────────────────────────────────────────────────
+
+class _OcclusionBanner extends StatelessWidget {
+  const _OcclusionBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final topPad = MediaQuery.of(context).padding.top;
+
+    return Positioned(
+      top: topPad + 62,
+      left: 0,
+      right: 0,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+            decoration: const BoxDecoration(
+              color: Color(0xCC4A1A00),
+              border: Border(bottom: BorderSide(color: Color(0x88FF8A3D))),
+            ),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.visibility_off_rounded,
+                  color: Color(0xFFFF8A3D),
+                  size: 16,
+                ),
+                SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    'Move into frame — keep all joints visible',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reusable glass pill chip (view indicator, etc.)
+// ──────────────────────────────────────────────────────────────────────────────
+
+class _GlassPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color iconColor;
+
+  const _GlassPill({
+    required this.icon,
+    required this.label,
+    required this.iconColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(999),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isLight ? const Color(0xB8F4F2EC) : const Color(0xB8141414),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: isLight
+                  ? const Color(0x33D8D6CD)
+                  : const Color(0x332D2D30),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: iconColor, size: 14),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isLight ? const Color(0xFF1A1C14) : Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Coach Toast — card-ai style with backdrop blur, cyan icon holder.
+// ──────────────────────────────────────────────────────────────────────────────
 
 class _CoachToast extends StatefulWidget {
   const _CoachToast();
@@ -829,7 +1179,8 @@ class _CoachToast extends StatefulWidget {
   State<_CoachToast> createState() => _CoachToastState();
 }
 
-class _CoachToastState extends State<_CoachToast> {
+class _CoachToastState extends State<_CoachToast>
+    with SingleTickerProviderStateMixin {
   static const _tips = [
     (
       icon: Icons.speed,
@@ -862,74 +1213,142 @@ class _CoachToastState extends State<_CoachToast> {
 
   int _index = 0;
   Timer? _timer;
+  late final AnimationController _slideCtrl;
+  late final Animation<Offset> _slideAnim;
+  late final Animation<double> _fadeAnim;
 
   @override
   void initState() {
     super.initState();
+    _slideCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOutCubic));
+    _fadeAnim = CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut);
+    _slideCtrl.forward();
     _timer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (mounted) setState(() => _index = (_index + 1) % _tips.length);
+      if (!mounted) return;
+      _slideCtrl.reset();
+      setState(() => _index = (_index + 1) % _tips.length);
+      _slideCtrl.forward();
     });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _slideCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final tip = _tips[_index];
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final cyanColor = isLight
+        ? const Color(0xFF007A85)
+        : const Color(0xFF00EEFC);
+
     return Positioned(
       left: 16,
       right: 16,
-      bottom: 140,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: const Color(0xCC141414),
-          borderRadius: BorderRadius.circular(10),
-          border: const Border(
-            left: BorderSide(color: Color(0xFF00EEFC), width: 3),
-          ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(tip.icon, color: const Color(0xFF00EEFC), size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'COACH · ${tip.label.toUpperCase()}',
-                    style: const TextStyle(
-                      color: Color(0xFF00EEFC),
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.2,
+      bottom: 148,
+      child: FadeTransition(
+        opacity: _fadeAnim,
+        child: SlideTransition(
+          position: _slideAnim,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: isLight
+                      ? const Color(0xDEF4F2EC)
+                      : const Color(0xD9141414),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border(
+                    left: BorderSide(color: cyanColor, width: 3),
+                    top: BorderSide(
+                      color: isLight
+                          ? const Color(0x22D8D6CD)
+                          : const Color(0x222D2D30),
+                    ),
+                    right: BorderSide(
+                      color: isLight
+                          ? const Color(0x22D8D6CD)
+                          : const Color(0x222D2D30),
+                    ),
+                    bottom: BorderSide(
+                      color: isLight
+                          ? const Color(0x22D8D6CD)
+                          : const Color(0x222D2D30),
                     ),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    tip.text,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                  ),
-                ],
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 32×32 icon holder with cyan tint
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: isLight
+                            ? const Color(0x1F007A85)
+                            : const Color(0x1F00EEFC),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(tip.icon, color: cyanColor, size: 16),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'COACH · ${tip.label.toUpperCase()}',
+                            style: TextStyle(
+                              color: cyanColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.2,
+                              height: 1,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            tip.text,
+                            style: TextStyle(
+                              color: isLight
+                                  ? const Color(0xFF1A1C14)
+                                  : const Color(0xFFE5E2E1),
+                              fontSize: 13,
+                              height: 1.45,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// Minimal HUD — design "Minimal" variant: compact rep counter at 38% height
-// + set indicator, bottom stats card, form errors. No full RepCounterDisplay.
-// ---------------------------------------------------------------------------
+// ──────────────────────────────────────────────────────────────────────────────
+// Minimal HUD — rep counter at 38% height + glassmorphic bottom stats card.
+// ──────────────────────────────────────────────────────────────────────────────
 
 class _MinimalHud extends StatelessWidget {
   final RepSnapshot snapshot;
@@ -938,7 +1357,6 @@ class _MinimalHud extends StatelessWidget {
   static const int _targetReps = 12;
 
   static String _formErrorLabel(FormError e) {
-    // Convert camelCase enum name to readable words, e.g. torsoSwing → Torso Swing.
     final spaced = e.name.replaceAllMapped(
       RegExp(r'([A-Z])'),
       (m) => ' ${m[0]}',
@@ -949,11 +1367,18 @@ class _MinimalHud extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ft = FiTrackColors.of(context);
+    final isLight = Theme.of(context).brightness == Brightness.light;
     final errors = snapshot.formErrors;
+    final progress = (snapshot.reps / _targetReps).clamp(0.0, 1.0);
+
+    // Accent glow color for text shadow
+    final accentColor = isLight
+        ? const Color(0xFF5A8C00)
+        : const Color(0xFFC3F400);
 
     return Stack(
       children: [
-        // Large reps/target counter at ~38% vertical position (design spec).
+        // ── Large reps counter at ~38% vertical position ────────────────────
         Positioned(
           top: null,
           left: 16,
@@ -971,14 +1396,21 @@ class _MinimalHud extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.baseline,
                   textBaseline: TextBaseline.alphabetic,
                   children: [
+                    // The rep number — unchanged per spec (body frame + counter)
                     Text(
                       '${snapshot.reps}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 84,
                         fontWeight: FontWeight.w900,
-                        color: Color(0xFFC3F400),
+                        color: accentColor,
                         letterSpacing: -4,
                         height: 1,
+                        shadows: [
+                          Shadow(
+                            color: accentColor.withValues(alpha: 0.55),
+                            blurRadius: 28,
+                          ),
+                        ],
                       ),
                     ),
                     Text(
@@ -991,7 +1423,7 @@ class _MinimalHud extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
-                    // Set indicator — top-right of this row.
+                    // Set indicator
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       mainAxisSize: MainAxisSize.min,
@@ -1023,92 +1455,97 @@ class _MinimalHud extends StatelessWidget {
           ),
         ),
 
-        // Bottom stats bar — backdrop-blurred card matching design.
+        // ── Bottom stats card — glassmorphic ────────────────────────────────
         Positioned(
           left: 0,
           right: 0,
           bottom: 0,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-            decoration: BoxDecoration(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? const Color(0xCC141414)
-                  : ft.surface2.withValues(alpha: 0.95),
-              border: Border(top: BorderSide(color: ft.stroke)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Progress bar.
-                Row(
-                  children: [
-                    Text(
-                      'SET PROGRESS',
-                      style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        color: ft.textDim,
-                        letterSpacing: 1.4,
-                      ),
+          child: ClipRect(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+                decoration: BoxDecoration(
+                  color: isLight
+                      ? const Color(0xDEF4F2EC)
+                      : const Color(0xD9141414),
+                  border: Border(
+                    top: BorderSide(
+                      color: isLight
+                          ? const Color(0x44D8D6CD)
+                          : const Color(0x442D2D30),
                     ),
-                    const Spacer(),
-                    Text(
-                      '${((snapshot.reps / _targetReps) * 100).round().clamp(0, 100)}%',
-                      style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        color: ft.accent,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    value: (snapshot.reps / _targetReps).clamp(0.0, 1.0),
-                    minHeight: 8,
-                    backgroundColor:
-                        Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xFF2A2A2A)
-                        : ft.surface3,
-                    valueColor: AlwaysStoppedAnimation<Color>(ft.accent),
                   ),
                 ),
-                // Form errors — show first active error if any.
-                if (errors.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.warning_amber_rounded,
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? const Color(0xFFFFB4AB)
-                            : Colors.red.shade700,
-                        size: 14,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          _formErrorLabel(errors.first),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Stats row: Tempo · Time · Set
+                    _StatsRow(snapshot: snapshot, isLight: isLight, ft: ft),
+                    const SizedBox(height: 12),
+                    // Progress label row
+                    Row(
+                      children: [
+                        Text(
+                          'SET PROGRESS',
                           style: TextStyle(
-                            color:
-                                Theme.of(context).brightness == Brightness.dark
-                                ? const Color(0xFFFFB4AB)
-                                : Colors.red.shade700,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: ft.textDim,
+                            letterSpacing: 1.4,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
+                        const Spacer(),
+                        Text(
+                          '${(progress * 100).round().clamp(0, 100)}%',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: ft.accent,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    // Progress bar with glow
+                    _GlowProgressBar(
+                      value: progress,
+                      accentColor: accentColor,
+                      trackColor: isLight
+                          ? const Color(0xFFECEBE4)
+                          : const Color(0xFF2A2A2A),
+                    ),
+                    // Form error row
+                    if (errors.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            color: ft.red,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              _formErrorLabel(errors.first),
+                              style: TextStyle(
+                                color: ft.red,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
-                  ),
-                ],
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -1117,34 +1554,149 @@ class _MinimalHud extends StatelessWidget {
   }
 }
 
-/// AppBar gear icon with optional red dot badge for "needs calibration".
-class _WorkoutGearIcon extends StatelessWidget {
-  final bool needsCalibration;
-  const _WorkoutGearIcon({required this.needsCalibration});
+/// Three-stat row: Set Progress % · Elapsed time placeholder · Set count.
+class _StatsRow extends StatelessWidget {
+  final RepSnapshot snapshot;
+  final bool isLight;
+  final FiTrackColors ft;
+
+  const _StatsRow({
+    required this.snapshot,
+    required this.isLight,
+    required this.ft,
+  });
 
   @override
   Widget build(BuildContext context) {
-    const icon = Icon(Icons.tune);
-    if (!needsCalibration) return icon;
-    final outline = Theme.of(context).colorScheme.outline;
-    return Stack(
-      clipBehavior: Clip.none,
+    final dividerColor = isLight
+        ? const Color(0x33D8D6CD)
+        : const Color(0x332D2D30);
+
+    return Row(
       children: [
-        icon,
-        Positioned(
-          right: -2,
-          top: -2,
-          child: Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              color: Colors.redAccent,
-              shape: BoxShape.circle,
-              border: Border.all(color: outline, width: 1.5),
-            ),
-          ),
+        _StatCell(label: 'REPS', value: '${snapshot.reps}', ft: ft),
+        _VertDivider(color: dividerColor),
+        _StatCell(label: 'TARGET', value: '12', ft: ft),
+        _VertDivider(color: dividerColor),
+        _StatCell(
+          label: 'SET',
+          value: '${snapshot.sets}',
+          ft: ft,
+          valueColor: ft.accent,
         ),
       ],
+    );
+  }
+}
+
+class _StatCell extends StatelessWidget {
+  final String label;
+  final String value;
+  final FiTrackColors ft;
+  final Color? valueColor;
+
+  const _StatCell({
+    required this.label,
+    required this.value,
+    required this.ft,
+    this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              color: ft.textDim,
+              letterSpacing: 1.4,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: valueColor ?? ft.textStrong,
+              letterSpacing: -0.5,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VertDivider extends StatelessWidget {
+  final Color color;
+  const _VertDivider({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: 32,
+      color: color,
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+    );
+  }
+}
+
+/// Progress bar with an accent glow shadow.
+class _GlowProgressBar extends StatelessWidget {
+  final double value;
+  final Color accentColor;
+  final Color trackColor;
+
+  const _GlowProgressBar({
+    required this.value,
+    required this.accentColor,
+    required this.trackColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalWidth = constraints.maxWidth;
+        final fillWidth = totalWidth * value;
+
+        return Container(
+          height: 10,
+          decoration: BoxDecoration(
+            color: trackColor,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Stack(
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+                width: fillWidth,
+                decoration: BoxDecoration(
+                  color: accentColor,
+                  borderRadius: BorderRadius.circular(999),
+                  boxShadow: [
+                    BoxShadow(
+                      color: accentColor.withValues(alpha: 0.5),
+                      blurRadius: 8,
+                      spreadRadius: 0,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

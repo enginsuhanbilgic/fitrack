@@ -41,24 +41,22 @@ void main() {
     });
 
     test(
-      'sideLeft view falls through to legacy constants (no override yet)',
+      'sideLeft view returns the manual override bucket (derived 2026-04-28)',
       () {
-        // Manual override for sideLeft is null until a side-view diagnostic
-        // session is captured. Data-driven flag is off in shipping config.
-        // → Legacy constants from constants.dart.
+        // ManualRomOverrides.sideLeftDefault is now populated from a --from-frames
+        // diagnostic session. Medium sensitivity is the no-arg default.
         final t = RomThresholds.global(CurlCameraView.sideLeft);
 
-        expect(t.startAngle, kCurlStartAngle);
-        expect(t.peakAngle, kCurlPeakAngle);
-        expect(t.peakExitAngle, kCurlPeakExitAngle);
-        expect(t.endAngle, kCurlEndAngle);
+        expect(t.startAngle, closeTo(159.0, 0.01));
+        expect(t.peakAngle, closeTo(136.4, 0.01));
+        expect(t.peakExitAngle, closeTo(151.4, 0.01));
+        expect(t.endAngle, closeTo(156.4, 0.01));
         expect(t.source, ThresholdSource.global);
       },
     );
 
-    test('sideRight falls through to legacy (mirrors sideLeft today)', () {
-      // Same null-override / legacy-fallback path as sideLeft. Will diverge
-      // when one or both side overrides are populated.
+    test('sideRight returns same values as sideLeft (bilateral symmetry)', () {
+      // Both views use the same 2026-04-28 session data by bilateral symmetry.
       final left = RomThresholds.global(CurlCameraView.sideLeft);
       final right = RomThresholds.global(CurlCameraView.sideRight);
 

@@ -21,6 +21,7 @@ class SessionSummary {
     required this.asymmetryDetected,
     this.averageQuality,
     this.detectedView,
+    this.topErrors = const [],
   });
 
   final int id;
@@ -33,6 +34,10 @@ class SessionSummary {
   final CurlCameraView? detectedView;
   final bool fatigueDetected;
   final bool asymmetryDetected;
+
+  /// Up to 3 most-frequent form errors in this session, sorted by count desc.
+  /// Empty when the session had no form errors or for pre-WP6 rows.
+  final List<FormError> topErrors;
 }
 
 /// Full detail view for the reconstructed SummaryScreen (PR3). Wraps the
@@ -76,6 +81,8 @@ class RepRow {
     this.bicepsElbowDriftRatio,
     this.bicepsBackLeanDeg,
     this.bicepsElbowDriftSigned,
+    this.bicepsShrugRatio,
+    this.bicepsElbowRiseRatio,
   });
 
   final int repIndex;
@@ -137,6 +144,14 @@ class RepRow {
   /// pipeline's split between forward-elbow and back-elbow cheats. Same
   /// NULL semantics as the four other biceps columns.
   final double? bicepsElbowDriftSigned;
+
+  /// Peak shoulder-shrug ratio — schema v6. NULL on non-side-view rows and
+  /// pre-v6 rows.
+  final double? bicepsShrugRatio;
+
+  /// Peak elbow-rise ratio — schema v6. NULL on non-side-view rows and
+  /// pre-v6 rows.
+  final double? bicepsElbowRiseRatio;
 
   /// Rebuild a [CurlRepRecord] when every curl-specific field is present;
   /// return null for squat/push-up rows (PR3 uses `.whereType<CurlRepRecord>()`

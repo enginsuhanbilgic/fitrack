@@ -81,6 +81,17 @@ class SessionCard extends StatelessWidget {
                           ],
                         ],
                       ),
+                      if (summary.topErrors.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: summary.topErrors
+                                .map((e) => _ErrorChip(label: _errorLabel(e)))
+                                .toList(),
+                          ),
+                        ),
                       if (summary.fatigueDetected || summary.asymmetryDetected)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
@@ -161,6 +172,25 @@ class SessionCard extends StatelessWidget {
     return Colors.redAccent;
   }
 
+  String _errorLabel(FormError e) => switch (e) {
+    FormError.torsoSwing => 'Body Swinging',
+    FormError.depthSwing => 'Rocking Forward',
+    FormError.shoulderArc => 'Hip Rotation',
+    FormError.elbowDrift => 'Elbow Moving Out',
+    FormError.elbowRise => 'Elbow Rising Up',
+    FormError.shoulderShrug => 'Shoulder Shrug',
+    FormError.backLean => 'Leaning Back',
+    FormError.shortRomStart => 'Arm Not Extended',
+    FormError.shortRomPeak => 'Not Curling Up',
+    FormError.eccentricTooFast => 'Lowering Too Fast',
+    FormError.concentricTooFast => 'Lifting Too Fast',
+    FormError.tempoInconsistent => 'Unsteady Pace',
+    FormError.asymmetryLeftLag => 'Left Arm Lagging',
+    FormError.asymmetryRightLag => 'Right Arm Lagging',
+    FormError.fatigue => 'Fatigue',
+    _ => e.name,
+  };
+
   String _semanticLabel() {
     final parts = <String>[
       summary.exercise.label,
@@ -196,6 +226,33 @@ class _Chip extends StatelessWidget {
         const SizedBox(width: 4),
         Text(text, style: TextStyle(color: c, fontSize: 12)),
       ],
+    );
+  }
+}
+
+class _ErrorChip extends StatelessWidget {
+  const _ErrorChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    const color = Color(0xFFFF5252);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.40)),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
     );
   }
 }

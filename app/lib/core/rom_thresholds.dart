@@ -42,31 +42,25 @@ class RomThresholds {
     required this.source,
   });
 
-  /// Returns the cold-start / `ThresholdSource.global` threshold set.
+  /// Returns the cold-start / [ThresholdSource.global] threshold set.
   ///
-  /// Two code paths, selected by the [kUseDataDrivenThresholds] flag in
-  /// `constants.dart`:
+  /// [sensitivity] is applied only on this path — calibrated and auto-calibrated
+  /// thresholds are personal and are never modified by sensitivity. Defaults to
+  /// [CurlSensitivity.medium] so all existing callers compile unchanged.
   ///
-  ///   * **Flag `false` (default, current shipping behavior):** returns the
-  ///     hand-tuned legacy constants (`kCurlStartAngle`, `kCurlPeakAngle`,
-  ///     `kCurlPeakExitAngle`, `kCurlEndAngle`). [view] is ignored. Behavior
-  ///     is identical to pre-T2.4 FiTrack.
-  ///   * **Flag `true`:** returns the T2.4-derived per-view bucket from
-  ///     [DefaultRomThresholds.forView], keyed on [view]. Falls back to
-  ///     [CurlCameraView.unknown] if no view is supplied (which itself
-  ///     routes to the side-view bucket as the most anatomically accurate
-  ///     projection — see `default_rom_thresholds.dart`).
-  ///
-  /// [view] is optional so existing callers (tests, initializers, fallback
-  /// paths where view hasn't been detected yet) continue to compile unchanged.
-  /// Once the flag is flipped to `true`, callers that can supply the real
-  /// view should — otherwise they default to the side-view bucket.
-  factory RomThresholds.global([CurlCameraView view = CurlCameraView.unknown]) {
-    // Tier 1 — manual override. Per-view granularity; null entries fall
-    // through to the lower tiers so views without an override are
-    // unaffected.
+  /// Three-tier resolver, sensitivity-aware:
+  ///   1. Manual override — sensitivity selects the strict/default/permissive
+  ///      constant directly (no delta math needed).
+  ///   2. Data-driven generated — sensitivity deltas applied via
+  ///      [_applyRomSensitivity] after derivation.
+  ///   3. Legacy hand-tuned constants — same delta application.
+  factory RomThresholds.global([
+    CurlCameraView view = CurlCameraView.unknown,
+    CurlSensitivity sensitivity = CurlSensitivity.medium,
+  ]) {
+    // Tier 1 — manual override (sensitivity-aware; each level is a separate constant).
     if (kUseManualOverrides) {
-      final override = ManualRomOverrides.forView(view);
+      final override = ManualRomOverrides.forView(view, sensitivity);
       if (override != null) {
         return RomThresholds(
           startAngle: override.startAngle,
@@ -77,24 +71,67 @@ class RomThresholds {
         );
       }
     }
-    // Tier 2 — data-driven generated defaults.
+    // Tier 2 — data-driven generated defaults; apply sensitivity deltas.
     if (kUseDataDrivenThresholds) {
       final set = DefaultRomThresholds.forView(view);
-      return RomThresholds(
-        startAngle: set.startAngle,
-        peakAngle: set.peakAngle,
-        peakExitAngle: set.peakExitAngle,
-        endAngle: set.endAngle,
-        source: ThresholdSource.global,
+      return _applyRomSensitivity(
+        RomThresholds(
+          startAngle: set.startAngle,
+          peakAngle: set.peakAngle,
+          peakExitAngle: set.peakExitAngle,
+          endAngle: set.endAngle,
+          source: ThresholdSource.global,
+        ),
+        sensitivity,
+        view,
       );
     }
-    // Tier 3 — legacy hand-tuned constants. Always-available fallback.
-    return const RomThresholds(
-      startAngle: kCurlStartAngle,
-      peakAngle: kCurlPeakAngle,
-      peakExitAngle: kCurlPeakExitAngle,
-      endAngle: kCurlEndAngle,
-      source: ThresholdSource.global,
+    // Tier 3 — legacy hand-tuned constants; apply sensitivity deltas.
+    return _applyRomSensitivity(
+      const RomThresholds(
+        startAngle: kCurlStartAngle,
+        peakAngle: kCurlPeakAngle,
+        peakExitAngle: kCurlPeakExitAngle,
+        endAngle: kCurlEndAngle,
+        source: ThresholdSource.global,
+      ),
+      sensitivity,
+      view,
+    );
+  }
+
+  /// Applies additive ROM deltas for a sensitivity level to a base threshold set.
+  ///
+  /// FSM invariant (start > end > peakExit > peak) is re-verified and floors
+  /// applied so the invariant always holds regardless of input.
+  /// peakExitAngle is always re-derived from the adjusted peak + kCurlPeakExitGap.
+  static RomThresholds _applyRomSensitivity(
+    RomThresholds base,
+    CurlSensitivity sensitivity, [
+    CurlCameraView view = CurlCameraView.unknown,
+  ]) {
+    if (sensitivity == CurlSensitivity.medium) return base;
+    // ROM deltas: (dStart, dPeak, dEnd)
+    // High: tighter gates — must curl deeper and extend more fully.
+    final (dStart, dPeak, dEnd) = switch (sensitivity) {
+      CurlSensitivity.high => (5.0, -10.0, 0.0),
+      CurlSensitivity.medium => (0.0, 0.0, 0.0), // unreachable; guarded above
+    };
+    final peak = base.peakAngle + dPeak;
+    final start = base.startAngle + dStart;
+    final end = base.endAngle + dEnd;
+    final peakExit = peak + kCurlPeakExitGap;
+    // Invariant floors: start > end > peakExit > peak
+    final safeEnd = end > peakExit + kCurlPeakExitGap
+        ? end
+        : peakExit + kCurlPeakExitGap;
+    final safeStart = start > safeEnd ? start : safeEnd + 1.0;
+    return RomThresholds(
+      startAngle: safeStart,
+      peakAngle: peak,
+      peakExitAngle: peakExit,
+      endAngle: safeEnd,
+      source: base.source,
     );
   }
 

@@ -1262,4 +1262,252 @@ void main() {
       await db.close();
     });
   });
+
+  group('Biceps side-view schema v6 — shrug + elbow-rise round-trip', () {
+    test(
+      'bicepsCurlSide session writes shrugRatio and elbowRiseRatio per rep',
+      () async {
+        final repo = InMemorySessionRepository();
+        final metrics = List<BicepsSideRepMetrics>.generate(
+          3,
+          (i) => BicepsSideRepMetrics(
+            repIndex: i + 1,
+            leanDeg: 5.0 + i,
+            shoulderDriftRatio: 0.10 + 0.01 * i,
+            elbowDriftRatio: 0.20 + 0.01 * i,
+            backLeanDeg: 2.0 + 0.5 * i,
+            elbowDriftSigned: 0.20 + 0.01 * i,
+            shrugRatio: 0.10 + 0.01 * i,
+            elbowRiseRatio: 0.07 + 0.01 * i,
+          ),
+        );
+        final event = WorkoutCompletedEvent(
+          exercise: ExerciseType.bicepsCurlSide,
+          totalReps: 3,
+          totalSets: 1,
+          sessionDuration: const Duration(seconds: 45),
+          averageQuality: 0.85,
+          detectedView: CurlCameraView.sideLeft,
+          repQualities: [0.80, 0.85, 0.90],
+          fatigueDetected: false,
+          asymmetryDetected: false,
+          eccentricTooFastCount: 0,
+          errorsTriggered: const {},
+          curlRepRecords: List<CurlRepRecord>.generate(
+            3,
+            (i) => CurlRepRecord(
+              repIndex: i + 1,
+              side: ProfileSide.left,
+              view: CurlCameraView.sideLeft,
+              minAngle: 60.0 + i,
+              maxAngle: 160.0 + i,
+              source: ThresholdSource.global,
+              bucketUpdated: false,
+              rejectedOutlier: false,
+            ),
+          ),
+          curlBucketSummaries: const [],
+          bicepsSideRepMetrics: metrics,
+        );
+        final id = await repo.insertCompletedSession(
+          event,
+          startedAt: DateTime.now(),
+        );
+
+        final detail = await repo.getSession(id);
+        expect(detail, isNotNull);
+        final reps = detail!.reps;
+        expect(reps[0].bicepsShrugRatio, closeTo(0.10, 1e-9));
+        expect(reps[1].bicepsShrugRatio, closeTo(0.11, 1e-9));
+        expect(reps[2].bicepsShrugRatio, closeTo(0.12, 1e-9));
+        expect(reps[0].bicepsElbowRiseRatio, closeTo(0.07, 1e-9));
+        expect(reps[1].bicepsElbowRiseRatio, closeTo(0.08, 1e-9));
+        expect(reps[2].bicepsElbowRiseRatio, closeTo(0.09, 1e-9));
+      },
+    );
+
+    test(
+      'front-curl session leaves both v6 columns null on every rep',
+      () async {
+        final repo = InMemorySessionRepository();
+        final event = buildCurlEvent(
+          reps: 2,
+          exercise: ExerciseType.bicepsCurlFront,
+          withSideMetrics: false,
+        );
+        final id = await repo.insertCompletedSession(
+          event,
+          startedAt: DateTime.now(),
+        );
+        final detail = await repo.getSession(id);
+        expect(detail, isNotNull);
+        for (final r in detail!.reps) {
+          expect(r.bicepsShrugRatio, isNull);
+          expect(r.bicepsElbowRiseRatio, isNull);
+        }
+      },
+    );
+
+    test(
+      'getSession reconstructs shrugRatio and elbowRiseRatio on RepRow',
+      () async {
+        final repo = InMemorySessionRepository();
+        final metrics = [
+          const BicepsSideRepMetrics(
+            repIndex: 1,
+            leanDeg: 3.0,
+            shoulderDriftRatio: 0.05,
+            elbowDriftRatio: 0.10,
+            backLeanDeg: 1.0,
+            elbowDriftSigned: 0.10,
+            shrugRatio: 0.19,
+            elbowRiseRatio: 0.22,
+          ),
+        ];
+        final event = WorkoutCompletedEvent(
+          exercise: ExerciseType.bicepsCurlSide,
+          totalReps: 1,
+          totalSets: 1,
+          sessionDuration: const Duration(seconds: 30),
+          averageQuality: 0.90,
+          detectedView: CurlCameraView.sideLeft,
+          repQualities: [0.90],
+          fatigueDetected: false,
+          asymmetryDetected: false,
+          eccentricTooFastCount: 0,
+          errorsTriggered: const {},
+          curlRepRecords: [
+            const CurlRepRecord(
+              repIndex: 1,
+              side: ProfileSide.left,
+              view: CurlCameraView.sideLeft,
+              minAngle: 65.0,
+              maxAngle: 160.0,
+              source: ThresholdSource.global,
+              bucketUpdated: false,
+              rejectedOutlier: false,
+            ),
+          ],
+          curlBucketSummaries: const [],
+          bicepsSideRepMetrics: metrics,
+        );
+        final id = await repo.insertCompletedSession(
+          event,
+          startedAt: DateTime.now(),
+        );
+        final detail = await repo.getSession(id);
+        expect(detail, isNotNull);
+        expect(detail!.reps[0].bicepsShrugRatio, closeTo(0.19, 1e-9));
+        expect(detail.reps[0].bicepsElbowRiseRatio, closeTo(0.22, 1e-9));
+      },
+    );
+  });
+
+  group('Schema v5 → v6 migration', () {
+    test(
+      'onUpgrade adds biceps_shrug_ratio and biceps_elbow_rise_ratio without losing data',
+      () async {
+        final db = await databaseFactoryFfi.openDatabase(
+          inMemoryDatabasePath,
+          options: OpenDatabaseOptions(
+            version: 5,
+            onConfigure: onConfigure,
+            onCreate: (db, _) async {
+              await db.execute(ddlProfiles);
+              await db.execute(ddlSessions);
+              await db.execute(ddlReps);
+              await db.execute(ddlFormErrors);
+              await db.execute(ddlFrameTelemetry);
+              await db.execute(ddlPreferences);
+              await db.execute(
+                'ALTER TABLE reps ADD COLUMN dtw_similarity REAL',
+              );
+              await db.execute(
+                'ALTER TABLE reps ADD COLUMN squat_lean_deg REAL',
+              );
+              await db.execute(
+                'ALTER TABLE reps ADD COLUMN squat_knee_shift_ratio REAL',
+              );
+              await db.execute(
+                'ALTER TABLE reps ADD COLUMN squat_heel_lift_ratio REAL',
+              );
+              await db.execute(
+                'ALTER TABLE reps ADD COLUMN squat_variant TEXT',
+              );
+              await db.execute(
+                'ALTER TABLE reps ADD COLUMN biceps_lean_deg REAL',
+              );
+              await db.execute(
+                'ALTER TABLE reps ADD COLUMN biceps_shoulder_drift_ratio REAL',
+              );
+              await db.execute(
+                'ALTER TABLE reps ADD COLUMN biceps_elbow_drift_ratio REAL',
+              );
+              await db.execute(
+                'ALTER TABLE reps ADD COLUMN biceps_back_lean_deg REAL',
+              );
+              await db.execute(
+                'ALTER TABLE reps ADD COLUMN biceps_elbow_drift_signed REAL',
+              );
+            },
+          ),
+        );
+
+        await db.insert('sessions', <String, Object?>{
+          'exercise': 'bicepsCurlSide',
+          'started_at': 1_700_000_000_000,
+          'duration_ms': 60000,
+          'total_reps': 1,
+          'total_sets': 1,
+          'fatigue_detected': 0,
+          'asymmetry_detected': 0,
+          'eccentric_too_fast_count': 0,
+        });
+        final sid = (await db.query('sessions', limit: 1)).first['id'] as int;
+        await db.insert('reps', <String, Object?>{
+          'session_id': sid,
+          'rep_index': 1,
+          'quality': 0.93,
+        });
+
+        await onUpgrade(db, 5, kDbSchemaVersion);
+
+        final cols = (await db.rawQuery(
+          'PRAGMA table_info(reps)',
+        )).map((r) => r['name'] as String).toList();
+        expect(
+          cols,
+          containsAll(['biceps_shrug_ratio', 'biceps_elbow_rise_ratio']),
+        );
+
+        final reps = await db.query('reps');
+        expect(reps, hasLength(1));
+        expect((reps.first['quality'] as num).toDouble(), closeTo(0.93, 1e-9));
+        expect(reps.first['biceps_shrug_ratio'], isNull);
+        expect(reps.first['biceps_elbow_rise_ratio'], isNull);
+
+        await db.close();
+      },
+    );
+
+    test('fresh v6 install has all 7 biceps columns', () async {
+      final db = await openTestDb();
+      final cols = (await db.rawQuery(
+        'PRAGMA table_info(reps)',
+      )).map((r) => r['name'] as String).toList();
+      expect(
+        cols,
+        containsAll([
+          'biceps_lean_deg',
+          'biceps_shoulder_drift_ratio',
+          'biceps_elbow_drift_ratio',
+          'biceps_back_lean_deg',
+          'biceps_elbow_drift_signed',
+          'biceps_shrug_ratio',
+          'biceps_elbow_rise_ratio',
+        ]),
+      );
+      await db.close();
+    });
+  });
 }

@@ -37,6 +37,36 @@ abstract class PreferencesRepository {
   /// effect on squat or push-up. Defaults to false.
   Future<bool> getDiagnosticDisableAutoCalibration();
   Future<void> setDiagnosticDisableAutoCalibration(bool value);
+
+  /// Whether the next biceps curl session should run as a *debug session*
+  /// — silent observation mode that suppresses user-facing feedback (TTS,
+  /// haptics, banners), forces `source=global` for every rep, and emits a
+  /// periodic `pose.frame_metrics` telemetry line so per-frame angle and
+  /// landmark-confidence distributions are visible even when no rep
+  /// commits. Read once at session start and frozen for the workout.
+  /// Defaults to false. Has no effect when [kCurlDebugSessionEnabled] is
+  /// compiled out.
+  Future<bool> getCurlDebugSession();
+  Future<void> setCurlDebugSession(bool value);
+
+  /// Whether the next squat session should run as a *debug session* —
+  /// silent observation mode, expanded ring buffer, per-frame metrics.
+  /// Read once at session start; frozen for the workout.
+  /// Defaults to false. No effect when [kSquatDebugSessionEnabled] is false.
+  Future<bool> getSquatDebugSession();
+  Future<void> setSquatDebugSession(bool value);
+
+  /// Form/ROM sensitivity for biceps curl. Defaults to [CurlSensitivity.medium].
+  /// Affects only cold-start (`ThresholdSource.global`) reps — calibrated
+  /// and auto-calibrated paths are personal and are never modified.
+  Future<CurlSensitivity> getCurlSensitivity();
+  Future<void> setCurlSensitivity(CurlSensitivity value);
+
+  /// Form sensitivity for squat. Defaults to [SquatSensitivity.medium].
+  /// Snapshot-on-construction — mid-session Settings changes apply to the
+  /// next workout only.
+  Future<SquatSensitivity> getSquatSensitivity();
+  Future<void> setSquatSensitivity(SquatSensitivity value);
 }
 
 class SqlitePreferencesRepository implements PreferencesRepository {
@@ -49,7 +79,11 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   static const String _kSquatLongFemurKey = 'squat_long_femur_lifter';
   static const String _kDiagnosticDisableAutoCalibrationKey =
       'diagnostic_disable_auto_calibration';
+  static const String _kCurlDebugSessionKey = 'curl_debug_session';
+  static const String _kSquatDebugSessionKey = 'squat_debug_session';
   static const String _kThemeModeKey = 'theme_mode';
+  static const String _kCurlSensitivityKey = 'curl_sensitivity';
+  static const String _kSquatSensitivityKey = 'squat_sensitivity';
 
   @override
   Future<bool> getEnableDtwScoring() async {
@@ -143,6 +177,102 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   }
 
   @override
+  Future<bool> getCurlDebugSession() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kCurlDebugSessionKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    return rows.first['value'] == 'true';
+  }
+
+  @override
+  Future<void> setCurlDebugSession(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kCurlDebugSessionKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<bool> getSquatDebugSession() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kSquatDebugSessionKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    return rows.first['value'] == 'true';
+  }
+
+  @override
+  Future<void> setSquatDebugSession(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kSquatDebugSessionKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<CurlSensitivity> getCurlSensitivity() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kCurlSensitivityKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return CurlSensitivity.medium;
+    final raw = rows.first['value'] as String?;
+    if (raw == null) return CurlSensitivity.medium;
+    try {
+      return CurlSensitivity.values.byName(raw);
+    } catch (_) {
+      return CurlSensitivity.medium;
+    }
+  }
+
+  @override
+  Future<void> setCurlSensitivity(CurlSensitivity value) async {
+    await _db.insert('preferences', {
+      'key': _kCurlSensitivityKey,
+      'value': value.name,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<SquatSensitivity> getSquatSensitivity() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kSquatSensitivityKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return SquatSensitivity.medium;
+    final raw = rows.first['value'] as String?;
+    if (raw == null) return SquatSensitivity.medium;
+    try {
+      return SquatSensitivity.values.byName(raw);
+    } catch (_) {
+      return SquatSensitivity.medium;
+    }
+  }
+
+  @override
+  Future<void> setSquatSensitivity(SquatSensitivity value) async {
+    await _db.insert('preferences', {
+      'key': _kSquatSensitivityKey,
+      'value': value.name,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
   Future<ThemeMode> getThemeMode() async {
     final rows = await _db.query(
       'preferences',
@@ -176,6 +306,10 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   SquatVariant _squatVariant = SquatVariant.bodyweight;
   bool _squatLongFemur = false;
   bool _diagnosticDisableAutoCalibration = false;
+  bool _curlDebugSession = false;
+  bool _squatDebugSession = false;
+  CurlSensitivity _curlSensitivity = CurlSensitivity.medium;
+  SquatSensitivity _squatSensitivity = SquatSensitivity.medium;
   ThemeMode _themeMode = ThemeMode.system;
 
   @override
@@ -209,6 +343,38 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   @override
   Future<void> setDiagnosticDisableAutoCalibration(bool value) async {
     _diagnosticDisableAutoCalibration = value;
+  }
+
+  @override
+  Future<bool> getCurlDebugSession() async => _curlDebugSession;
+
+  @override
+  Future<void> setCurlDebugSession(bool value) async {
+    _curlDebugSession = value;
+  }
+
+  @override
+  Future<bool> getSquatDebugSession() async => _squatDebugSession;
+
+  @override
+  Future<void> setSquatDebugSession(bool value) async {
+    _squatDebugSession = value;
+  }
+
+  @override
+  Future<CurlSensitivity> getCurlSensitivity() async => _curlSensitivity;
+
+  @override
+  Future<void> setCurlSensitivity(CurlSensitivity value) async {
+    _curlSensitivity = value;
+  }
+
+  @override
+  Future<SquatSensitivity> getSquatSensitivity() async => _squatSensitivity;
+
+  @override
+  Future<void> setSquatSensitivity(SquatSensitivity value) async {
+    _squatSensitivity = value;
   }
 
   @override

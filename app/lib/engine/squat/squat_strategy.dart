@@ -1,4 +1,5 @@
 import '../../core/constants.dart';
+import '../../core/squat_form_thresholds.dart';
 import '../../core/types.dart';
 import '../../models/landmark_types.dart';
 import '../../models/pose_result.dart';
@@ -32,9 +33,11 @@ class SquatStrategy extends ExerciseStrategy {
   SquatStrategy({
     this.variant = SquatVariant.bodyweight,
     this.longFemurLifter = false,
+    SquatFormThresholds formThresholds = SquatFormThresholds.defaults,
   }) : _form = SquatFormAnalyzer(
          variant: variant,
          longFemurLifter: longFemurLifter,
+         formThresholds: formThresholds,
        );
 
   final SquatVariant variant;

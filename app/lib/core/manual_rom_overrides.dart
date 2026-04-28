@@ -36,8 +36,12 @@
 ///
 /// PROVENANCE — sideLeft / sideRight buckets
 /// ─────────────────────────────────────────
-/// Currently null. The next diagnostic side-view session will populate them.
-/// Until then, side views fall through to the data-driven or legacy layers.
+/// Source: diagnostic session 2026-04-28, left-arm side view, --from-frames
+/// mode (FSM thresholds were misconfigured so no rep.extremes were emitted;
+/// reps were detected from raw angle_raw signal via local-min/max detector).
+/// n=7 raw reps, 5 kept after 3.5×MAD rejection. Personal medians: peak=108.4°,
+/// start=167.0°. Permissive level omitted — geometrically invalid for this
+/// user's ROM (peakExit would exceed startAngle with +38° tolerance).
 library;
 
 import 'default_rom_thresholds.dart';
@@ -46,36 +50,84 @@ import 'types.dart';
 class ManualRomOverrides {
   const ManualRomOverrides._();
 
-  /// Front-view manual override. Derived 2026-04-26 with generalization.
-  static const CurlRomThresholdSet front = CurlRomThresholdSet(
+  // ── Front-view overrides (derived 2026-04-26, generalization tolerances) ──
+  // Base (medium): start=148, peak=35, peakExit=50, end=128
+  // High (strict): start+5=153, peak−10=25, peakExit=25+15=40, end=128
+
+  /// High-sensitivity front override — tighter ROM gates for experienced lifters.
+  static const CurlRomThresholdSet frontStrict = CurlRomThresholdSet(
+    startAngle: 153.0,
+    peakAngle: 25.0,
+    peakExitAngle: 40.0,
+    endAngle: 128.0,
+  );
+
+  /// Medium-sensitivity front override — default, derived 2026-04-26.
+  static const CurlRomThresholdSet frontDefault = CurlRomThresholdSet(
     startAngle: 148.0,
     peakAngle: 35.0,
     peakExitAngle: 50.0,
     endAngle: 128.0,
   );
 
-  /// Side-left override — null until a side-left session is captured.
-  static const CurlRomThresholdSet? sideLeft = null;
+  // ── Side-left overrides (derived 2026-04-28, --from-frames mode) ────────────
+  // Source: diagnostic session 2026-04-28 (left-arm, side view).
+  // 7 reps detected via local-min/max frame-signal detector; 5 kept after
+  // 3.5×MAD outlier rejection. Personal medians: peak=108.4°, start=167.0°.
+  // ICC=0.000 (single session), eff_n=5. Mirror-inverted session logged as
+  // sideRight due to a known home-screen mapping bug — angles are identical
+  // by bilateral symmetry so these constants apply to both views.
 
-  /// Side-right override — null until a side-right session is captured
-  /// (or sideLeft mirroring is decided as authoritative).
-  static const CurlRomThresholdSet? sideRight = null;
+  static const CurlRomThresholdSet sideLeftStrict = CurlRomThresholdSet(
+    startAngle: 162.0,
+    peakAngle: 128.4,
+    peakExitAngle: 143.4,
+    endAngle: 148.4,
+  );
 
-  /// Look up the manual override for a given view. Returns null when no
-  /// override is defined for that view — caller falls through to the next
-  /// resolution tier.
-  static CurlRomThresholdSet? forView(CurlCameraView view) {
+  static const CurlRomThresholdSet sideLeftDefault = CurlRomThresholdSet(
+    startAngle: 159.0,
+    peakAngle: 136.4,
+    peakExitAngle: 151.4,
+    endAngle: 156.4,
+  );
+
+  // ── Side-right overrides (aliases of sideLeft — bilateral symmetry) ─────────
+  // Elbow-angle geometry is identical across left/right in the 2D sagittal
+  // projection. These are true Dart const aliases — changing the sideLeft
+  // constants above automatically propagates here with no manual sync needed.
+  // If a dedicated right-arm session is ever recorded, replace the alias with
+  // an independent CurlRomThresholdSet derived from that session.
+  static const CurlRomThresholdSet sideRightStrict = sideLeftStrict;
+  static const CurlRomThresholdSet sideRightDefault = sideLeftDefault;
+
+  /// Look up the manual override for a given view and sensitivity level.
+  ///
+  /// Returns null when no override is defined for that view — caller falls
+  /// through to the next resolution tier.
+  ///
+  /// [sensitivity] defaults to medium so all existing callers compile unchanged.
+  static CurlRomThresholdSet? forView(
+    CurlCameraView view, [
+    CurlSensitivity sensitivity = CurlSensitivity.medium,
+  ]) {
     switch (view) {
       case CurlCameraView.front:
-        return front;
+        return switch (sensitivity) {
+          CurlSensitivity.high => frontStrict,
+          CurlSensitivity.medium => frontDefault,
+        };
       case CurlCameraView.sideLeft:
-        return sideLeft;
+        return switch (sensitivity) {
+          CurlSensitivity.high => sideLeftStrict,
+          CurlSensitivity.medium => sideLeftDefault,
+        };
       case CurlCameraView.sideRight:
-        return sideRight;
+        return switch (sensitivity) {
+          CurlSensitivity.high => sideRightStrict,
+          CurlSensitivity.medium => sideRightDefault,
+        };
       case CurlCameraView.unknown:
-        // No override for unknown — let the lower tiers handle the
-        // pre-detection fallback (which currently picks side-view as the
-        // most anatomically accurate projection).
         return null;
     }
   }

@@ -7,6 +7,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/constants.dart';
 import '../core/theme.dart';
 import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
@@ -759,6 +760,16 @@ class _TrainTab extends StatelessWidget {
                     'Side camera · place phone at floor level, 1.5 m away',
                 onTap: () => onStartWorkout(ExerciseType.pushUp),
               ),
+              if (kCurlDebugSessionEnabled) ...[
+                const SizedBox(height: 10),
+                _ExerciseCard(
+                  icon: Icons.bug_report_outlined,
+                  title: 'Curl Debug Session',
+                  subtitle:
+                      'Silent observation — logs frame metrics for tuning',
+                  onTap: () => _showCurlDebugSidePicker(context),
+                ),
+              ],
             ]),
           ),
         ),
@@ -770,6 +781,31 @@ class _TrainTab extends StatelessWidget {
     if (!context.mounted) return;
     final side = await _showSideFacingPicker(context);
     if (side == null) return;
+    if (!context.mounted) return;
+    // Defensive: a previous "Curl Debug Session" launch may have left the
+    // pref enabled. Normal curl tile must always run with feedback ON, so
+    // clear the flag before navigating. Cheap (single SQLite upsert) and
+    // makes the two entry points unambiguous from the user's perspective.
+    if (kCurlDebugSessionEnabled) {
+      final prefs = AppServicesScope.read(context).preferencesRepository;
+      await prefs.setCurlDebugSession(false);
+      if (!context.mounted) return;
+    }
+    await onStartWorkout(ExerciseType.bicepsCurlSide, curlSide: side);
+  }
+
+  /// "Curl Debug Session" entry. Mirrors [_showCurlViewPicker] but flips
+  /// the `curl_debug_session` preference to `true` before launching the
+  /// workout so the view-model reads it during `init()`. The Settings
+  /// switch reflects the flip — users can manually flip it back off after
+  /// the session, or the next normal-curl launch will clear it.
+  Future<void> _showCurlDebugSidePicker(BuildContext context) async {
+    if (!context.mounted) return;
+    final side = await _showSideFacingPicker(context);
+    if (side == null) return;
+    if (!context.mounted) return;
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setCurlDebugSession(true);
     if (!context.mounted) return;
     await onStartWorkout(ExerciseType.bicepsCurlSide, curlSide: side);
   }
@@ -808,6 +844,12 @@ class _TrainTab extends StatelessWidget {
                   'Track your left arm',
                   style: TextStyle(color: ft.textMuted),
                 ),
+                // DO NOT "fix" this — the user's physical left arm appears on
+                // the camera's right side due to front-camera mirroring, so
+                // tracking the user's left arm requires `ExerciseSide.right`
+                // (right-side-of-frame). Title/subtitle are user-frame
+                // ("your left arm"); the enum is camera-frame. Reverted on
+                // 2026-04-27 after a misguided "swap" broke the mapping.
                 onTap: () => Navigator.pop(ctx, ExerciseSide.right),
               ),
               ListTile(
@@ -820,6 +862,7 @@ class _TrainTab extends StatelessWidget {
                   'Track your right arm',
                   style: TextStyle(color: ft.textMuted),
                 ),
+                // Same camera-mirroring rationale as the Left tile above.
                 onTap: () => Navigator.pop(ctx, ExerciseSide.left),
               ),
               const SizedBox(height: 8),

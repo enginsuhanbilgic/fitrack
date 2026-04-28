@@ -3,6 +3,8 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
 import '../core/constants.dart';
+import '../core/form_thresholds.dart';
+import '../core/squat_form_thresholds.dart';
 import '../core/platform_config.dart';
 import '../core/rom_thresholds.dart';
 import '../core/types.dart';
@@ -42,6 +44,7 @@ class WorkoutCompletedEvent {
   final bool asymmetryDetected;
   final int eccentricTooFastCount;
   final Set<FormError> errorsTriggered;
+  final Map<FormError, int> errorCounts;
   final List<CurlRepRecord> curlRepRecords;
   final List<CurlProfileBucketSummary> curlBucketSummaries;
 
@@ -62,6 +65,20 @@ class WorkoutCompletedEvent {
   /// order. Empty for non-side-view sessions (front curl, squat, push-up).
   final List<BicepsSideRepMetrics> bicepsSideRepMetrics;
 
+  /// Per-rep concentric duration in milliseconds, index-aligned with the
+  /// rep order. NULL for reps where the FSM didn't capture a concentric
+  /// duration (rare — abandoned reps). Drives the summary card's TEMPO
+  /// stat (`avg of non-null / 1000`).
+  final List<int?> repConcentricMs;
+
+  /// Per-rep depth as a fraction (0.0–1.0) of the user's reference range,
+  /// index-aligned with the rep order. NULL when no reference range is
+  /// available (e.g. non-curl sessions with zero session-max ROM).
+  /// Reference range is the calibrated bucket's peak ROM when available
+  /// (curl), else the session's max ROM (fallback). Drives the summary
+  /// card's DEPTH stat (`avg of non-null × 100`).
+  final List<double?> repDepthPercents;
+
   const WorkoutCompletedEvent({
     required this.exercise,
     required this.totalReps,
@@ -74,6 +91,7 @@ class WorkoutCompletedEvent {
     required this.asymmetryDetected,
     required this.eccentricTooFastCount,
     required this.errorsTriggered,
+    this.errorCounts = const {},
     required this.curlRepRecords,
     required this.curlBucketSummaries,
     this.dtwSimilarities = const [],
@@ -81,6 +99,8 @@ class WorkoutCompletedEvent {
     this.squatLongFemurLifter = false,
     this.squatRepMetrics = const [],
     this.bicepsSideRepMetrics = const [],
+    this.repConcentricMs = const [],
+    this.repDepthPercents = const [],
   });
 }
 
@@ -122,6 +142,38 @@ class WorkoutViewModel extends ChangeNotifier {
   bool _diagnosticDisableAutoCalibration = false;
   bool get diagnosticDisableAutoCalibration =>
       _diagnosticDisableAutoCalibration;
+
+  /// Whether this session is running as a *curl debug session*. When
+  /// true the workout silently observes — no TTS, no haptics, no banners,
+  /// no form-error cues — and emits a periodic `pose.frame_metrics`
+  /// telemetry line at [kDebugFrameMetricsHz] so frame-level distributions
+  /// are visible even when no rep commits. Forces
+  /// [_diagnosticDisableAutoCalibration] true (every rep `source=global`)
+  /// so the data is consistent regardless of the orthogonal toggle.
+  ///
+  /// Read from `PreferencesRepository.getCurlDebugSession()` during
+  /// `init()` and frozen for the rest of the VM's lifetime
+  /// (snapshot-on-construction). Settings toggling mid-session does NOT
+  /// affect an in-flight workout. Always false when the active exercise
+  /// is not a biceps curl variant.
+  bool _isCurlDebugSession = false;
+  bool get isCurlDebugSession => _isCurlDebugSession;
+
+  /// Form/ROM coaching sensitivity for biceps curl. Read from
+  /// [PreferencesRepository.getCurlSensitivity] during [init] and frozen
+  /// for the session (snapshot-on-construction). Affects only cold-start
+  /// (`ThresholdSource.global`) reps — calibrated and auto-calibrated paths
+  /// are unaffected.
+  CurlSensitivity _curlSensitivity = CurlSensitivity.medium;
+
+  /// Form sensitivity for squat. Read from [PreferencesRepository.getSquatSensitivity]
+  /// during [init] and frozen for the session (snapshot-on-construction).
+  SquatSensitivity _squatSensitivity = SquatSensitivity.medium;
+
+  /// Wall-clock timestamp of the most recent `pose.frame_metrics` emit.
+  /// Throttles emission to roughly [kDebugFrameMetricsHz] regardless of
+  /// the camera's frame rate. Null until the first debug-session frame.
+  DateTime? _lastDebugFrameMetricsAt;
 
   /// Diagnostic-mode rep counter. Lives separately from `_curlRepRecords`
   /// because diagnostic mode intentionally does not write to the records
@@ -179,6 +231,7 @@ class WorkoutViewModel extends ChangeNotifier {
   DateTime? _absenceStart;
   DateTime? _activeStart;
   final Map<FormError, DateTime> _lastFeedbackTime = {};
+  final Map<FormError, int> _formErrorCounts = {};
 
   // Visual highlight state.
   Map<int, Color> _errorHighlight = {};
@@ -253,6 +306,15 @@ class WorkoutViewModel extends ChangeNotifier {
   /// non-squat sessions. Populated by `_handleSquatRepCommit`.
   final List<SquatRepMetrics> _squatRepMetrics = [];
 
+  /// True when this session runs in squat debug mode. Snapshot-on-construction.
+  bool _isSquatDebugSession = false;
+
+  /// Monotonic rep index for squat.rep telemetry lines.
+  int _squatDebugRepIndex = 0;
+
+  /// Timestamp of the last squat frame-metric emission (throttle guard).
+  DateTime? _lastSquatDebugFrameMetricsAt;
+
   /// Per-rep biceps-curl side-view metrics. Populated by
   /// [_handleCurlRepCommit] when `exercise == bicepsCurlSide` AND the
   /// locked view is `sideLeft` / `sideRight`. Read by
@@ -274,6 +336,7 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.depthSwing: [LM.leftShoulder, LM.rightShoulder],
     FormError.shoulderArc: [LM.leftShoulder, LM.rightShoulder],
     FormError.elbowDrift: [LM.leftElbow, LM.rightElbow],
+    FormError.elbowRise: [LM.leftElbow, LM.rightElbow],
     FormError.shoulderShrug: [LM.leftShoulder, LM.rightShoulder],
     FormError.backLean: [
       LM.leftShoulder,
@@ -390,11 +453,63 @@ class WorkoutViewModel extends ChangeNotifier {
             data: <String, Object?>{'stackTrace': st.toString()},
           );
         }
+        // Sensitivity snapshot must come before the debug-session block so the
+        // curl_debug.session_start telemetry log includes the real value.
+        _curlSensitivity = await _preferencesRepository.getCurlSensitivity();
         // Diagnostic flag — snapshot once, identical to other curl prefs.
         // A mid-session toggle in Settings has no effect on this run (matches
         // the squat long-femur "snapshot-on-construction" rule).
         _diagnosticDisableAutoCalibration = await _preferencesRepository
             .getDiagnosticDisableAutoCalibration();
+        // Curl-debug-session snapshot. Read AFTER the diagnostic toggle so
+        // the implicit "debug-session forces diagnostic on" rule below is
+        // ordering-independent of which Settings switch the user flipped
+        // first. Compile-time gated on `kCurlDebugSessionEnabled` — when
+        // the constant is false, the pref read still runs (cheap, defaults
+        // false) but the dead branch tree-shakes.
+        if (kCurlDebugSessionEnabled) {
+          _isCurlDebugSession = await _preferencesRepository
+              .getCurlDebugSession();
+          if (_isCurlDebugSession) {
+            // Force diagnostic-mode on so debug-session reps are uniformly
+            // tagged `source=global` even if the orthogonal Settings toggle
+            // happens to be off. Two separate user-facing switches, one
+            // unambiguous data shape downstream.
+            _diagnosticDisableAutoCalibration = true;
+            // Expand the ring buffer for the session lifetime so frame
+            // metrics + rep lines from long sets don't overflow the default
+            // 500-entry cap. resetCap() is called in dispose().
+            TelemetryLog.instance.setCap(kDebugRingBufferSize);
+            TelemetryLog.instance.log(
+              'curl_debug.session_active',
+              'silent observation mode — feedback suppressed; '
+                  'frame_metrics @ ${kDebugFrameMetricsHz}Hz; '
+                  'ring_buffer=$kDebugRingBufferSize',
+            );
+            // Session-boundary marker. Carries a wall-clock timestamp so
+            // multi-session pastes can be split unambiguously, and the
+            // exact threshold values + flag state so the retune pipeline
+            // knows which gates every rep.extremes line ran under.
+            final debugView = curlSide == ExerciseSide.right
+                ? CurlCameraView.sideRight
+                : CurlCameraView.sideLeft;
+            final debugThresholds = RomThresholds.global(debugView);
+            TelemetryLog.instance.log(
+              'curl_debug.session_start',
+              'ts=${DateTime.now().toIso8601String()} '
+                  'exercise=${exercise.name} '
+                  'side=${curlSide.name} '
+                  'view=${debugView.name} '
+                  'sensitivity=${_curlSensitivity.name} '
+                  'thresholds_start=${debugThresholds.startAngle.toStringAsFixed(1)} '
+                  'thresholds_peak=${debugThresholds.peakAngle.toStringAsFixed(1)} '
+                  'thresholds_peak_exit=${debugThresholds.peakExitAngle.toStringAsFixed(1)} '
+                  'thresholds_end=${debugThresholds.endAngle.toStringAsFixed(1)} '
+                  'use_manual_overrides=$kUseManualOverrides '
+                  'use_data_driven=$kUseDataDrivenThresholds',
+            );
+          }
+        }
         if (_diagnosticDisableAutoCalibration) {
           TelemetryLog.instance.log(
             'diagnostic.mode_active',
@@ -417,6 +532,33 @@ class WorkoutViewModel extends ChangeNotifier {
         _squatVariant = await _preferencesRepository.getSquatVariant();
         _squatLongFemurLifter = await _preferencesRepository
             .getSquatLongFemurLifter();
+        _squatSensitivity = await _preferencesRepository.getSquatSensitivity();
+        if (kSquatDebugSessionEnabled) {
+          _isSquatDebugSession = await _preferencesRepository
+              .getSquatDebugSession();
+          if (_isSquatDebugSession) {
+            TelemetryLog.instance.setCap(kSquatDebugRingBufferSize);
+            TelemetryLog.instance.log(
+              'squat_debug.session_active',
+              'ring_buffer=$kSquatDebugRingBufferSize '
+                  'frame_metrics@${kSquatDebugFrameMetricsHz}Hz',
+            );
+            TelemetryLog.instance.log(
+              'squat_debug.session_start',
+              'ts=${DateTime.now().toIso8601String()} '
+                  'exercise=${exercise.name} '
+                  'variant=${_squatVariant.name} '
+                  'long_femur=$_squatLongFemurLifter '
+                  'start_angle=$kSquatStartAngle '
+                  'bottom_angle=$kSquatBottomAngle '
+                  'end_angle=$kSquatEndAngle '
+                  'lean_warn_bodyweight=$kSquatLeanWarnDegBodyweight '
+                  'lean_warn_hbbs=$kSquatLeanWarnDegHBBS '
+                  'knee_shift_warn=$kSquatKneeShiftWarnRatio '
+                  'heel_lift_warn=$kSquatHeelLiftWarnRatio',
+            );
+          }
+        }
       }
       _repCounter = RepCounter(
         exercise: exercise,
@@ -427,8 +569,12 @@ class WorkoutViewModel extends ChangeNotifier {
         curlHistoricalConcentricDurations: historical,
         curlReferenceRepAngleSeries: referenceAngles,
         curlEnableDtwScoring: _dtwScoringEnabled,
+        curlFormThresholds: FormThresholds.forSensitivity(_curlSensitivity),
         squatVariant: _squatVariant,
         squatLongFemurLifter: _squatLongFemurLifter,
+        squatFormThresholds: SquatFormThresholds.forSensitivity(
+          _squatSensitivity,
+        ),
         onSquatRepCommit: _handleSquatRepCommit,
       );
       if (exercise.isCurl && forceCalibration) {
@@ -455,6 +601,10 @@ class WorkoutViewModel extends ChangeNotifier {
     // `rep.extremes` log is uniformly tagged `source=global`. Skips both the
     // calibrated-bucket path and the auto-cal path; nothing else.
     if (diagnosticDisableAutoCalibration) {
+      // Intentionally no sensitivity — debug sessions collect baseline data
+      // against the unmodified global thresholds the Python script was
+      // calibrated with. Applying sensitivity would make the measurements
+      // circular.
       return RomThresholds.global(view);
     }
     final profile = _profile;
@@ -469,13 +619,21 @@ class WorkoutViewModel extends ChangeNotifier {
     }
     final auto = _autoCalibrator.currentThresholds;
     if (auto != null) return auto;
-    return RomThresholds.global(view);
+    // Cold-start path: sensitivity applies here only.
+    return RomThresholds.global(view, _curlSensitivity);
   }
 
   /// Engine-callback: a view flip just committed at FSM idle. Surface a
   /// 2-second amber advisory so the user sees the system adapt. Mirrors
   /// the existing transient-banner patterns in `WorkoutScreen`.
   void _handleCurlViewFlipped(CurlCameraView from, CurlCameraView to) {
+    // Curl debug session: suppress the banner. The flip still happens
+    // engine-side (analyzer's view changes, telemetry tags update); the
+    // user just doesn't see a UI advisory about it. Matches the rest of
+    // the silent-observation contract.
+    if (kCurlDebugSessionEnabled && _isCurlDebugSession) {
+      return;
+    }
     final String text;
     switch (to) {
       case CurlCameraView.front:
@@ -531,6 +689,53 @@ class WorkoutViewModel extends ChangeNotifier {
             'source=global '
             'result=diagnosticSkipped',
       );
+      // Diagnostic mode skips bucket persistence and `_curlRepRecords`
+      // (intentional — avoid contaminating calibration buckets), but
+      // it MUST still emit the side-form telemetry. Retuning defaults
+      // is the entire purpose of diagnostic mode; without these lines
+      // the workflow has no data to work from. Schema is identical to
+      // the production path below — same parser handles both.
+      if (exercise == ExerciseType.bicepsCurlSide &&
+          (view == CurlCameraView.sideLeft ||
+              view == CurlCameraView.sideRight)) {
+        final extras = _repCounter.curlFormExtras;
+        if (extras != null) {
+          final declaredArmIsLeft = side == ProfileSide.left;
+          final resolvedArmIsLeft = extras.activeArmIsLeftThisRep;
+          final armMatch = declaredArmIsLeft == resolvedArmIsLeft;
+          final poseFacing = extras.facingRightThisRep == null
+              ? 'unknown'
+              : (extras.facingRightThisRep! ? 'right' : 'left');
+          TelemetryLog.instance.log(
+            'rep.arm_resolved',
+            'rep=$_diagnosticRepIndex '
+                'declared_side=${declaredArmIsLeft ? "left" : "right"} '
+                'declared_view=${view.name} '
+                'resolved_arm=${resolvedArmIsLeft ? "left" : "right"} '
+                'committed_side=${side.name} '
+                'left_conf=${extras.leftArmConfidenceSumThisRep.toStringAsFixed(2)} '
+                'right_conf=${extras.rightArmConfidenceSumThisRep.toStringAsFixed(2)} '
+                'pose_facing=$poseFacing '
+                'arm_match=$armMatch',
+          );
+          TelemetryLog.instance.log(
+            'rep.side_metrics',
+            'rep=$_diagnosticRepIndex '
+                'side=${side.name} '
+                'view=${view.name} '
+                'lean_deg=${extras.maxTorsoLeanDegThisRep.toStringAsFixed(2)} '
+                'shoulder_drift_ratio=${extras.maxShoulderDriftRatioThisRep.toStringAsFixed(4)} '
+                'elbow_drift_ratio=${extras.maxElbowDriftRatioThisRep.toStringAsFixed(4)} '
+                'elbow_drift_signed=${extras.signedElbowDriftRatioAtMax?.toStringAsFixed(4) ?? "null"} '
+                'back_lean_deg=${extras.maxBackLeanDegThisRep.toStringAsFixed(2)} '
+                'shrug_ratio=${extras.maxShrugRatioThisRep.toStringAsFixed(4)} '
+                'elbow_rise_ratio=${extras.maxElbowRiseRatioThisRep.toStringAsFixed(4)} '
+                'rep_quality=${extras.lastRepQuality.toStringAsFixed(3)} '
+                'concentric_ms=${concentricDuration?.inMilliseconds ?? -1} '
+                'source=global',
+          );
+        }
+      }
       return;
     }
     _autoCalibrator.recordRepExtremes(minAngle, maxAngle);
@@ -591,6 +796,8 @@ class WorkoutViewModel extends ChangeNotifier {
             elbowDriftRatio: extras.maxElbowDriftRatioThisRep,
             backLeanDeg: extras.maxBackLeanDegThisRep,
             elbowDriftSigned: extras.signedElbowDriftRatioAtMax,
+            shrugRatio: extras.maxShrugRatioThisRep,
+            elbowRiseRatio: extras.maxElbowRiseRatioThisRep,
           ),
         );
       }
@@ -636,6 +843,13 @@ class WorkoutViewModel extends ChangeNotifier {
     //   elbow_drift_signed      — same projection at the peak frame, with
     //                             sign preserved (split forward vs back)
     //   back_lean_deg           — peak hyperextension (degrees)
+    //   shrug_ratio             — peak −Δ(shoulder.y − hip.y) / torso_len
+    //                             (positive = shoulder rose). Retunes
+    //                             `kShrugThreshold` from real distributions.
+    //   elbow_rise_ratio        — peak (baseline_elbowRelY − current) /
+    //                             torso_len (positive = elbow swung up,
+    //                             front-delt cheat). Retunes
+    //                             `kElbowRiseThreshold`.
     //   rep_quality             — analyzer's lastRepQuality (0.0–1.0).
     //                             Filter clean-form reps by quality > 0.85
     //                             when computing percentile thresholds.
@@ -649,6 +863,56 @@ class WorkoutViewModel extends ChangeNotifier {
         (view == CurlCameraView.sideLeft || view == CurlCameraView.sideRight)) {
       final extras = _repCounter.curlFormExtras;
       if (extras != null) {
+        // Side-mismatch diagnostic line. Emitted BEFORE `rep.side_metrics`
+        // so that when a user reports "I picked left but the log says
+        // right," this single line shows exactly why:
+        //
+        //   declared_side       — what the user tapped at home screen
+        //                         (mapped from `ExerciseSide` →
+        //                         `ProfileSide` via `_profileSideForRep`).
+        //   declared_view       — the locked camera view (echoes the
+        //                         home-screen tap for pre-seeded
+        //                         sessions; that's a tautology, but
+        //                         making it explicit prevents readers
+        //                         from interpreting it as detection).
+        //   resolved_arm        — what `_resolveActiveArm` picked from
+        //                         per-arm landmark confidence sums.
+        //   committed_side      — what `_commitRepSamples` actually
+        //                         wrote to the rep record. After the
+        //                         Bug 3 fix this should equal
+        //                         `resolved_arm` whenever any landmark
+        //                         confidence was non-zero.
+        //   left_conf / right_conf — the inputs `_resolveActiveArm`
+        //                         summed (shoulder + hip + elbow per
+        //                         side). Both ≈ 0.0 → the analyzer
+        //                         fell back to the declared view.
+        //   pose_facing         — `_facingRight` from nose-vs-shoulder
+        //                         X comparison. "right" = user's nose
+        //                         is on the camera-right of the active
+        //                         shoulder. Compare with `declared_view`:
+        //                         if declared sideLeft but pose_facing=right,
+        //                         the camera was framing the wrong side.
+        //   arm_match           — boolean shortcut: did declared_side
+        //                         agree with resolved_arm? Quick filter
+        //                         for "show me the mismatched reps."
+        final declaredArmIsLeft = side == ProfileSide.left;
+        final resolvedArmIsLeft = extras.activeArmIsLeftThisRep;
+        final armMatch = declaredArmIsLeft == resolvedArmIsLeft;
+        final poseFacing = extras.facingRightThisRep == null
+            ? 'unknown'
+            : (extras.facingRightThisRep! ? 'right' : 'left');
+        TelemetryLog.instance.log(
+          'rep.arm_resolved',
+          'rep=${_curlRepRecords.length} '
+              'declared_side=${declaredArmIsLeft ? "left" : "right"} '
+              'declared_view=${view.name} '
+              'resolved_arm=${resolvedArmIsLeft ? "left" : "right"} '
+              'committed_side=${side.name} '
+              'left_conf=${extras.leftArmConfidenceSumThisRep.toStringAsFixed(2)} '
+              'right_conf=${extras.rightArmConfidenceSumThisRep.toStringAsFixed(2)} '
+              'pose_facing=$poseFacing '
+              'arm_match=$armMatch',
+        );
         TelemetryLog.instance.log(
           'rep.side_metrics',
           'rep=${_curlRepRecords.length} '
@@ -659,12 +923,81 @@ class WorkoutViewModel extends ChangeNotifier {
               'elbow_drift_ratio=${extras.maxElbowDriftRatioThisRep.toStringAsFixed(4)} '
               'elbow_drift_signed=${extras.signedElbowDriftRatioAtMax?.toStringAsFixed(4) ?? "null"} '
               'back_lean_deg=${extras.maxBackLeanDegThisRep.toStringAsFixed(2)} '
+              'shrug_ratio=${extras.maxShrugRatioThisRep.toStringAsFixed(4)} '
+              'elbow_rise_ratio=${extras.maxElbowRiseRatioThisRep.toStringAsFixed(4)} '
               'rep_quality=${extras.lastRepQuality.toStringAsFixed(3)} '
               'concentric_ms=${concentricDuration?.inMilliseconds ?? -1} '
               'source=${resolved.source.name}',
         );
       }
     }
+  }
+
+  /// Periodic frame-level telemetry for curl debug sessions. Captures the
+  /// data we lose between rep commits: per-arm landmark confidences (so we
+  /// can see WHY the FSM never armed), the current FSM state, the elbow
+  /// angle, and torso length. Emitted at ~`kDebugFrameMetricsHz` Hz from
+  /// the active-phase frame loop.
+  ///
+  /// Token vocabulary (fixed-order, key=value, regex-friendly):
+  ///   fsm                  — RepState (idle / concentric / peak / eccentric)
+  ///   angle                — primary joint angle this frame (degrees) or "null"
+  ///   l_sh / l_el / l_wr / l_hip — left-side landmark confidences
+  ///   r_sh / r_el / r_wr / r_hip — right-side landmark confidences
+  ///   torso_len            — `verticalDist(shoulder, hip)` for the active arm,
+  ///                          or "null" if landmarks missing
+  ///
+  /// Confidences below `kMinLandmarkConfidence` are NOT gated out — the
+  /// whole point is to expose the raw signal that drives `_resolveActiveArm`
+  /// and the FSM's landmark-availability decisions.
+  void _emitDebugFrameMetrics(PoseResult result, RepSnapshot snapshot) {
+    double conf(int landmarkType) {
+      for (final lm in result.landmarks) {
+        if (lm.type == landmarkType) return lm.confidence;
+      }
+      return 0.0;
+    }
+
+    final angle = snapshot.jointAngle;
+    final angleStr = angle == null ? 'null' : angle.toStringAsFixed(1);
+    TelemetryLog.instance.log(
+      'pose.frame_metrics',
+      'fsm=${snapshot.state.name} '
+          'angle_raw=$angleStr ' // unsmoothed; FSM gates on 3-frame moving average
+          'l_sh=${conf(LM.leftShoulder).toStringAsFixed(2)} '
+          'l_el=${conf(LM.leftElbow).toStringAsFixed(2)} '
+          'l_wr=${conf(LM.leftWrist).toStringAsFixed(2)} '
+          'l_hip=${conf(LM.leftHip).toStringAsFixed(2)} '
+          'r_sh=${conf(LM.rightShoulder).toStringAsFixed(2)} '
+          'r_el=${conf(LM.rightElbow).toStringAsFixed(2)} '
+          'r_wr=${conf(LM.rightWrist).toStringAsFixed(2)} '
+          'r_hip=${conf(LM.rightHip).toStringAsFixed(2)}',
+    );
+  }
+
+  /// Periodic frame-level telemetry for squat debug sessions.
+  /// Throttled to [kSquatDebugFrameMetricsHz]. Emits hip/knee/ankle
+  /// landmark confidences + FSM state + primary joint angle.
+  void _emitSquatDebugFrameMetrics(PoseResult result, RepSnapshot snapshot) {
+    double conf(int type) {
+      for (final lm in result.landmarks) {
+        if (lm.type == type) return lm.confidence;
+      }
+      return 0.0;
+    }
+
+    final angle = snapshot.jointAngle;
+    TelemetryLog.instance.log(
+      'squat.frame_metrics',
+      'fsm=${snapshot.state.name} '
+          'angle=${angle == null ? "null" : angle.toStringAsFixed(1)} '
+          'l_hip=${conf(LM.leftHip).toStringAsFixed(2)} '
+          'l_knee=${conf(LM.leftKnee).toStringAsFixed(2)} '
+          'l_ankle=${conf(LM.leftAnkle).toStringAsFixed(2)} '
+          'r_hip=${conf(LM.rightHip).toStringAsFixed(2)} '
+          'r_knee=${conf(LM.rightKnee).toStringAsFixed(2)} '
+          'r_ankle=${conf(LM.rightAnkle).toStringAsFixed(2)}',
+    );
   }
 
   List<CurlProfileBucketSummary> _snapshotBucketsForSummary() {
@@ -692,6 +1025,45 @@ class WorkoutViewModel extends ChangeNotifier {
             : 0,
       );
     }).toList();
+  }
+
+  /// Per-rep depth as a fraction of the user's reference range. Currently
+  /// only curl sessions capture per-rep ROM live (`_curlRepRecords`); squat
+  /// and push-up commit handlers don't surface min/max angles to the VM, so
+  /// they return an empty list here. Reconstructed-from-DB sessions get
+  /// richer treatment in `SummaryScreen.fromSession` where `RepRow` exposes
+  /// min/max for any exercise.
+  ///
+  /// Reference range per rep is the calibrated bucket's peak ROM when the
+  /// matching `(side, view)` bucket is calibrated; otherwise it falls back
+  /// to the session's max observed ROM. Returns `null` for an individual
+  /// rep when neither reference is available (rejected outliers, abandoned
+  /// reps with zero ROM).
+  List<double?> _computeLiveRepDepthPercents() {
+    if (_curlRepRecords.isEmpty) return const [];
+    final profile = _profile;
+    final sessionMaxRom = _curlRepRecords
+        .map((r) => r.romDegrees)
+        .fold<double>(0, (a, b) => a > b ? a : b);
+    return _curlRepRecords
+        .map<double?>((r) {
+          double? reference;
+          final bucket = profile?.bucketFor(r.side, r.view);
+          final bucketRom = bucket == null
+              ? 0.0
+              : bucket.observedMaxAngle - bucket.observedMinAngle;
+          if (bucket != null &&
+              (profile?.isCalibrated(r.side, r.view) ?? false) &&
+              bucketRom > 0) {
+            reference = bucketRom;
+          } else if (sessionMaxRom > 0) {
+            reference = sessionMaxRom;
+          }
+          if (reference == null || reference <= 0) return null;
+          final pct = r.romDegrees / reference;
+          return pct.clamp(0.0, 1.0);
+        })
+        .toList(growable: false);
   }
 
   Future<void> _flushProfileIfDirty() async {
@@ -1056,14 +1428,45 @@ class WorkoutViewModel extends ChangeNotifier {
     final colors = <int, Color>{};
     var allVisible = true;
 
+    // Curl exercises apply a stricter confidence floor during setup to reject
+    // bystanders whose landmarks are partially visible at the frame edges.
+    final double setupConfidence = exercise.isCurl
+        ? kSetupCurlMinConfidence
+        : kMinLandmarkConfidence;
+
     for (final idx in requirements.landmarkIndices) {
-      final lm = result.landmark(idx, minConfidence: kMinLandmarkConfidence);
+      final lm = result.landmark(idx, minConfidence: setupConfidence);
       if (lm != null) {
         colors[idx] = const Color(0xFF00E676);
       } else {
         colors[idx] = Colors.redAccent;
         allVisible = false;
       }
+    }
+
+    // Curl posture check: at least one arm must be in a resting-arm angle
+    // range (130°–185°). Catches bystanders whose arms happen to pass the
+    // confidence gate but are mid-gesture or mid-walk.
+    if (allVisible && exercise.isCurl) {
+      final leftAngle = angleDeg(
+        result.landmark(LM.leftShoulder, minConfidence: setupConfidence),
+        result.landmark(LM.leftElbow, minConfidence: setupConfidence),
+        result.landmark(LM.leftWrist, minConfidence: setupConfidence),
+      );
+      final rightAngle = angleDeg(
+        result.landmark(LM.rightShoulder, minConfidence: setupConfidence),
+        result.landmark(LM.rightElbow, minConfidence: setupConfidence),
+        result.landmark(LM.rightWrist, minConfidence: setupConfidence),
+      );
+      final bool leftResting =
+          leftAngle != null &&
+          leftAngle >= kSetupRestingArmMinDeg &&
+          leftAngle <= kSetupRestingArmMaxDeg;
+      final bool rightResting =
+          rightAngle != null &&
+          rightAngle >= kSetupRestingArmMinDeg &&
+          rightAngle <= kSetupRestingArmMaxDeg;
+      if (!leftResting && !rightResting) allVisible = false;
     }
 
     if (allVisible) {
@@ -1164,10 +1567,42 @@ class WorkoutViewModel extends ChangeNotifier {
       }
 
       final snapshot = _repCounter.update(result);
+      // Curl-debug-session frame metrics. Throttled to ~kDebugFrameMetricsHz
+      // independent of camera FPS so the ring buffer doesn't flood. Emits
+      // only during the active phase (no point logging frames during
+      // setupCheck or countdown — the user isn't curling yet). Gated by
+      // both the compile-time flag and the runtime preference; both must
+      // be true for the entire branch to fire.
+      if (kCurlDebugSessionEnabled &&
+          _isCurlDebugSession &&
+          _phase == WorkoutPhase.active) {
+        final intervalMs = (1000.0 / kDebugFrameMetricsHz).round();
+        final last = _lastDebugFrameMetricsAt;
+        final stamp = DateTime.now();
+        if (last == null ||
+            stamp.difference(last).inMilliseconds >= intervalMs) {
+          _lastDebugFrameMetricsAt = stamp;
+          _emitDebugFrameMetrics(result, snapshot);
+        }
+      }
+      if (kSquatDebugSessionEnabled &&
+          _isSquatDebugSession &&
+          _phase == WorkoutPhase.active) {
+        final intervalMs = (1000.0 / kSquatDebugFrameMetricsHz).round();
+        final last = _lastSquatDebugFrameMetricsAt;
+        final stamp = DateTime.now();
+        if (last == null ||
+            stamp.difference(last).inMilliseconds >= intervalMs) {
+          _lastSquatDebugFrameMetricsAt = stamp;
+          _emitSquatDebugFrameMetrics(result, snapshot);
+        }
+      }
       if (snapshot.formErrors.isNotEmpty) _onFormErrors(snapshot.formErrors);
       // Rep-commit TTS: one short number per counted rep. Guarded against set
-      // reset (where reps rolls back to 0).
-      if (snapshot.reps > _snapshot.reps) {
+      // reset (where reps rolls back to 0). Suppressed during a debug
+      // session — the user explicitly opted into silent observation.
+      final isDebugSilent = kCurlDebugSessionEnabled && _isCurlDebugSession;
+      if (!isDebugSilent && snapshot.reps > _snapshot.reps) {
         _tts.speak('${snapshot.reps}');
       }
       // Capture angle into the DTW buffer while the rep is in progress.
@@ -1235,6 +1670,15 @@ class WorkoutViewModel extends ChangeNotifier {
 
   // ── Form feedback coordinator ─────────────────────────
   void _onFormErrors(List<FormError> errors) {
+    // Curl debug session: silent observation. Skip cooldown bookkeeping,
+    // TTS, and visual highlights entirely — the analyzer's per-rep
+    // telemetry still fires (we want the data), but nothing reaches the
+    // user. `_formErrorCounts` is intentionally NOT incremented either,
+    // so the post-session summary doesn't show inflated counts that
+    // never had a chance to be seen and corrected mid-set.
+    if (kCurlDebugSessionEnabled && _isCurlDebugSession) {
+      return;
+    }
     final now = DateTime.now();
     for (final err in errors) {
       // forwardKneeShift is informational — visual highlight only, no TTS
@@ -1251,6 +1695,7 @@ class WorkoutViewModel extends ChangeNotifier {
         continue;
       }
       _lastFeedbackTime[cooldownKey] = now;
+      _formErrorCounts[err] = (_formErrorCounts[err] ?? 0) + 1;
       _tts.speak(_errorMessage(err));
       _triggerHighlight(err);
       break; // one cue per update — list order defines priority
@@ -1276,6 +1721,19 @@ class WorkoutViewModel extends ChangeNotifier {
         heelLiftRatio: heelLiftRatio,
       ),
     );
+    // Always log — not gated on debug session. Production data is valuable
+    // for threshold derivation. The Python script filters by variant.
+    _squatDebugRepIndex++;
+    TelemetryLog.instance.log(
+      'squat.rep',
+      'rep=$_squatDebugRepIndex '
+          'variant=${_squatVariant.name} '
+          'long_femur=$_squatLongFemurLifter '
+          'lean_deg=${leanDeg?.toStringAsFixed(2) ?? "null"} '
+          'knee_shift=${kneeShiftRatio?.toStringAsFixed(4) ?? "null"} '
+          'heel_lift=${heelLiftRatio?.toStringAsFixed(4) ?? "null"} '
+          'quality=${quality?.toStringAsFixed(3) ?? "null"}',
+    );
   }
 
   static FormError _cooldownKeyFor(FormError err) => switch (err) {
@@ -1285,13 +1743,14 @@ class WorkoutViewModel extends ChangeNotifier {
   };
 
   static String _errorMessage(FormError err) => switch (err) {
-    FormError.torsoSwing => "Don't swing",
-    FormError.depthSwing => "Don't rock toward the camera",
-    FormError.shoulderArc => "Stop pivoting at the hip",
+    FormError.torsoSwing => "No swinging",
+    FormError.depthSwing => "Don't rock forward",
+    FormError.shoulderArc => "Stop rotating",
     FormError.elbowDrift => 'Keep your elbow still',
+    FormError.elbowRise => 'Elbow down',
     FormError.shoulderShrug => 'Keep your shoulders down',
     FormError.backLean => "Don't lean back",
-    FormError.shortRomStart => 'Start from full extension',
+    FormError.shortRomStart => 'Full extension down',
     FormError.shortRomPeak => 'Curl all the way up',
     FormError.squatDepth => 'Go deeper',
     FormError.trunkTibia => 'Keep your chest up',
@@ -1381,6 +1840,10 @@ class WorkoutViewModel extends ChangeNotifier {
         : Duration.zero;
     _phase = WorkoutPhase.completed;
     notifyListeners();
+    final repConcentricMs = _repConcentricDurations
+        .map((d) => d?.inMilliseconds)
+        .toList(growable: false);
+    final repDepthPercents = _computeLiveRepDepthPercents();
     final event = WorkoutCompletedEvent(
       exercise: exercise,
       totalReps: _snapshot.reps,
@@ -1393,6 +1856,7 @@ class WorkoutViewModel extends ChangeNotifier {
       asymmetryDetected: asymmetryDetected,
       eccentricTooFastCount: _snapshot.eccentricTooFastCount,
       errorsTriggered: _lastFeedbackTime.keys.toSet(),
+      errorCounts: Map.unmodifiable(_formErrorCounts),
       curlRepRecords: List.unmodifiable(_curlRepRecords),
       curlBucketSummaries: _snapshotBucketsForSummary(),
       dtwSimilarities: List<double?>.unmodifiable(_repDtwSimilarities),
@@ -1402,6 +1866,8 @@ class WorkoutViewModel extends ChangeNotifier {
       bicepsSideRepMetrics: List<BicepsSideRepMetrics>.unmodifiable(
         _bicepsSideRepMetrics,
       ),
+      repConcentricMs: List<int?>.unmodifiable(repConcentricMs),
+      repDepthPercents: List<double?>.unmodifiable(repDepthPercents),
     );
     // Emit first — the UI's SummaryScreen push is latency-critical and must
     // not wait for a SQLite round-trip. Persistence is fire-and-forget; any
@@ -1442,6 +1908,14 @@ class WorkoutViewModel extends ChangeNotifier {
     _disposeCalibrationResources();
     // Best-effort persistence — fire-and-forget.
     _flushProfileIfDirty();
+    // Restore the default telemetry ring-buffer cap if this was a debug
+    // session. No-op for normal sessions (resetCap is idempotent).
+    if (kCurlDebugSessionEnabled && _isCurlDebugSession) {
+      TelemetryLog.instance.resetCap();
+    }
+    if (kSquatDebugSessionEnabled && _isSquatDebugSession) {
+      TelemetryLog.instance.resetCap();
+    }
     _tts.dispose();
     _camera.dispose();
     _pose.dispose();

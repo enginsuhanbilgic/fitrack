@@ -12,6 +12,7 @@ library;
 
 import 'package:fitrack/core/constants.dart';
 import 'package:fitrack/core/default_squat_thresholds.dart';
+import 'package:fitrack/core/squat_form_thresholds.dart';
 import 'package:fitrack/core/types.dart';
 import 'package:fitrack/engine/squat/squat_form_analyzer.dart';
 import 'package:fitrack/models/landmark_types.dart';
@@ -379,5 +380,108 @@ void main() {
       final errs = a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
       expect(errs, isNot(contains(FormError.squatDepth)));
     });
+  });
+
+  group('SquatFormAnalyzer with injected SquatFormThresholds', () {
+    test('defaults produce identical behavior to hard-coded constants', () {
+      final withDefaults = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+        formThresholds: SquatFormThresholds.defaults,
+      );
+      final withoutParam = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+      );
+      expect(withDefaults.leanWarnDeg, withoutParam.leanWarnDeg);
+    });
+
+    test(
+      'injected tight kneeShiftWarnRatio fires at value that defaults would not',
+      () {
+        // Default threshold is kSquatKneeShiftWarnRatio (0.30).
+        // We inject 0.15 — the pose below produces ratio ≈ 0.196
+        // (above 0.15, below 0.30), so strict fires but normal does not.
+        // Geometry: kneeX=0.34, ankleX=0.30 → shift=0.04
+        //           femur = sqrt((0.34-0.30)²+(0.70-0.50)²) ≈ 0.204
+        //           ratio = 0.04/0.204 ≈ 0.196.
+        const tightThresholds = SquatFormThresholds(
+          leanWarnDegBodyweight: kSquatLeanWarnDegBodyweight,
+          leanWarnDegHBBS: kSquatLeanWarnDegHBBS,
+          longFemurLeanBoost: kSquatLongFemurLeanBoost,
+          kneeShiftWarnRatio: 0.15,
+          heelLiftWarnRatio: kSquatHeelLiftWarnRatio,
+        );
+        final strict = SquatFormAnalyzer(
+          variant: SquatVariant.bodyweight,
+          longFemurLifter: false,
+          formThresholds: tightThresholds,
+        );
+        final normal = SquatFormAnalyzer(
+          variant: SquatVariant.bodyweight,
+          longFemurLifter: false,
+        );
+        final pose = buildPose(
+          hipX: 0.30,
+          hipY: 0.50,
+          kneeX: 0.34,
+          kneeY: 0.70,
+          ankleX: 0.30,
+        );
+        expect(strict.evaluate(pose), contains(FormError.forwardKneeShift));
+        expect(
+          normal.evaluate(pose),
+          isNot(contains(FormError.forwardKneeShift)),
+        );
+      },
+    );
+
+    test(
+      'injected loose heelLiftWarnRatio does NOT fire at borderline value that defaults would',
+      () {
+        // Default threshold is kSquatHeelLiftWarnRatio (0.03).
+        // We inject 0.20 — a heel lift of 0.05 is above 0.03 but below 0.20.
+        const looseThresholds = SquatFormThresholds(
+          leanWarnDegBodyweight: kSquatLeanWarnDegBodyweight,
+          leanWarnDegHBBS: kSquatLeanWarnDegHBBS,
+          longFemurLeanBoost: kSquatLongFemurLeanBoost,
+          kneeShiftWarnRatio: kSquatKneeShiftWarnRatio,
+          heelLiftWarnRatio: 0.20,
+        );
+        final loose = SquatFormAnalyzer(
+          variant: SquatVariant.bodyweight,
+          longFemurLifter: false,
+          formThresholds: looseThresholds,
+        );
+        final normal = SquatFormAnalyzer(
+          variant: SquatVariant.bodyweight,
+          longFemurLifter: false,
+        );
+        // heelY=0.93, footY=0.97 → (0.97-0.93)/leg_len fires defaults (ratio > 0.03)
+        final pose = buildPose(heelY: 0.93, footY: 0.97);
+        expect(normal.evaluate(pose), contains(FormError.heelLift));
+        expect(loose.evaluate(pose), isNot(contains(FormError.heelLift)));
+      },
+    );
+
+    test(
+      'leanWarnDeg is computed from injected thresholds, not kSquat* constants',
+      () {
+        const customThresholds = SquatFormThresholds(
+          leanWarnDegBodyweight: 60.0,
+          leanWarnDegHBBS: kSquatLeanWarnDegHBBS,
+          longFemurLeanBoost: kSquatLongFemurLeanBoost,
+          kneeShiftWarnRatio: kSquatKneeShiftWarnRatio,
+          heelLiftWarnRatio: kSquatHeelLiftWarnRatio,
+        );
+        final a = SquatFormAnalyzer(
+          variant: SquatVariant.bodyweight,
+          longFemurLifter: false,
+          formThresholds: customThresholds,
+        );
+        expect(a.leanWarnDeg, 60.0);
+        expect(a.leanWarnDeg, isNot(kSquatLeanWarnDegBodyweight));
+      },
+    );
   });
 }

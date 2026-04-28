@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../../core/constants.dart';
+import '../../core/form_thresholds.dart';
 import '../../core/rom_thresholds.dart';
 import '../../core/types.dart';
 import '../../models/landmark_types.dart';
@@ -76,16 +77,20 @@ class CurlFormAnalyzer extends CurlAnalyzer {
   /// no service import bleed into `lib/engine/`. Default to `const []` so
   /// every existing call-site (`CurlFormAnalyzer()`) compiles unchanged.
   CurlFormAnalyzer({
+    FormThresholds formThresholds = FormThresholds.medium,
     List<Duration> historicalConcentricDurations = const [],
     List<double>? referenceRepAngleSeries,
     bool enableDtwScoring = false,
     DtwScorer? dtwScorer,
-  }) : _historicalConcentricDurations = List<Duration>.unmodifiable(
+  }) : _formThresholds = formThresholds,
+       _historicalConcentricDurations = List<Duration>.unmodifiable(
          historicalConcentricDurations,
        ),
        _referenceRepAngleSeries = referenceRepAngleSeries,
        _enableDtwScoring = enableDtwScoring,
        _dtwScorer = dtwScorer ?? DtwScorer();
+
+  final FormThresholds _formThresholds;
 
   /// Score a completed rep's angle trace against the reference.
   /// Returns null when scoring is disabled or no reference is available.
@@ -462,7 +467,9 @@ class CurlFormAnalyzer extends CurlAnalyzer {
     if (swing != null) {
       final ratio = swing / torsoLen;
       if (ratio > _maxSwingRatio) _maxSwingRatio = ratio;
-      if (ratio > kSwingThreshold) errors.add(FormError.torsoSwing);
+      if (ratio > _formThresholds.swingThreshold) {
+        errors.add(FormError.torsoSwing);
+      }
     }
 
     // Forward trunk lean (side views only — front view collapses the sagittal
@@ -475,7 +482,7 @@ class CurlFormAnalyzer extends CurlAnalyzer {
       if (currentAngle != null) {
         final delta = (currentAngle - baseline).abs();
         if (delta > _maxLeanDeltaDeg) _maxLeanDeltaDeg = delta;
-        if (delta > kTorsoLeanThresholdDeg &&
+        if (delta > _formThresholds.torsoLeanThresholdDeg &&
             !errors.contains(FormError.torsoSwing)) {
           errors.add(FormError.torsoSwing);
         }
@@ -507,7 +514,9 @@ class CurlFormAnalyzer extends CurlAnalyzer {
         final disp = math.sqrt(dx * dx + dy * dy);
         final ratio = disp / torsoLen;
         if (ratio > _maxShoulderArcRatio) _maxShoulderArcRatio = ratio;
-        if (ratio > kSwingThreshold) errors.add(FormError.shoulderArc);
+        if (ratio > _formThresholds.swingThreshold) {
+          errors.add(FormError.shoulderArc);
+        }
       }
     }
 
@@ -518,7 +527,9 @@ class CurlFormAnalyzer extends CurlAnalyzer {
     if (drift != null) {
       final ratio = drift / torsoLen;
       if (ratio > _maxDriftRatio) _maxDriftRatio = ratio;
-      if (ratio > kDriftThreshold) errors.add(FormError.elbowDrift);
+      if (ratio > _formThresholds.driftThreshold) {
+        errors.add(FormError.elbowDrift);
+      }
     }
 
     return errors;
@@ -674,11 +685,15 @@ class CurlFormAnalyzer extends CurlAnalyzer {
 
   double _computeQualityScore() {
     var score = 1.0;
+    final ft = _formThresholds;
 
     // Proportional swing deduction: scale from threshold to 2x threshold.
-    if (_maxSwingRatio > kSwingThreshold) {
-      final severity = ((_maxSwingRatio - kSwingThreshold) / kSwingThreshold)
-          .clamp(0.0, 1.0);
+    if (_maxSwingRatio > ft.swingThreshold) {
+      final severity =
+          ((_maxSwingRatio - ft.swingThreshold) / ft.swingThreshold).clamp(
+            0.0,
+            1.0,
+          );
       score -= severity * kQualitySwingMaxDeduction;
     }
 
@@ -698,27 +713,29 @@ class CurlFormAnalyzer extends CurlAnalyzer {
     }
 
     // Shoulder arc — same severity curve & cap.
-    if (_maxShoulderArcRatio > kSwingThreshold) {
+    if (_maxShoulderArcRatio > ft.swingThreshold) {
       final severity =
-          ((_maxShoulderArcRatio - kSwingThreshold) / kSwingThreshold).clamp(
-            0.0,
-            1.0,
-          );
+          ((_maxShoulderArcRatio - ft.swingThreshold) / ft.swingThreshold)
+              .clamp(0.0, 1.0);
       score -= severity * kQualitySwingMaxDeduction;
     }
 
     // Forward lean deduction (side views only — same cap as swing).
-    if (_maxLeanDeltaDeg > kTorsoLeanThresholdDeg) {
+    if (_maxLeanDeltaDeg > ft.torsoLeanThresholdDeg) {
       final severity =
-          ((_maxLeanDeltaDeg - kTorsoLeanThresholdDeg) / kTorsoLeanThresholdDeg)
+          ((_maxLeanDeltaDeg - ft.torsoLeanThresholdDeg) /
+                  ft.torsoLeanThresholdDeg)
               .clamp(0.0, 1.0);
       score -= severity * kQualitySwingMaxDeduction;
     }
 
     // Proportional drift deduction.
-    if (_maxDriftRatio > kDriftThreshold) {
-      final severity = ((_maxDriftRatio - kDriftThreshold) / kDriftThreshold)
-          .clamp(0.0, 1.0);
+    if (_maxDriftRatio > ft.driftThreshold) {
+      final severity =
+          ((_maxDriftRatio - ft.driftThreshold) / ft.driftThreshold).clamp(
+            0.0,
+            1.0,
+          );
       score -= severity * kQualityDriftMaxDeduction;
     }
 
@@ -810,6 +827,24 @@ class CurlFormAnalyzer extends CurlAnalyzer {
 
   @override
   double get maxBackLeanDegThisRep => 0.0;
+
+  @override
+  double get maxShrugRatioThisRep => 0.0;
+
+  @override
+  double get maxElbowRiseRatioThisRep => 0.0;
+
+  @override
+  bool get activeArmIsLeftThisRep => true;
+
+  @override
+  double get leftArmConfidenceSumThisRep => 0.0;
+
+  @override
+  double get rightArmConfidenceSumThisRep => 0.0;
+
+  @override
+  bool? get facingRightThisRep => null;
 
   /// Torso angle from vertical for side-view lean detection.
   /// Uses the near-side shoulder→hip segment. Returns null when either

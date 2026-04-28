@@ -1,4 +1,6 @@
 import '../core/constants.dart';
+import '../core/form_thresholds.dart';
+import '../core/squat_form_thresholds.dart';
 import '../core/types.dart';
 import '../models/pose_result.dart';
 import 'curl/curl_form_analyzer_extras.dart';
@@ -100,8 +102,10 @@ class RepCounter {
     List<Duration> curlHistoricalConcentricDurations = const [],
     List<double>? curlReferenceRepAngleSeries,
     bool curlEnableDtwScoring = false,
+    FormThresholds curlFormThresholds = FormThresholds.medium,
     SquatVariant squatVariant = SquatVariant.bodyweight,
     bool squatLongFemurLifter = false,
+    SquatFormThresholds squatFormThresholds = SquatFormThresholds.defaults,
     SquatRepCommitCallback? onSquatRepCommit,
   }) : _onSquatRepCommit = onSquatRepCommit {
     _strategy = _buildStrategy(
@@ -113,8 +117,10 @@ class RepCounter {
       curlHistoricalConcentricDurations: curlHistoricalConcentricDurations,
       curlReferenceRepAngleSeries: curlReferenceRepAngleSeries,
       curlEnableDtwScoring: curlEnableDtwScoring,
+      curlFormThresholds: curlFormThresholds,
       squatVariant: squatVariant,
       squatLongFemurLifter: squatLongFemurLifter,
+      squatFormThresholds: squatFormThresholds,
     );
   }
 
@@ -127,8 +133,10 @@ class RepCounter {
     List<Duration> curlHistoricalConcentricDurations = const [],
     List<double>? curlReferenceRepAngleSeries,
     bool curlEnableDtwScoring = false,
+    FormThresholds curlFormThresholds = FormThresholds.medium,
     SquatVariant squatVariant = SquatVariant.bodyweight,
     bool squatLongFemurLifter = false,
+    SquatFormThresholds squatFormThresholds = SquatFormThresholds.defaults,
   }) => switch (exercise) {
     ExerciseType.bicepsCurlFront => CurlStrategy(
       exerciseType: ExerciseType.bicepsCurlFront,
@@ -140,6 +148,7 @@ class RepCounter {
       historicalConcentricDurations: curlHistoricalConcentricDurations,
       referenceRepAngleSeries: curlReferenceRepAngleSeries,
       enableDtwScoring: curlEnableDtwScoring,
+      formThresholds: curlFormThresholds,
     ),
     ExerciseType.bicepsCurlSide => CurlStrategy(
       exerciseType: ExerciseType.bicepsCurlSide,
@@ -153,6 +162,7 @@ class RepCounter {
       historicalConcentricDurations: curlHistoricalConcentricDurations,
       referenceRepAngleSeries: curlReferenceRepAngleSeries,
       enableDtwScoring: curlEnableDtwScoring,
+      formThresholds: curlFormThresholds,
     ),
     // ignore: deprecated_member_use_from_same_package
     ExerciseType.bicepsCurl => CurlStrategy(
@@ -164,10 +174,12 @@ class RepCounter {
       historicalConcentricDurations: curlHistoricalConcentricDurations,
       referenceRepAngleSeries: curlReferenceRepAngleSeries,
       enableDtwScoring: curlEnableDtwScoring,
+      formThresholds: curlFormThresholds,
     ),
     ExerciseType.squat => SquatStrategy(
       variant: squatVariant,
       longFemurLifter: squatLongFemurLifter,
+      formThresholds: squatFormThresholds,
     ),
     ExerciseType.pushUp => PushUpStrategy(),
   };
