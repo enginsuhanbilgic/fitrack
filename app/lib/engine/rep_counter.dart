@@ -10,7 +10,66 @@ import 'curl/curl_view_detector.dart';
 import 'squat/squat_form_analyzer.dart';
 import 'push_up/push_up_form_analyzer.dart';
 
-/// Snapshot returned after every frame — everything the UI needs.
+// ── Per-arm state machine (biceps curl only) ─────────────
+
+/// Holds all state for one arm's rep-counting FSM.
+class _ArmFsm {
+  RepState state = RepState.idle;
+  int reps = 0;
+  final List<double> _buf = [];
+  bool reachedPeak = false;
+  DateTime? _lastTransition;
+  DateTime? _stateStart;
+
+  static const int _window = 3;
+
+  void addAngle(double angle) {
+    _buf.add(angle);
+    if (_buf.length > _window) _buf.removeAt(0);
+  }
+
+  double? get smoothed {
+    if (_buf.isEmpty) return null;
+    return _buf.reduce((a, b) => a + b) / _buf.length;
+  }
+
+  bool get isDebouncing {
+    if (_lastTransition == null) return false;
+    return DateTime.now().difference(_lastTransition!) < kStateDebounce;
+  }
+
+  bool get isStuck {
+    if (state == RepState.idle || _stateStart == null) return false;
+    return DateTime.now().difference(_stateStart!) > kStuckStateLimit;
+  }
+
+  void transition(RepState next) {
+    state = next;
+    final now = DateTime.now();
+    _lastTransition = now;
+    _stateStart = now;
+  }
+
+  void forceIdle() {
+    state = RepState.idle;
+    reachedPeak = false;
+    _stateStart = null;
+    _lastTransition = DateTime.now(); // keeps debounce active after reset
+  }
+
+  void reset() {
+    state = RepState.idle;
+    reps = 0;
+    _buf.clear();
+    reachedPeak = false;
+    _lastTransition = null;
+    _stateStart = null;
+  }
+}
+
+// ── RepSnapshot ──────────────────────────────────────────
+
+/// Everything the UI needs after every frame.
 class RepSnapshot {
   final int reps;
   final int sets;
@@ -24,6 +83,9 @@ class RepSnapshot {
   final bool fatigueDetected;
   final int eccentricTooFastCount;
   final Set<FormError> errorsTriggered;
+  /// Per-arm rep counts — only meaningful for bicepsCurl; both 0 otherwise.
+  final int leftReps;
+  final int rightReps;
 
   const RepSnapshot({
     required this.reps,
@@ -38,31 +100,25 @@ class RepSnapshot {
     this.fatigueDetected = false,
     this.eccentricTooFastCount = 0,
     this.errorsTriggered = const {},
+    this.leftReps = 0,
+    this.rightReps = 0,
   });
 }
 
-/// Multi-exercise rep counter. Drives a 4-state FSM for biceps curl
-/// and a 4-state FSM for squat / push-up. Each exercise has its own
-/// form analyzer for quality evaluation.
+// ── RepCounter ───────────────────────────────────────────
+
+/// Multi-exercise rep counter.
 ///
-/// Biceps curl (elbow angle θ):
-///   IDLE ──[θ < 150°]──► CONCENTRIC ──[θ ≤ 40°]──► PEAK
-///     ▲                                                │ [θ > 50°]
-///     └───────────[θ ≥ 160°, rep++]──── ECCENTRIC ◄───┘
+/// Biceps curl uses TWO independent per-arm FSMs so left and right reps
+/// are tracked separately. The primary arm (determined by view lock) also
+/// drives form analysis; the secondary arm only counts reps.
 ///
-/// Squat (knee angle θ, + hip Y direction):
-///   IDLE ──[θ < 160°]──► DESCENDING ──[θ < 90°]──► BOTTOM
-///     ▲                                                │ [hipY decreasing]
-///     └───────────[θ > 160°, rep++]──── ASCENDING ◄───┘
-///
-/// Push-up (elbow angle θ):
-///   IDLE ──[θ < 160°]──► DESCENDING ──[θ < 90°]──► BOTTOM
-///     ▲                                                │ [θ > 90°]
-///     └───────────[θ > 160°, rep++]──── ASCENDING ◄───┘
+/// Squat and push-up use the original single 4-state FSM.
 class RepCounter {
   final ExerciseType exercise;
   final ExerciseSide side;
 
+  // ── Form analyzers ────────────────────────────────────
   final CurlFormAnalyzer _curlForm = CurlFormAnalyzer();
   final CurlViewDetector _viewDetector = CurlViewDetector();
   CurlCameraView _lockedView = CurlCameraView.unknown;
@@ -70,92 +126,88 @@ class RepCounter {
   final SquatFormAnalyzer _squatForm = SquatFormAnalyzer();
   final PushUpFormAnalyzer _pushUpForm = PushUpFormAnalyzer();
 
+  // ── Curl per-arm FSMs ─────────────────────────────────
+  final _ArmFsm _leftArm = _ArmFsm();
+  final _ArmFsm _rightArm = _ArmFsm();
+  // Which arm currently owns form analysis (null = neither, mid-rep).
+  bool? _formArmIsLeft;
+
+  // ── Squat / push-up single FSM ────────────────────────
   RepState _state = RepState.idle;
   int _reps = 0;
   int _sets = 1;
   double? _lastAngle;
   List<FormError> _lastErrors = const [];
 
-  // Timing & Debounce
   DateTime? _lastTransitionTime;
   DateTime? _stateStartTime;
 
-  // Smoothing: small ring buffer for angle.
   final List<double> _angleBuffer = [];
   static const int _smoothWindow = 3;
 
-  // Squat: track previous hip Y to detect rising direction.
   double? _prevHipY;
-
-  // Long-femur detection (squat only)
   final List<double> _repMinAngles = [];
   bool _longFemurDetected = false;
   double _effectiveSquatBottomAngle = kSquatBottomAngle;
   double? _minAngleThisRep;
 
-  // Curl: track whether PEAK was reached (for shortRom detection)
-  bool _curlReachedPeak = false;
-
-  // Curl: continuous view re-detection (active phase hysteresis)
+  // ── Active-phase view re-detection (curl) ─────────────
   CurlCameraView _pendingView = CurlCameraView.unknown;
   int _pendingViewStreak = 0;
 
   RepCounter({this.exercise = ExerciseType.bicepsCurl, this.side = ExerciseSide.both});
+
+  // ── Public API ────────────────────────────────────────
 
   RepSnapshot update(PoseResult result) {
     final now = DateTime.now();
     final angle = _computeAngle(result);
     _lastAngle = angle;
 
-    if (angle == null) {
-      return _snapshot();
-    }
+    if (angle == null) return _snapshot();
 
-    // Simple moving-average smoothing on the angle.
-    _angleBuffer.add(angle);
-    if (_angleBuffer.length > _smoothWindow) _angleBuffer.removeAt(0);
-    final smoothed = _angleBuffer.reduce((a, b) => a + b) / _angleBuffer.length;
+    if (exercise == ExerciseType.bicepsCurl) {
+      // Curl: independent per-arm FSMs; view re-detection runs in background.
+      if (_lockedView != CurlCameraView.unknown) {
+        _updateActiveViewDetection(result);
+      }
+      _runCurlFsm(result);
+    } else {
+      // Squat / push-up: shared single-angle FSM.
+      _angleBuffer.add(angle);
+      if (_angleBuffer.length > _smoothWindow) _angleBuffer.removeAt(0);
+      final smoothed = _angleBuffer.reduce((a, b) => a + b) / _angleBuffer.length;
 
-    // Stuck-State Timer (Zombie detection)
-    if (_state != RepState.idle && _stateStartTime != null) {
-      if (now.difference(_stateStartTime!) > kStuckStateLimit) {
-        _resetToIdle();
+      if (_state != RepState.idle && _stateStartTime != null) {
+        if (now.difference(_stateStartTime!) > kStuckStateLimit) {
+          _resetToIdle();
+          return _snapshot();
+        }
+      }
+      if (_lastTransitionTime != null &&
+          now.difference(_lastTransitionTime!) < kStateDebounce) {
         return _snapshot();
       }
-    }
 
-    // Transition Lockout (Debounce)
-    if (_lastTransitionTime != null &&
-        now.difference(_lastTransitionTime!) < kStateDebounce) {
-      return _snapshot();
-    }
-
-    // Continuous view re-detection for curl (active phase).
-    if (exercise == ExerciseType.bicepsCurl && _lockedView != CurlCameraView.unknown) {
-      _updateActiveViewDetection(result);
-    }
-
-    final oldState = _state;
-
-    switch (exercise) {
-      case ExerciseType.bicepsCurl:
-        _runCurlFsm(smoothed, result);
-      case ExerciseType.squat:
-        _runSquatFsm(smoothed, result);
-      case ExerciseType.pushUp:
-        _runPushUpFsm(smoothed, result);
-    }
-
-    if (_state != oldState) {
-      _lastTransitionTime = now;
-      _stateStartTime = now;
+      final oldState = _state;
+      switch (exercise) {
+        case ExerciseType.squat:
+          _runSquatFsm(smoothed, result);
+        case ExerciseType.pushUp:
+          _runPushUpFsm(smoothed, result);
+        default:
+          break;
+      }
+      if (_state != oldState) {
+        _lastTransitionTime = now;
+        _stateStartTime = now;
+      }
     }
 
     return _snapshot();
   }
 
-  /// Call once per frame during SETUP_CHECK and COUNTDOWN (biceps curl only).
-  /// Returns the current detected view; [CurlCameraView.unknown] until locked.
+  /// Feed frames during SETUP_CHECK and COUNTDOWN to lock the camera view.
   CurlCameraView updateSetupView(PoseResult pose) {
     if (exercise != ExerciseType.bicepsCurl) return CurlCameraView.unknown;
     final view = _viewDetector.update(pose);
@@ -166,63 +218,163 @@ class RepCounter {
     return _lockedView;
   }
 
-  // ── Biceps Curl FSM ───────────────────────────────────
+  /// Start a new set — resets reps, keeps set count and locked view.
+  void nextSet() {
+    _sets++;
+    _reps = 0;
+    _leftArm.reset();
+    _rightArm.reset();
+    _formArmIsLeft = null;
+    _angleBuffer.clear();
+    _prevHipY = null;
+    _minAngleThisRep = null;
+    _repMinAngles.clear();
+    _longFemurDetected = false;
+    _effectiveSquatBottomAngle = kSquatBottomAngle;
+    // Intentionally keep _lockedView and _viewDetector — the user is in the
+    // same position between sets, so the detected view remains valid.
+    _curlForm.reset();
+    _curlForm.setView(_lockedView); // re-apply view after form reset
+    _squatForm.reset();
+    _pushUpForm.reset();
+    _state = RepState.idle;
+    _stateStartTime = null;
+    _lastErrors = const [];
+  }
 
-  void _runCurlFsm(double smoothed, PoseResult result) {
-    switch (_state) {
+  /// Full reset — clears everything including view detection.
+  void reset() {
+    _reps = 0;
+    _sets = 1;
+    _state = RepState.idle;
+    _leftArm.reset();
+    _rightArm.reset();
+    _formArmIsLeft = null;
+    _angleBuffer.clear();
+    _prevHipY = null;
+    _minAngleThisRep = null;
+    _repMinAngles.clear();
+    _longFemurDetected = false;
+    _effectiveSquatBottomAngle = kSquatBottomAngle;
+    _viewDetector.reset();
+    _lockedView = CurlCameraView.unknown;
+    _pendingView = CurlCameraView.unknown;
+    _pendingViewStreak = 0;
+    _curlForm.reset();
+    _squatForm.reset();
+    _pushUpForm.reset();
+    _stateStartTime = null;
+    _lastErrors = const [];
+    _lastAngle = null;
+  }
+
+  // ── Biceps Curl per-arm FSM ───────────────────────────
+
+  void _runCurlFsm(PoseResult result) {
+    final now = DateTime.now();
+
+    final lAngle = angleDeg(
+      result.landmark(LM.leftShoulder,  minConfidence: kMinLandmarkConfidence),
+      result.landmark(LM.leftElbow,     minConfidence: kMinLandmarkConfidence),
+      result.landmark(LM.leftWrist,     minConfidence: kMinLandmarkConfidence),
+    );
+    final rAngle = angleDeg(
+      result.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
+      result.landmark(LM.rightElbow,    minConfidence: kMinLandmarkConfidence),
+      result.landmark(LM.rightWrist,    minConfidence: kMinLandmarkConfidence),
+    );
+
+    if (lAngle != null) _leftArm.addAngle(lAngle);
+    if (rAngle != null) _rightArm.addAngle(rAngle);
+
+    _stepArmFsm(_leftArm,  isLeft: true,  result: result, now: now);
+    _stepArmFsm(_rightArm, isLeft: false, result: result, now: now);
+
+    // Show the angle of whichever arm is currently moving.
+    if (_leftArm.state != RepState.idle && _leftArm.smoothed != null) {
+      _lastAngle = _leftArm.smoothed;
+    } else if (_rightArm.state != RepState.idle && _rightArm.smoothed != null) {
+      _lastAngle = _rightArm.smoothed;
+    }
+  }
+
+  void _stepArmFsm(
+    _ArmFsm arm, {
+    required bool isLeft,
+    required PoseResult result,
+    required DateTime now,
+  }) {
+    if (arm.isStuck) {
+      arm.forceIdle();
+      if (_formArmIsLeft == isLeft) _formArmIsLeft = null;
+      return;
+    }
+    if (arm.isDebouncing) return;
+
+    final smoothed = arm.smoothed;
+    if (smoothed == null) return;
+
+    // Only the arm that claimed form-analysis ownership writes to _lastErrors
+    // and calls form-analyzer lifecycle methods.
+    final bool isPrimary = _formArmIsLeft == isLeft;
+
+    switch (arm.state) {
       case RepState.idle:
         if (smoothed < kCurlStartAngle) {
-          _state = RepState.concentric;
-          _curlReachedPeak = false;
-          _curlForm.onRepStart(result);
+          arm.transition(RepState.concentric);
+          arm.reachedPeak = false;
+          // Claim form analysis if no arm currently owns it.
+          if (_formArmIsLeft == null) {
+            _formArmIsLeft = isLeft;
+            _curlForm.onRepStart(result);
+          }
         }
       case RepState.concentric:
-        _lastErrors = _curlForm.evaluate(result);
+        if (isPrimary) _lastErrors = _curlForm.evaluate(result);
         if (smoothed <= kCurlPeakAngle) {
-          _state = RepState.peak;
-          _curlReachedPeak = true;
-          _curlForm.onPeakReached();
+          arm.transition(RepState.peak);
+          arm.reachedPeak = true;
+          if (isPrimary) _curlForm.onPeakReached();
         } else if (smoothed > kCurlStartAngle) {
-          // Abandoned rep — never reached peak
-          if (!_curlReachedPeak) _curlForm.onAbortedRep();
-          _lastErrors = [..._lastErrors, ..._curlForm.consumeCompletionErrors()];
-          _resetToIdle();
+          // Abandoned rep — never reached peak.
+          if (!arm.reachedPeak && isPrimary) _curlForm.onAbortedRep();
+          if (isPrimary) {
+            _lastErrors = [..._lastErrors, ..._curlForm.consumeCompletionErrors()];
+            _formArmIsLeft = null;
+          }
+          arm.forceIdle();
         }
       case RepState.peak:
         if (smoothed > kCurlPeakExitAngle) {
-          _state = RepState.eccentric;
-          _curlForm.onEccentricStart();
+          arm.transition(RepState.eccentric);
+          if (isPrimary) _curlForm.onEccentricStart();
         }
       case RepState.eccentric:
-        _lastErrors = _curlForm.evaluate(result);
+        if (isPrimary) _lastErrors = _curlForm.evaluate(result);
         if (smoothed >= kCurlEndAngle) {
-          _reps++;
-          // Record bilateral angles for asymmetry detection (front view).
-          _curlForm.recordBilateralAngles(
-            _computeBilateralAngle(result, left: true),
-            _computeBilateralAngle(result, left: false),
-          );
-          final completionErrors = _curlForm.consumeCompletionErrors();
-          _lastErrors = [..._lastErrors, ...completionErrors];
-          _curlForm.onRepEnd();
-          _resetToIdle();
+          arm.reps++;
+          if (isPrimary) {
+            _curlForm.recordBilateralAngles(
+              _computeBilateralAngle(result, left: true),
+              _computeBilateralAngle(result, left: false),
+            );
+            _lastErrors = [..._lastErrors, ..._curlForm.consumeCompletionErrors()];
+            _curlForm.onRepEnd();
+            _formArmIsLeft = null;
+          }
+          arm.forceIdle();
         }
       default:
         break;
     }
   }
 
-  // ── Curl Active-Phase View Re-Detection ───────────────
+  // ── Active-Phase View Re-Detection ───────────────────
 
-  /// Runs every frame during ACTIVE phase (curl only).
-  /// Classifies the current frame and increments a streak counter when
-  /// consecutive frames agree on a view different from the locked one.
-  /// Only applies the switch when the FSM is idle — never mid-rep.
   void _updateActiveViewDetection(PoseResult result) {
     final candidate = _viewDetector.classifyFrame(result);
 
     if (candidate == CurlCameraView.unknown || candidate == _lockedView) {
-      // No evidence for a different view — reset streak.
       _pendingView = CurlCameraView.unknown;
       _pendingViewStreak = 0;
       return;
@@ -231,14 +383,14 @@ class RepCounter {
     if (candidate == _pendingView) {
       _pendingViewStreak++;
     } else {
-      // New candidate — start fresh streak.
       _pendingView = candidate;
       _pendingViewStreak = 1;
     }
 
-    // Only switch when hysteresis threshold met AND FSM is idle (never mid-rep).
+    // Switch only when both arms are idle — never mid-rep.
     if (_pendingViewStreak >= kViewRedetectHysteresisFrames &&
-        _state == RepState.idle) {
+        _leftArm.state == RepState.idle &&
+        _rightArm.state == RepState.idle) {
       _lockedView = _pendingView;
       _curlForm.setView(_lockedView);
       _pendingView = CurlCameraView.unknown;
@@ -251,7 +403,6 @@ class RepCounter {
   void _runSquatFsm(double smoothed, PoseResult result) {
     final hipY = _computeHipY(result);
 
-    // Track minimum knee angle during active descent for long-femur detection.
     if (_state == RepState.descending || _state == RepState.bottom) {
       if (_minAngleThisRep == null || smoothed < _minAngleThisRep!) {
         _minAngleThisRep = smoothed;
@@ -272,8 +423,6 @@ class RepCounter {
           _resetToIdle();
         }
       case RepState.bottom:
-        // Transition to ascending only when hip is actually rising.
-        // In screen coordinates Y=0 is top, so rising = Y decreasing.
         if (hipY != null && _prevHipY != null && hipY < _prevHipY!) {
           _state = RepState.ascending;
         }
@@ -284,7 +433,6 @@ class RepCounter {
           final completionErrors = _squatForm.consumeCompletionErrors(_effectiveSquatBottomAngle);
           _lastErrors = [..._lastErrors, ...completionErrors];
 
-          // Long-femur detection
           if (!_longFemurDetected && _minAngleThisRep != null) {
             _repMinAngles.add(_minAngleThisRep!);
             if (_repMinAngles.length >= kLongFemurDetectReps) {
@@ -349,9 +497,7 @@ class RepCounter {
     _state = RepState.idle;
     _prevHipY = null;
     _minAngleThisRep = null;
-    _curlReachedPeak = false;
     _stateStartTime = null;
-    // Apply any deferred view switch now that we're back to idle.
     if (_pendingViewStreak >= kViewRedetectHysteresisFrames &&
         _pendingView != CurlCameraView.unknown) {
       _lockedView = _pendingView;
@@ -361,110 +507,49 @@ class RepCounter {
     }
   }
 
-  /// Start a new set — resets reps, keeps set count.
-  void nextSet() {
-    _sets++;
-    _reps = 0;
-    _angleBuffer.clear();
-    _prevHipY = null;
-    _minAngleThisRep = null;
-    _curlReachedPeak = false;
-    _repMinAngles.clear();
-    _longFemurDetected = false;
-    _effectiveSquatBottomAngle = kSquatBottomAngle;
-    _viewDetector.reset();
-    _lockedView = CurlCameraView.unknown;
-    _pendingView = CurlCameraView.unknown;
-    _pendingViewStreak = 0;
-    _curlForm.reset();
-    _squatForm.reset();
-    _pushUpForm.reset();
-    _state = RepState.idle;
-    _stateStartTime = null;
-    _lastErrors = const [];
-  }
-
-  /// Full reset.
-  void reset() {
-    _reps = 0;
-    _sets = 1;
-    _state = RepState.idle;
-    _angleBuffer.clear();
-    _prevHipY = null;
-    _minAngleThisRep = null;
-    _curlReachedPeak = false;
-    _repMinAngles.clear();
-    _longFemurDetected = false;
-    _effectiveSquatBottomAngle = kSquatBottomAngle;
-    _viewDetector.reset();
-    _lockedView = CurlCameraView.unknown;
-    _pendingView = CurlCameraView.unknown;
-    _pendingViewStreak = 0;
-    _curlForm.reset();
-    _squatForm.reset();
-    _pushUpForm.reset();
-    _stateStartTime = null;
-    _lastErrors = const [];
-    _lastAngle = null;
-  }
-
   double? _computeAngle(PoseResult r) {
     switch (exercise) {
       case ExerciseType.bicepsCurl:
-        final leftAngle = angleDeg(
-          r.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.leftElbow,    minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.leftWrist,    minConfidence: kMinLandmarkConfidence),
+        final l = angleDeg(
+          r.landmark(LM.leftShoulder,  minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftElbow,     minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftWrist,     minConfidence: kMinLandmarkConfidence),
         );
-        final rightAngle = angleDeg(
+        final rr = angleDeg(
           r.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
           r.landmark(LM.rightElbow,    minConfidence: kMinLandmarkConfidence),
           r.landmark(LM.rightWrist,    minConfidence: kMinLandmarkConfidence),
         );
-        // In side views, prefer the near-side arm but fall back to the far-side
-        // arm if the near side becomes occluded (e.g. user rotates mid-session).
-        // In front/unknown, respect the `side` parameter.
-        switch (_lockedView) {
-          case CurlCameraView.sideLeft:  return leftAngle ?? rightAngle;
-          case CurlCameraView.sideRight: return rightAngle ?? leftAngle;
-          case CurlCameraView.front:
-          case CurlCameraView.unknown:
-            switch (side) {
-              case ExerciseSide.left:  return leftAngle;
-              case ExerciseSide.right: return rightAngle;
-              case ExerciseSide.both:
-                if (leftAngle != null && rightAngle != null) return (leftAngle + rightAngle) / 2.0;
-                return leftAngle ?? rightAngle;
-            }
-        }
+        if (l != null && rr != null) return (l + rr) / 2.0;
+        return l ?? rr;
 
       case ExerciseType.squat:
-        final leftAngle = angleDeg(
-          r.landmark(LM.leftHip, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.leftKnee, minConfidence: kMinLandmarkConfidence),
+        final l = angleDeg(
+          r.landmark(LM.leftHip,   minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftKnee,  minConfidence: kMinLandmarkConfidence),
           r.landmark(LM.leftAnkle, minConfidence: kMinLandmarkConfidence),
         );
-        final rightAngle = angleDeg(
-          r.landmark(LM.rightHip, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.rightKnee, minConfidence: kMinLandmarkConfidence),
+        final rr = angleDeg(
+          r.landmark(LM.rightHip,   minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightKnee,  minConfidence: kMinLandmarkConfidence),
           r.landmark(LM.rightAnkle, minConfidence: kMinLandmarkConfidence),
         );
-        if (leftAngle != null && rightAngle != null) return (leftAngle + rightAngle) / 2.0;
-        return leftAngle ?? rightAngle;
+        if (l != null && rr != null) return (l + rr) / 2.0;
+        return l ?? rr;
 
       case ExerciseType.pushUp:
-        final leftAngle = angleDeg(
+        final l = angleDeg(
           r.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.leftElbow, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.leftWrist, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftElbow,    minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.leftWrist,    minConfidence: kMinLandmarkConfidence),
         );
-        final rightAngle = angleDeg(
+        final rr = angleDeg(
           r.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.rightElbow, minConfidence: kMinLandmarkConfidence),
-          r.landmark(LM.rightWrist, minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightElbow,    minConfidence: kMinLandmarkConfidence),
+          r.landmark(LM.rightWrist,    minConfidence: kMinLandmarkConfidence),
         );
-        if (leftAngle != null && rightAngle != null) return (leftAngle + rightAngle) / 2.0;
-        return leftAngle ?? rightAngle;
+        if (l != null && rr != null) return (l + rr) / 2.0;
+        return l ?? rr;
     }
   }
 
@@ -484,24 +569,40 @@ class RepCounter {
   }
 
   double? _computeHipY(PoseResult r) {
-    final left = r.landmark(LM.leftHip, minConfidence: kMinLandmarkConfidence);
+    final left  = r.landmark(LM.leftHip,  minConfidence: kMinLandmarkConfidence);
     final right = r.landmark(LM.rightHip, minConfidence: kMinLandmarkConfidence);
     if (left != null && right != null) return (left.y + right.y) / 2.0;
     return left?.y ?? right?.y;
   }
 
-  RepSnapshot _snapshot() => RepSnapshot(
-        reps: _reps,
-        sets: _sets,
-        state: _state,
-        jointAngle: _lastAngle,
-        formErrors: _lastErrors,
-        detectedView: _lockedView,
-        lastRepQuality: exercise == ExerciseType.bicepsCurl ? _curlForm.lastRepQuality : null,
-        averageQuality: exercise == ExerciseType.bicepsCurl ? _curlForm.averageQuality : null,
-        repQualities: exercise == ExerciseType.bicepsCurl ? _curlForm.repQualities : const [],
-        fatigueDetected: exercise == ExerciseType.bicepsCurl ? _curlForm.fatigueDetected : false,
-        eccentricTooFastCount: exercise == ExerciseType.bicepsCurl ? _curlForm.eccentricTooFastCount : 0,
-        errorsTriggered: const {},
-      );
+  RepSnapshot _snapshot() {
+    final int leftR  = _leftArm.reps;
+    final int rightR = _rightArm.reps;
+    final int totalR = exercise == ExerciseType.bicepsCurl ? leftR + rightR : _reps;
+
+    final RepState displayState = exercise == ExerciseType.bicepsCurl
+        ? (_leftArm.state != RepState.idle
+            ? _leftArm.state
+            : _rightArm.state != RepState.idle
+                ? _rightArm.state
+                : RepState.idle)
+        : _state;
+
+    return RepSnapshot(
+      reps: totalR,
+      sets: _sets,
+      state: displayState,
+      jointAngle: _lastAngle,
+      formErrors: _lastErrors,
+      detectedView: _lockedView,
+      lastRepQuality:      exercise == ExerciseType.bicepsCurl ? _curlForm.lastRepQuality  : null,
+      averageQuality:      exercise == ExerciseType.bicepsCurl ? _curlForm.averageQuality  : null,
+      repQualities:        exercise == ExerciseType.bicepsCurl ? _curlForm.repQualities    : const [],
+      fatigueDetected:     exercise == ExerciseType.bicepsCurl ? _curlForm.fatigueDetected : false,
+      eccentricTooFastCount: exercise == ExerciseType.bicepsCurl ? _curlForm.eccentricTooFastCount : 0,
+      errorsTriggered: const {},
+      leftReps:  exercise == ExerciseType.bicepsCurl ? leftR  : 0,
+      rightReps: exercise == ExerciseType.bicepsCurl ? rightR : 0,
+    );
+  }
 }

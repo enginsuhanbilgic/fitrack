@@ -17,23 +17,25 @@ const double kFarSideConfidenceGate = 0.4;
 
 // ── Biceps Curl FSM thresholds (degrees) ────────────────
 /// IDLE → CONCENTRIC when elbow angle drops below this.
-const double kCurlStartAngle = 150.0;
+const double kCurlStartAngle = 155.0;
 
 /// CONCENTRIC → PEAK when elbow angle reaches this.
-const double kCurlPeakAngle = 40.0;
+/// Raised from 40° — most users stop at 45-60° and still perform a full curl.
+const double kCurlPeakAngle = 55.0;
 
 /// PEAK → ECCENTRIC when elbow angle exceeds peak + hysteresis.
-const double kCurlPeakExitAngle = 50.0;
+const double kCurlPeakExitAngle = 65.0;
 
 /// ECCENTRIC → IDLE when elbow angle reaches this → rep++.
-const double kCurlEndAngle = 160.0;
+/// Lowered from 160° — full lockout not required for rep to count.
+const double kCurlEndAngle = 150.0;
 
 // ── Form feedback thresholds ────────────────────────────
 /// Torso swing: ΔX_shoulder / L_torso.
-const double kSwingThreshold = 0.15;
+const double kSwingThreshold = 0.35;
 
 /// Elbow drift: ΔX_elbow / L_torso.
-const double kDriftThreshold = 0.10;
+const double kDriftThreshold = 0.25;
 
 // ── Timing ──────────────────────────────────────────────
 /// Minimum seconds between two audio cues of the same type.
