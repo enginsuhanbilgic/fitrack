@@ -31,10 +31,15 @@ class PushUpFormAnalyzer {
     // Angle at hip in shoulder→hip→ankle triangle.
     // A straight body = 180°. Deviation = |180 - angle|.
     final hipAngle = angleDeg(
-      current.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
-      current.landmark(LM.leftHip, minConfidence: kMinLandmarkConfidence),
-      current.landmark(LM.leftAnkle, minConfidence: kMinLandmarkConfidence),
-    );
+          current.landmark(LM.leftShoulder,  minConfidence: kMinLandmarkConfidence),
+          current.landmark(LM.leftHip,       minConfidence: kMinLandmarkConfidence),
+          current.landmark(LM.leftAnkle,     minConfidence: kMinLandmarkConfidence),
+        ) ??
+        angleDeg(
+          current.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
+          current.landmark(LM.rightHip,      minConfidence: kMinLandmarkConfidence),
+          current.landmark(LM.rightAnkle,    minConfidence: kMinLandmarkConfidence),
+        );
 
     if (hipAngle != null && (180.0 - hipAngle).abs() > kHipSagDeviation) {
       errors.add(FormError.hipSag);
