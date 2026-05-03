@@ -29,13 +29,21 @@ class SquatFormAnalyzer {
     final errors = <FormError>[];
 
     final trunk = angleToVertical(
-      current.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
-      current.landmark(LM.leftHip, minConfidence: kMinLandmarkConfidence),
-    );
+          current.landmark(LM.leftShoulder,  minConfidence: kMinLandmarkConfidence),
+          current.landmark(LM.leftHip,       minConfidence: kMinLandmarkConfidence),
+        ) ??
+        angleToVertical(
+          current.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
+          current.landmark(LM.rightHip,      minConfidence: kMinLandmarkConfidence),
+        );
     final tibia = angleToVertical(
-      current.landmark(LM.leftKnee, minConfidence: kMinLandmarkConfidence),
-      current.landmark(LM.leftAnkle, minConfidence: kMinLandmarkConfidence),
-    );
+          current.landmark(LM.leftKnee,  minConfidence: kMinLandmarkConfidence),
+          current.landmark(LM.leftAnkle, minConfidence: kMinLandmarkConfidence),
+        ) ??
+        angleToVertical(
+          current.landmark(LM.rightKnee,  minConfidence: kMinLandmarkConfidence),
+          current.landmark(LM.rightAnkle, minConfidence: kMinLandmarkConfidence),
+        );
 
     if (trunk != null && tibia != null && (trunk - tibia).abs() > kTrunkTibiaDeviation) {
       errors.add(FormError.trunkTibia);
