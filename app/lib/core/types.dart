@@ -65,7 +65,10 @@ class ExerciseRequirements {
   static ExerciseRequirements forExercise(ExerciseType type) {
     switch (type) {
       case ExerciseType.bicepsCurl:
-        return const ExerciseRequirements([11, 12, 13, 14, 15, 16, 23, 24]);
+        // Hips removed — only upper body needed. Side-view users may have
+        // the far-side arm below confidence; setup accepts both shoulders +
+        // at least one complete arm (checked separately in workout_screen).
+        return const ExerciseRequirements([11, 12, 13, 14, 15, 16]);
       case ExerciseType.squat:
         return const ExerciseRequirements([23, 24, 25, 26, 27, 28]);
       case ExerciseType.pushUp:

@@ -8,6 +8,9 @@ class RepCounterDisplay extends StatelessWidget {
   final RepState state;
   final double? jointAngle;
   final List<FormError> activeErrors;
+  final int leftReps;
+  final int rightReps;
+  final bool showPerArm;
 
   const RepCounterDisplay({
     super.key,
@@ -16,6 +19,9 @@ class RepCounterDisplay extends StatelessWidget {
     required this.state,
     this.jointAngle,
     this.activeErrors = const [],
+    this.leftReps = 0,
+    this.rightReps = 0,
+    this.showPerArm = false,
   });
 
   @override
@@ -30,31 +36,59 @@ class RepCounterDisplay extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Rep count — big.
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$reps',
-                style: const TextStyle(
-                  color: Color(0xFF00E676),
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
+          // Rep count row — per-arm (curl) or single large number.
+          if (showPerArm)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _armCount('L', leftReps),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('|',
+                      style: TextStyle(
+                          color: Colors.white38,
+                          fontSize: 36,
+                          fontWeight: FontWeight.w300)),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('REPS',
-                      style: TextStyle(color: Colors.white54, fontSize: 12)),
-                  Text('Set $sets',
-                      style:
-                          const TextStyle(color: Colors.white38, fontSize: 11)),
-                ],
-              ),
-            ],
-          ),
+                _armCount('R', rightReps),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('REPS',
+                        style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    Text('Set $sets',
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 11)),
+                  ],
+                ),
+              ],
+            )
+          else
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '$reps',
+                  style: const TextStyle(
+                    color: Color(0xFF00E676),
+                    fontSize: 48,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('REPS',
+                        style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    Text('Set $sets',
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 11)),
+                  ],
+                ),
+              ],
+            ),
           const SizedBox(height: 4),
           // State + angle.
           Text(
@@ -78,6 +112,22 @@ class RepCounterDisplay extends StatelessWidget {
       ),
     );
   }
+
+  Widget _armCount(String label, int count) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        '$count',
+        style: const TextStyle(
+          color: Color(0xFF00E676),
+          fontSize: 40,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      Text(label,
+          style: const TextStyle(color: Colors.white54, fontSize: 11)),
+    ],
+  );
 
   String _errorLabel(FormError err) => switch (err) {
     FormError.torsoSwing      => 'Keep your torso still',

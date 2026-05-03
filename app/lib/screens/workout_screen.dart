@@ -8,6 +8,7 @@ import '../engine/landmark_smoother.dart';
 import '../engine/rep_counter.dart';
 import '../models/landmark_types.dart';
 import '../models/pose_landmark.dart';
+import '../models/pose_result.dart';
 import '../services/camera_service.dart';
 import '../services/pose/mlkit_pose_service.dart';
 import '../services/pose/pose_service.dart';
@@ -74,6 +75,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   CurlCameraView _detectedCurlView = CurlCameraView.unknown;
 
   // Per-frame display state.
+  bool _showSkeleton = true;
   List<PoseLandmark> _landmarks = [];
   RepSnapshot _snapshot = const RepSnapshot(
     reps: 0,
@@ -113,31 +115,40 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
   Future<void> _processFrame(Uint8List nv21, int width, int height) async {
     try {
-      final result = await _pose.processNv21(
+      final rawResult = await _pose.processNv21(
         nv21,
         width,
         height,
         _camera.sensorRotation,
       );
 
-      if (result.isEmpty || !mounted) return;
+      if (rawResult.isEmpty || !mounted) return;
 
-      // Smooth + mirror for display only.
-      final mirrored = result.landmarks.map((lm) => PoseLandmark(
+      // Mirror for display then apply 1€ filter.
+      // All angle/distance helpers are mirroring-invariant (dot-product and
+      // abs-based), so smoothedResult is correct for both display and analysis.
+      // rawResult is kept for visibility/occlusion checks, where we want the
+      // real-time detection state — not a filtered version that could mask
+      // a sudden landmark loss.
+      final mirrored = rawResult.landmarks.map((lm) => PoseLandmark(
         type: lm.type,
         x: _camera.isFrontCamera ? 1.0 - lm.x : lm.x,
         y: lm.y,
         confidence: lm.confidence,
       )).toList();
-      final smoothed = _smoother.smooth(mirrored);
+      final smoothedLandmarks = _smoother.smooth(mirrored);
+      final smoothedResult = PoseResult(
+        landmarks: smoothedLandmarks,
+        inferenceTime: rawResult.inferenceTime,
+      );
 
       switch (_phase) {
         case WorkoutPhase.setupCheck:
-          _updateSetupCheck(result, smoothed);
+          _updateSetupCheck(rawResult, smoothedResult);
         case WorkoutPhase.countdown:
-          _updateCountdownFrame(result, smoothed);
+          _updateCountdownFrame(rawResult, smoothedResult);
         case WorkoutPhase.active:
-          _updateActive(result, smoothed);
+          _updateActive(rawResult, smoothedResult);
         case WorkoutPhase.completed:
           break; // session over — ignore incoming frames
       }
@@ -148,34 +159,46 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
   // ── SETUP_CHECK ────────────────────────────────────────
 
-  void _updateSetupCheck(dynamic result, List<PoseLandmark> smoothed) {
-    // Drive view detector for curl during setup.
+  /// Curl-specific readiness: both shoulders must be visible, plus at least
+  /// one complete arm (elbow + wrist on the same side).
+  bool _curlSetupVisible(PoseResult raw) {
+    final ls = raw.landmark(LM.leftShoulder,  minConfidence: kMinLandmarkConfidence);
+    final rs = raw.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence);
+    if (ls == null || rs == null) return false;
+    final leftArm  = raw.landmark(LM.leftElbow,  minConfidence: kMinLandmarkConfidence) != null
+                  && raw.landmark(LM.leftWrist,   minConfidence: kMinLandmarkConfidence) != null;
+    final rightArm = raw.landmark(LM.rightElbow, minConfidence: kMinLandmarkConfidence) != null
+                  && raw.landmark(LM.rightWrist,  minConfidence: kMinLandmarkConfidence) != null;
+    return leftArm || rightArm;
+  }
+
+  void _updateSetupCheck(PoseResult rawResult, PoseResult smoothedResult) {
+    // View detection uses smoothedResult so filtered positions feed the detector.
     if (widget.exercise == ExerciseType.bicepsCurl) {
-      final view = _repCounter.updateSetupView(result);
+      final view = _repCounter.updateSetupView(smoothedResult);
       if (view != _detectedCurlView) setState(() => _detectedCurlView = view);
     }
 
+    // Visibility color dots use rawResult — real-time landmark state.
     final requirements = ExerciseRequirements.forExercise(widget.exercise);
     final colors = <int, Color>{};
-    var allVisible = true;
 
     for (final idx in requirements.landmarkIndices) {
-      final lm = result.landmark(idx, minConfidence: kMinLandmarkConfidence);
-      if (lm != null) {
-        colors[idx] = const Color(0xFF00E676); // green — visible
-      } else {
-        colors[idx] = Colors.redAccent; // red — not visible
-        allVisible = false;
-      }
+      final lm = rawResult.landmark(idx, minConfidence: kMinLandmarkConfidence);
+      colors[idx] = lm != null ? const Color(0xFF00E676) : Colors.redAccent;
     }
 
-    if (allVisible) {
+    final ready = widget.exercise == ExerciseType.bicepsCurl
+        ? _curlSetupVisible(rawResult)
+        : colors.values.every((c) => c == const Color(0xFF00E676));
+
+    if (ready) {
       _setupOkFrames++;
       if (_setupOkFrames >= kSetupCheckFrames) {
         if (mounted) {
           setState(() {
             _phase = WorkoutPhase.countdown;
-            _landmarks = smoothed;
+            _landmarks = smoothedResult.landmarks;
             _landmarkColors = {};
           });
           _startCountdown();
@@ -188,7 +211,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
     if (mounted) {
       setState(() {
-        _landmarks = smoothed;
+        _landmarks = smoothedResult.landmarks;
         _landmarkColors = colors;
       });
     }
@@ -220,19 +243,22 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     });
   }
 
-  void _updateCountdownFrame(dynamic result, List<PoseLandmark> smoothed) {
+  void _updateCountdownFrame(PoseResult rawResult, PoseResult smoothedResult) {
     // Continue view detection during countdown in case not yet locked.
     if (widget.exercise == ExerciseType.bicepsCurl) {
-      final view = _repCounter.updateSetupView(result);
+      final view = _repCounter.updateSetupView(smoothedResult);
       if (view != _detectedCurlView) setState(() => _detectedCurlView = view);
     }
 
+    // Visibility check uses rawResult for real-time presence detection.
     final requirements = ExerciseRequirements.forExercise(widget.exercise);
-    final allVisible = requirements.landmarkIndices.every(
-      (idx) => result.landmark(idx, minConfidence: kMinLandmarkConfidence) != null,
-    );
+    final stillVisible = widget.exercise == ExerciseType.bicepsCurl
+        ? _curlSetupVisible(rawResult)
+        : requirements.landmarkIndices.every(
+            (idx) => rawResult.landmark(idx, minConfidence: kMinLandmarkConfidence) != null,
+          );
 
-    if (!allVisible) {
+    if (!stillVisible) {
       // User left frame mid-countdown — cancel and reset to setup check.
       _countdownTimer?.cancel();
       _tts.stop();
@@ -241,24 +267,31 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           _phase = WorkoutPhase.setupCheck;
           _setupOkFrames = 0;
           _countdownValue = kCountdownSeconds;
-          _landmarks = smoothed;
+          _landmarks = smoothedResult.landmarks;
         });
       }
     } else {
-      if (mounted) setState(() => _landmarks = smoothed);
+      if (mounted) setState(() => _landmarks = smoothedResult.landmarks);
     }
   }
 
   // ── ACTIVE ─────────────────────────────────────────────
 
-  void _updateActive(dynamic result, List<PoseLandmark> smoothed) {
+  void _updateActive(PoseResult rawResult, PoseResult smoothedResult) {
+    // Occlusion/absence detection always uses rawResult so a sudden landmark
+    // loss isn't masked by the 1€ filter's inertia.
     final requirements = ExerciseRequirements.forExercise(widget.exercise);
-    final total = requirements.landmarkIndices.length;
     final visible = requirements.landmarkIndices
-        .where((idx) => result.landmark(idx, minConfidence: kMinLandmarkConfidence) != null)
+        .where((idx) => rawResult.landmark(idx, minConfidence: kMinLandmarkConfidence) != null)
         .length;
 
-    if (visible == total) {
+    // Curl uses _curlSetupVisible instead of "all 6 landmarks" so side-view
+    // users (far-side arm below confidence) still get FSM updates.
+    final allVisible = widget.exercise == ExerciseType.bicepsCurl
+        ? _curlSetupVisible(rawResult)
+        : visible == requirements.landmarkIndices.length;
+
+    if (allVisible) {
       // ── All landmarks visible ──────────────────────────
       _absenceStart = null;
       _occlusionStart = null;
@@ -272,11 +305,16 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         }
       }
 
-      final snapshot = _repCounter.update(result);
+      // Analysis uses smoothedResult — 1€-filtered positions reduce false-
+      // positive form cues caused by raw landmark noise (torso swing, elbow
+      // drift, squat hip-direction). The rep-start snapshot stored inside
+      // CurlFormAnalyzer will also be a smoothed frame, keeping the reference
+      // and current measurements in the same coordinate space.
+      final snapshot = _repCounter.update(smoothedResult);
       if (snapshot.formErrors.isNotEmpty) _onFormErrors(snapshot.formErrors);
       if (mounted) {
         setState(() {
-          _landmarks = smoothed;
+          _landmarks = smoothedResult.landmarks;
           _snapshot = snapshot;
         });
       }
@@ -296,7 +334,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       }
 
       // FSM frozen — do not call _repCounter.update()
-      if (mounted) setState(() => _landmarks = smoothed);
+      if (mounted) setState(() => _landmarks = smoothedResult.landmarks);
     } else {
       // ── Full absence — no landmarks at all ────────────
       _occlusionStart = null;
@@ -409,6 +447,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       appBar: AppBar(
         title: Text(widget.exercise.label),
         actions: [
+          IconButton(
+            icon: Icon(
+              _showSkeleton ? Icons.visibility : Icons.visibility_off,
+              color: _showSkeleton ? const Color(0xFF00E676) : Colors.white38,
+            ),
+            tooltip: _showSkeleton ? 'Hide skeleton' : 'Show skeleton',
+            onPressed: () => setState(() => _showSkeleton = !_showSkeleton),
+          ),
           if (_phase == WorkoutPhase.active) ...[
             IconButton(
               icon: const Icon(Icons.replay),
@@ -477,8 +523,8 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             ),
           ),
 
-        // Skeleton overlay.
-        if (_landmarks.isNotEmpty)
+        // Skeleton overlay — hidden when _showSkeleton is toggled off.
+        if (_showSkeleton && _landmarks.isNotEmpty)
           CustomPaint(
             painter: SkeletonPainter(
               landmarks: _landmarks,
@@ -503,7 +549,9 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
               child: Text(
                 _setupOkFrames > 0
                     ? 'Almost there… ($_setupOkFrames / $kSetupCheckFrames)'
-                    : 'Step back until your full body is visible',
+                    : widget.exercise == ExerciseType.bicepsCurl
+                        ? 'Show both shoulders and at least one full arm'
+                        : 'Step back until your full body is visible',
                 style: const TextStyle(color: Colors.white, fontSize: 16),
                 textAlign: TextAlign.center,
               ),
@@ -582,6 +630,9 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
               state: _snapshot.state,
               jointAngle: _snapshot.jointAngle,
               activeErrors: _snapshot.formErrors,
+              leftReps: _snapshot.leftReps,
+              rightReps: _snapshot.rightReps,
+              showPerArm: widget.exercise == ExerciseType.bicepsCurl,
             ),
           ),
       ],
