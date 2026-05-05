@@ -28,6 +28,7 @@ class CurlViewDetector {
   /// Feed one pose frame. Returns current locked view (or unknown).
   CurlCameraView update(PoseResult pose) {
     if (_isLocked) return _lockedView;
+    // Initial consensus lock is strict — no hysteresis applies yet.
     final vote = _classifyFrame(pose);
     if (vote != CurlCameraView.unknown) _frameVotes.add(vote);
     if (_frameVotes.length >= kViewDetectionFrames) _tryLock();
@@ -43,10 +44,22 @@ class CurlViewDetector {
   // ── Internal ─────────────────────────────────────────
 
   /// Classify a single frame without affecting vote state.
+  ///
   /// Used by RepCounter during ACTIVE phase for continuous re-detection.
-  CurlCameraView classifyFrame(PoseResult pose) => _classifyFrame(pose);
+  /// When [currentLocked] is supplied (non-`unknown`), hysteresis applies to
+  /// the shoulder-separation evidence: flipping from a locked view requires
+  /// crossing the opposite threshold by `kViewHysteresisDelta`. Pass
+  /// `CurlCameraView.unknown` (or omit) during initial detection — strict
+  /// thresholds only.
+  CurlCameraView classifyFrame(
+    PoseResult pose, {
+    CurlCameraView currentLocked = CurlCameraView.unknown,
+  }) => _classifyFrame(pose, currentLocked: currentLocked);
 
-  CurlCameraView _classifyFrame(PoseResult pose) {
+  CurlCameraView _classifyFrame(
+    PoseResult pose, {
+    CurlCameraView currentLocked = CurlCameraView.unknown,
+  }) {
     // Raw access without confidence gate — we need raw confidence for asymmetry.
     final ls = pose.landmark(LM.leftShoulder);
     final rs = pose.landmark(LM.rightShoulder);
@@ -59,14 +72,40 @@ class CurlViewDetector {
         ? (nose.x - (ls.x + rs.x) / 2.0).abs()
         : 0.0;
 
+    // Hysteresis: once locked, widen the band required to flip to the other
+    // side. Locked on front → need sep ≤ (side − delta) to count as side
+    // evidence. Locked on a side → need sep ≥ (front + delta) to count as
+    // front evidence. Initial lock (currentLocked == unknown) uses strict
+    // thresholds.
+    final double sideSepThreshold;
+    final double frontSepThreshold;
+    switch (currentLocked) {
+      case CurlCameraView.front:
+        sideSepThreshold = kSideViewShoulderSepThreshold - kViewHysteresisDelta;
+        frontSepThreshold = kFrontViewShoulderSepThreshold;
+        break;
+      case CurlCameraView.sideLeft:
+      case CurlCameraView.sideRight:
+        sideSepThreshold = kSideViewShoulderSepThreshold;
+        frontSepThreshold =
+            kFrontViewShoulderSepThreshold + kViewHysteresisDelta;
+        break;
+      case CurlCameraView.unknown:
+        sideSepThreshold = kSideViewShoulderSepThreshold;
+        frontSepThreshold = kFrontViewShoulderSepThreshold;
+        break;
+    }
+
     int sideEvidence = 0;
-    if (separation < kSideViewShoulderSepThreshold) sideEvidence++;
+    if (separation < sideSepThreshold) sideEvidence++;
     if (confidenceDelta > kViewShoulderConfidenceDeltaThreshold) sideEvidence++;
     if (noseOffset > kViewNoseOffsetThreshold) sideEvidence++;
 
     int frontEvidence = 0;
-    if (separation > kFrontViewShoulderSepThreshold) frontEvidence++;
-    if (confidenceDelta <= kViewShoulderConfidenceDeltaThreshold) frontEvidence++;
+    if (separation > frontSepThreshold) frontEvidence++;
+    if (confidenceDelta <= kViewShoulderConfidenceDeltaThreshold) {
+      frontEvidence++;
+    }
     if (noseOffset <= kViewNoseOffsetThreshold) frontEvidence++;
 
     if (frontEvidence >= 2 && sideEvidence == 0) return CurlCameraView.front;

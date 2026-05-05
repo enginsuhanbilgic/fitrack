@@ -1,0 +1,19 @@
+# Replay harness analysis overrides.
+#
+# The `bin/replay.dart` CLI imports `package:fitrack/...` via a path: dep on
+# ../../../app. Those URIs only resolve after `flutter pub get` is run inside
+# this directory, which writes the package-config map. Until then the analyzer
+# flags them as unresolved.
+#
+# Excluding the bin directory keeps the repo-wide `flutter analyze` clean while
+# letting contributors run the replay via:
+#
+#     cd tools/dataset_analysis/dart_replay && flutter pub get && dart run bin/replay.dart
+#
+# When the dataset lands and someone regenerates thresholds, they must run
+# `flutter analyze` locally (after pub get) to verify the harness still
+# compiles against the current RepCounter surface.
+
+analyzer:
+  exclude:
+    - bin/**

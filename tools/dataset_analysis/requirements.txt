@@ -1,0 +1,10 @@
+# Pinned for reproducibility. Update only with a matching bump to
+# data/derived/percentiles.json so any threshold drift is explicit.
+
+mediapipe==0.10.33
+opencv-python==4.10.0.84
+numpy==1.26.4
+pandas==2.2.3
+matplotlib==3.10.0
+jupyter==1.1.1
+pytest==8.3.3

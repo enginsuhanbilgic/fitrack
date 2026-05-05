@@ -1,0 +1,7 @@
+clip_id,subject_id,view,side,arm,fps,intended_quality,notes
+clip_001_you_side_right_good,you,side,left,left,30,good,All good form reps with controlled tempo and full ROM (left side facing camera)
+clip_002_you_side_right_swing,you,side,left,left,30,bad_swing,Deliberately swinging reps with forward/back torso lean (left side facing camera)
+clip_003_you_side_right_speed,you,side,left,left,30,bad_speed,Fast concentric tempo reps (explosive up, slow down) (left side facing camera)
+clip_004_you_front_both_good,you,front,both,both,30,good,Good form bilateral curls facing camera with symmetric tempo
+clip_005_you_front_both_partial,you,front,both,both,30,bad_partial_rom,Partial ROM reps stopping short of full contraction (45-60 degrees only)
+clip_006_you_front_both_swing,you,front,both,both,30,bad_swing,Swinging reps from front view with forward/back rock for cross-validation

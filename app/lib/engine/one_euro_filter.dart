@@ -17,9 +17,9 @@ class OneEuroFilter {
     double minCutoff = kOneEuroMinCutoff,
     double beta = kOneEuroBeta,
     double dCutoff = kOneEuroDCutoff,
-  })  : _minCutoff = minCutoff,
-        _beta = beta,
-        _dCutoff = dCutoff;
+  }) : _minCutoff = minCutoff,
+       _beta = beta,
+       _dCutoff = dCutoff;
 
   double filter(double x, double t) {
     if (_tPrev == null) {
@@ -62,8 +62,15 @@ class OneEuroFilter {
 
 /// Convenience: a filter pair for (x, y) of a single landmark.
 class LandmarkFilter {
-  final OneEuroFilter _fx = OneEuroFilter();
-  final OneEuroFilter _fy = OneEuroFilter();
+  final OneEuroFilter _fx;
+  final OneEuroFilter _fy;
+
+  LandmarkFilter({
+    double minCutoff = kOneEuroMinCutoff,
+    double beta = kOneEuroBeta,
+    double dCutoff = kOneEuroDCutoff,
+  }) : _fx = OneEuroFilter(minCutoff: minCutoff, beta: beta, dCutoff: dCutoff),
+       _fy = OneEuroFilter(minCutoff: minCutoff, beta: beta, dCutoff: dCutoff);
 
   (double, double) filter(double x, double y, double t) {
     return (_fx.filter(x, t), _fy.filter(y, t));

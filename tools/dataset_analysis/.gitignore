@@ -1,0 +1,16 @@
+# Raw video files — private, consent-bound, large. Keypoints are what we commit.
+data/videos/*.mp4
+data/videos/*.mov
+data/videos/*.avi
+
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Jupyter runtime junk (notebooks themselves are committed)
+.ipynb_checkpoints/
+
+# OS noise
+.DS_Store

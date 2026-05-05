@@ -2,7 +2,12 @@ import 'package:flutter/material.dart';
 import '../core/types.dart';
 
 /// Floating overlay that shows reps, set count, elbow angle, and form state.
-class RepCounterDisplay extends StatelessWidget {
+///
+/// The FSM state is shown as a subtly animated pill — color shifts on each
+/// state change via [AnimatedContainer]; the label swaps with a short fade
+/// via [AnimatedSwitcher]. Form errors appear below with no extra decoration,
+/// keeping the overlay quiet during normal reps.
+class RepCounterDisplay extends StatefulWidget {
   final int reps;
   final int sets;
   final RepState state;
@@ -25,6 +30,33 @@ class RepCounterDisplay extends StatelessWidget {
   });
 
   @override
+  State<RepCounterDisplay> createState() => _RepCounterDisplayState();
+}
+
+class _RepCounterDisplayState extends State<RepCounterDisplay> {
+  /// Maps each FSM state to a muted accent color for the pill background.
+  /// Chosen to be readable against the dark overlay without being jarring.
+  static Color _pillColor(RepState s) => switch (s) {
+    RepState.idle => const Color(0xFF2A2A2A),
+    RepState.concentric => const Color(0xFF3D2B00), // dark amber
+    RepState.peak => const Color(0xFF003D1A), // dark green
+    RepState.eccentric => const Color(0xFF00213D), // dark blue
+    RepState.descending => const Color(0xFF3D2B00),
+    RepState.bottom => const Color(0xFF003D1A),
+    RepState.ascending => const Color(0xFF00213D),
+  };
+
+  static Color _pillTextColor(RepState s) => switch (s) {
+    RepState.idle => Colors.white38,
+    RepState.concentric => const Color(0xFFFFB300), // amber
+    RepState.peak => const Color(0xFF00E676), // green
+    RepState.eccentric => const Color(0xFF40C4FF), // light blue
+    RepState.descending => const Color(0xFFFFB300),
+    RepState.bottom => const Color(0xFF00E676),
+    RepState.ascending => const Color(0xFF40C4FF),
+  };
+
+  @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -36,40 +68,19 @@ class RepCounterDisplay extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Rep count row — per-arm (curl) or single large number.
-          if (showPerArm)
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _armCount('L', leftReps),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text('|',
-                      style: TextStyle(
-                          color: Colors.white38,
-                          fontSize: 36,
-                          fontWeight: FontWeight.w300)),
-                ),
-                _armCount('R', rightReps),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('REPS',
-                        style: TextStyle(color: Colors.white54, fontSize: 12)),
-                    Text('Set $sets',
-                        style: const TextStyle(
-                            color: Colors.white38, fontSize: 11)),
-                  ],
-                ),
-              ],
-            )
-          else
-            Row(
+          // Rep count — big. Wrapped in Semantics(liveRegion: true) so
+          // VoiceOver/TalkBack announce each rep in the active set as the
+          // count increments. excludeSemantics: true prevents each child Text
+          // from also being announced separately.
+          Semantics(
+            liveRegion: true,
+            label: '${widget.reps} reps in set ${widget.sets}',
+            excludeSemantics: true,
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  '$reps',
+                  '${widget.reps}',
                   style: const TextStyle(
                     color: Color(0xFF00E676),
                     fontSize: 48,
@@ -80,65 +91,113 @@ class RepCounterDisplay extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('REPS',
-                        style: TextStyle(color: Colors.white54, fontSize: 12)),
-                    Text('Set $sets',
-                        style: const TextStyle(
-                            color: Colors.white38, fontSize: 11)),
+                    const Text(
+                      'REPS',
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                    Text(
+                      'Set ${widget.sets}',
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 11,
+                      ),
+                    ),
                   ],
                 ),
               ],
             ),
-          const SizedBox(height: 4),
-          // State + angle.
-          Text(
-            '${state.name.toUpperCase()}'
-            '${jointAngle != null ? '  ${jointAngle!.toInt()}°' : ''}',
-            style: const TextStyle(color: Colors.white54, fontSize: 12),
           ),
-          // Form errors.
-          if (activeErrors.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            for (final err in activeErrors)
-              Text(
-                _errorLabel(err),
-                style: const TextStyle(
-                    color: Colors.redAccent,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600),
+          const SizedBox(height: 6),
+
+          // FSM state pill — color animates on state change, label fades.
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: _pillColor(widget.state),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: Text(
+                key: ValueKey(widget.state),
+                _pillLabel(widget.state, widget.jointAngle),
+                style: TextStyle(
+                  color: _pillTextColor(widget.state),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.8,
+                ),
               ),
+            ),
+          ),
+
+          // Form errors — shown only when present, no extra chrome.
+          // Wrapped in liveRegion so corrective cues are announced as they
+          // appear (matches the TTS audio cue that fires on the same trigger).
+          if (widget.activeErrors.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Semantics(
+              liveRegion: true,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final err in widget.activeErrors)
+                    Text(
+                      _errorLabel(err),
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ],
         ],
       ),
     );
   }
 
-  Widget _armCount(String label, int count) => Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Text(
-        '$count',
-        style: const TextStyle(
-          color: Color(0xFF00E676),
-          fontSize: 40,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      Text(label,
-          style: const TextStyle(color: Colors.white54, fontSize: 11)),
-    ],
-  );
+  String _pillLabel(RepState s, double? angle) {
+    final angleSuffix = angle != null ? '  ${angle.toInt()}°' : '';
+    return '${_stateLabel(s)}$angleSuffix';
+  }
+
+  String _stateLabel(RepState s) => switch (s) {
+    RepState.idle => 'READY',
+    RepState.concentric => 'LIFTING',
+    RepState.peak => 'PEAK',
+    RepState.eccentric => 'LOWERING',
+    RepState.descending => 'DESCENDING',
+    RepState.bottom => 'BOTTOM',
+    RepState.ascending => 'ASCENDING',
+  };
 
   String _errorLabel(FormError err) => switch (err) {
-    FormError.torsoSwing      => 'Keep your torso still',
-    FormError.elbowDrift      => 'Keep your elbow still',
-    FormError.shortRom        => 'Full range of motion',
-    FormError.squatDepth      => 'Go deeper',
-    FormError.trunkTibia      => 'Keep your chest up',
-    FormError.hipSag          => 'Keep your body straight',
-    FormError.pushUpShortRom  => 'Go lower',
+    FormError.torsoSwing => 'Keep your torso still',
+    FormError.depthSwing => "Don't rock toward the camera",
+    FormError.shoulderArc => 'Stop pivoting at the hip',
+    FormError.elbowDrift => 'Keep your elbow still',
+    FormError.shoulderShrug => 'Keep your shoulders down',
+    FormError.backLean => "Don't lean back",
+    FormError.shortRomStart => 'Start from full extension',
+    FormError.shortRomPeak => 'Curl all the way up',
+    FormError.squatDepth => 'Go deeper',
+    FormError.trunkTibia => 'Keep your chest up',
+    FormError.excessiveForwardLean => 'Chest up — keep your back tall',
+    FormError.heelLift => 'Drive your heels into the floor',
+    FormError.forwardKneeShift => 'Knees tracking forward',
+    FormError.hipSag => 'Keep your body straight',
+    FormError.pushUpShortRom => 'Go lower',
     FormError.eccentricTooFast => 'Lower slowly',
-    FormError.lateralAsymmetry => 'Even out both arms',
-    FormError.fatigue          => 'Fatigue detected',
+    FormError.concentricTooFast => 'Control the lift',
+    FormError.tempoInconsistent => 'Keep steady tempo',
+    FormError.asymmetryLeftLag => 'Left arm is lagging',
+    FormError.asymmetryRightLag => 'Right arm is lagging',
+    FormError.fatigue => "You're slowing down, stay strong",
+    FormError.elbowRise => 'Keep your elbow pinned to your side',
   };
 }

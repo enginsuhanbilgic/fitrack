@@ -1,0 +1,238 @@
+================================================================================
+                        T2.4 TASK EXECUTION SUMMARY
+================================================================================
+
+Date Started:           2026-04-24
+Task ID:                T2.4 (WP2: Mobile App Foundation)
+Task Name:              Record Initial Reference Dataset
+Status:                 PLANNING COMPLETE ✅ — READY FOR EXECUTION
+
+================================================================================
+                            TASK DOCUMENTATION
+================================================================================
+
+Two comprehensive documents created at project root:
+
+  1. T2.4_STATE.md (860 lines)
+     → Complete reference documentation
+     → 10 parts covering context, decisions, procedures, next steps
+     → For understanding WHY, HOW, WHERE, WHEN
+     → Suitable for project presentation and code review
+
+  2. T2.4_QUICK_START.md (120 lines)
+     → Quick reference for recording execution
+     → Checklists, form cues, CSV templates
+     → Pocket guide while recording
+
+================================================================================
+                         DECISION SUMMARY
+================================================================================
+
+User Decisions (2026-04-24):
+  ✓ Camera Views:        Both side + front (separate clips per view)
+  ✓ Quality Scenarios:   Separate clips per quality (good, swing, partial, speed)
+  ✓ Recording Scope:     Single subject (you), 5–8 clips target = 6 clips
+  ✓ Equipment:           Phone + tripod (ideal) + light dumbbell (5–10 lbs)
+  ✓ Starting Position:   Arm fully extended at rest (IDLE state)
+
+Recording Specification Derived:
+  • Total clips:         6 (3 side-view, 3 front-view)
+  • Total reps:          48–72 (8–12 per clip)
+  • Equipment:           Phone ≥30fps, tripod, dumbbell
+  • Video specs:         720p+, landscape orientation
+  • Per-clip duration:   ~45–60 seconds
+  • Total recording time: ~30–40 minutes
+
+================================================================================
+                          CLIP MATRIX
+================================================================================
+
+SIDE VIEW:
+  clip_001_you_side_right_good.mp4
+    → 8–12 reps, perfect form (elbow at ribs, smooth, controlled)
+    → Purpose: Baseline threshold derivation
+
+  clip_002_you_side_right_swing.mp4
+    → 8–12 reps, exaggerated torso swing (lean forward 15–20°)
+    → Purpose: Validate torso-swing detector (Form Error feedback)
+
+  clip_003_you_side_right_speed.mp4
+    → 8–12 reps, fast concentric (~0.3s up), slow eccentric (~1.5s down)
+    → Purpose: Validate concentric-tempo detector
+
+FRONT VIEW:
+  clip_004_you_front_both_good.mp4
+    → 8–12 bilateral reps, symmetric arms, perfect form
+    → Purpose: Baseline + bilateral asymmetry validation
+
+  clip_005_you_front_both_partial.mp4
+    → 8–12 reps, incomplete ROM (stop at 45–60° flexion)
+    → Purpose: Validate short-ROM peak detector
+
+  clip_006_you_front_both_swing.mp4
+    → 8–12 reps, forward/back torso rock
+    → Purpose: Cross-validate swing detector from front view
+
+================================================================================
+                       PIPELINE PHASES AFTER RECORDING
+================================================================================
+
+Phase A:  Angle math & landmark index utils (already ported)
+Phase B:  Extract keypoints (MediaPipe)
+Phase B:  Auto-annotate rep boundaries (signal-based zero-crossing)
+Phase C:  Compute per-rep stats (22 metrics per rep)
+Phase D:  Derive percentile-based thresholds + FSM invariant checks + codegen
+Phase E:  Replay validation (real RepCounter import, F1 ≥ 0.95 gate)
+
+Output:   app/lib/core/default_rom_thresholds.dart
+          (Shipped default constants, generated and committed)
+
+================================================================================
+                      VOCABULARY LOCK REMINDER
+================================================================================
+
+DO NOT CONFLATE:
+
+  Default ROM Threshold (offline, developer-run)
+    → tools/dataset_analysis/ pipeline
+    → Runs at T2.4 (this task)
+    → Produces app/lib/core/default_rom_thresholds.dart
+    → Every user inherits these as starting point
+
+  Personal Calibration (on-device, per-user)
+    → WP4.X feature (completed 2026-04-20)
+    → Runs on user's phone at workout time
+    → Adapts thresholds to individual anatomy
+    → Persisted in profiles/biceps_curl.json
+
+They are complementary: good defaults → better personal calibration UX.
+
+See GLOSSARY.md §1 (Core Calibration Vocabulary) for full lock.
+
+================================================================================
+                    PROJECT PRESENTATION CONTEXT
+================================================================================
+
+Why T2.4?
+  Hand-guessed thresholds (160°/70°/85°/140°) work but lack empirical ground.
+  Default ROM Threshold pipeline enables data-driven, percentile-based constants.
+  These become the starting point for every user's Personal Calibration.
+
+How T2.4?
+  Record controlled clips (side + front, multiple quality scenarios).
+  Auto-annotate rep boundaries from the angle signal (not manual).
+  Compute stats, derive percentiles, validate with replay.
+
+Where T2.4?
+  Recording: in-person (user's location)
+  Processing: tools/dataset_analysis/ (offline)
+  Output: app/lib/core/default_rom_thresholds.dart (shipped)
+
+When T2.4?
+  Week 11–12 of Spring 2026 (before WP5/WP6 final push)
+  Recording: 2026-04-24 (now)
+  Pipeline: 2026-04-24 → 2026-04-25 (same day)
+  Deployment: 2026-04-25 → 2026-04-28 (before final demo)
+
+================================================================================
+                        NEXT STEPS
+================================================================================
+
+Immediate (2026-04-24):
+  [ ] Read T2.4_QUICK_START.md before recording
+  [ ] Verify equipment (phone, tripod, dumbbell, lighting)
+  [ ] Record 6 clips (~30–40 minutes)
+  [ ] Rename files and populate videos.csv
+
+Same day (2026-04-24 → 2026-04-25):
+  [ ] Run Phase B extraction (extract_keypoints.py)
+  [ ] Run Phase B auto-annotate (phase_b_auto_annotate.py)
+  [ ] Run Phase C (compute_rep_stats.py)
+  [ ] Run Phase D (derive_thresholds.py + generate_dart.py)
+  [ ] Run Phase E (dart_replay/bin/replay.dart)
+  [ ] Verify F1 ≥ 0.95, commit default_rom_thresholds.dart
+
+Following week (2026-04-25 → 2026-04-28):
+  [ ] Integrate new defaults into app (already imported)
+  [ ] Validate Personal Calibration against new defaults
+  [ ] Prepare T2.4 section for final presentation
+
+================================================================================
+                       SUCCESS CRITERIA
+================================================================================
+
+Recording Success:
+  ✓ 6 clips recorded (3 side, 3 front)
+  ✓ 8–12 reps per clip (48–72 total)
+  ✓ videos.csv populated
+  ✓ No clips > 10% missing-person frames
+  ✓ Smooth elbow-angle traces (no spikes)
+
+Pipeline Success:
+  ✓ Phase B: 6 JSONL files
+  ✓ Phase B: reps.csv auto-generated
+  ✓ Phase C: per_rep_stats.csv with 22 columns
+  ✓ Phase D: default_rom_thresholds.dart generated without errors
+  ✓ Phase D: FSM invariants satisfied
+  ✓ Phase E: F1 ≥ 0.95 overall, ≥ 0.85 per clip
+
+Presentation Success:
+  ✓ Explain why data-driven thresholds matter
+  ✓ Show recording matrix and form cues
+  ✓ Trace one clip's journey through the pipeline
+  ✓ Display Phase E validation report
+  ✓ Show final output (default_rom_thresholds.dart)
+  ✓ Emphasize vocabulary lock (Default ROM ≠ Personal Calibration)
+
+================================================================================
+                          REFERENCE FILES
+================================================================================
+
+At project root:
+  • T2.4_STATE.md           (860 lines, comprehensive)
+  • T2.4_QUICK_START.md     (120 lines, quick reference)
+  • T2.4_SUMMARY.txt        (this file)
+
+In proposal & brain:
+  • proposal.md             (project foundation)
+  • GLOSSARY.md             (vocabulary lock, canonical terms)
+  • .agent_brain/SKILLS.md  (biomechanical models, constants)
+  • .agent_brain/ROADMAP.md (work packages and timelines)
+
+Recording guide:
+  • tools/dataset_analysis/docs/07_recording_guide.md
+
+Pipeline documentation:
+  • tools/dataset_analysis/docs/ (9 files, comprehensive)
+
+================================================================================
+                            NOTES
+================================================================================
+
+1. Start arms fully extended at rest (IDLE state) on EVERY clip.
+   This is critical for true rest-angle measurement.
+
+2. Exaggerate "bad form" scenarios intentionally.
+   The pipeline uses these for detector validation.
+
+3. Record all clips in one session if possible.
+   Consistent lighting/setup reduces per-clip noise.
+
+4. Don't re-record for minor imperfections.
+   One weird rep → just label it in quality.
+   MediaPipe failure (>10% missing) → re-record.
+
+5. Phase B auto-annotation is the recommended path.
+   Manual frame-picking (VLC) is the fallback.
+
+6. Phase E validates thresholds (F1 gate ≥ 0.95).
+   If validation fails, investigate which clips are noisy.
+   Possible: re-record that one clip and re-run pipeline.
+
+================================================================================
+
+Documentation Complete. Ready to Execute T2.4 Recording.
+
+Questions? Refer to T2.4_STATE.md (comprehensive) or T2.4_QUICK_START.md (cheat sheet).
+
+================================================================================

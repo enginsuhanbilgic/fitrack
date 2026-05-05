@@ -3,6 +3,7 @@ import '../../core/types.dart';
 import '../../models/landmark_types.dart';
 import '../../models/pose_result.dart';
 import '../angle_utils.dart';
+import '../form_analyzer_base.dart';
 
 /// Form analyzer for push-up.
 ///
@@ -11,11 +12,13 @@ import '../angle_utils.dart';
 ///
 /// Rep-boundary error (evaluated at ASCENDING → IDLE):
 ///   - Partial ROM: rep completed without elbow angle reaching kPushUpBottomAngle
-class PushUpFormAnalyzer {
+class PushUpFormAnalyzer extends FormAnalyzerBase {
   double? _minElbowAngle;
 
-  /// Call at IDLE → DESCENDING.
-  void onRepStart() => _minElbowAngle = null;
+  /// Call at IDLE → DESCENDING. The [startSnapshot] is accepted for
+  /// base-class compliance but push-up uses only the tracked minimum angle.
+  @override
+  void onRepStart(PoseResult startSnapshot) => _minElbowAngle = null;
 
   /// Call every frame during DESCENDING and BOTTOM to track lowest point.
   void trackAngle(double elbowAngle) {
@@ -25,7 +28,8 @@ class PushUpFormAnalyzer {
   }
 
   /// Frame-level evaluation — returns hipSag if active.
-  List<FormError> evaluate(PoseResult current) {
+  @override
+  List<FormError> evaluate(PoseResult current, {DateTime? now}) {
     final errors = <FormError>[];
 
     // Angle at hip in shoulder→hip→ankle triangle.
@@ -49,6 +53,7 @@ class PushUpFormAnalyzer {
   }
 
   /// Rep-boundary evaluation — checks if elbow reached bottom threshold.
+  @override
   List<FormError> consumeCompletionErrors() {
     final errors = <FormError>[];
     if (_minElbowAngle != null && _minElbowAngle! >= kPushUpBottomAngle) {
@@ -58,5 +63,6 @@ class PushUpFormAnalyzer {
     return errors;
   }
 
+  @override
   void reset() => _minElbowAngle = null;
 }

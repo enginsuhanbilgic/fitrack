@@ -4,8 +4,39 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="feat: design-quality biceps curl summary screen with per-rep quality chart, form analysis, and coaching insights">
+    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="BIG UPDATE ON DESIGN">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/GLOSSARY.md" beforeDir="false" afterPath="$PROJECT_DIR$/GLOSSARY.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/ios/Podfile" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Podfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/ios/Podfile.lock" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Podfile.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/constants.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/constants.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/default_rom_thresholds.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/default_rom_thresholds.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/manual_rom_overrides.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/manual_rom_overrides.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/rom_thresholds.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/rom_thresholds.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/types.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/types.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer_extras.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer_extras.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_side_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_side_form_analyzer.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_strategy.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_strategy.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/squat/squat_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/squat/squat_form_analyzer.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/squat/squat_strategy.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/squat/squat_strategy.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/db/preferences_repository.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/preferences_repository.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/db/schema.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/schema.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/db/session_dtos.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/session_dtos.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/db/session_repository.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/session_repository.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/telemetry_log.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/telemetry_log.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/widgets/session_card.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/session_card.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/core/rom_thresholds_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/core/rom_thresholds_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/engine/curl/curl_side_form_analyzer_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/curl/curl_side_form_analyzer_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/engine/squat/squat_form_analyzer_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/squat/squat_form_analyzer_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/services/db/session_repository_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/services/db/session_repository_test.dart" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -33,6 +64,7 @@
       </map>
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+    <option name="RESET_MODE" value="HARD" />
     <option name="SWAP_SIDES_IN_COMPARE_BRANCHES" value="true" />
   </component>
   <component name="GitHubPullRequestSearchHistory">{
@@ -76,14 +108,17 @@
     &quot;cf.first.check.clang-format&quot;: &quot;false&quot;,
     &quot;cidr.known.project.marker&quot;: &quot;true&quot;,
     &quot;dart.analysis.tool.window.visible&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;alihan&quot;,
     &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/fitrack&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;AndroidSdkUpdater&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/alihan/AndroidStudioProjects/fitrack/tools/dataset_analysis/data/videos&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;configurable.group.language&quot;,
     &quot;show.migrate.to.gradle.popup&quot;: &quot;false&quot;
   }
 }</component>
   <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/tools/dataset_analysis/data/videos" />
+    </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$" />
       <recent name="$PROJECT_DIR$/benchmark" />
@@ -193,7 +228,87 @@
       <option name="project" value="LOCAL" />
       <updated>1775429114964</updated>
     </task>
-    <option name="localTasksCounter" value="13" />
+    <task id="LOCAL-00013" summary="fix: continuous curl view re-detection with hysteresis and idle-state deferral">
+      <option name="closed" value="true" />
+      <created>1775430138923</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1775430138923</updated>
+    </task>
+    <task id="LOCAL-00014" summary="feat: enhance camera and pose detection services with improved format handling and error logging">
+      <option name="closed" value="true" />
+      <created>1776311739667</created>
+      <option name="number" value="00014" />
+      <option name="presentableId" value="LOCAL-00014" />
+      <option name="project" value="LOCAL" />
+      <updated>1776311739667</updated>
+    </task>
+    <task id="LOCAL-00015" summary="feat: initialize project structure with essential configuration files and dependencies, Week 11: per-user ROM profile + T2.4 dataset pipeline + data-driven thresholds">
+      <option name="closed" value="true" />
+      <created>1777044380988</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1777044380988</updated>
+    </task>
+    <task id="LOCAL-00016" summary="WP5.1: SQLite engine + ProfileRepository + JSON migration Closes #22">
+      <option name="closed" value="true" />
+      <created>1777064098881</created>
+      <option name="number" value="00016" />
+      <option name="presentableId" value="LOCAL-00016" />
+      <option name="project" value="LOCAL" />
+      <updated>1777064098881</updated>
+    </task>
+    <task id="LOCAL-00017" summary="WP5.2: Session write path on workout completion Closes #23">
+      <option name="closed" value="true" />
+      <created>1777064848922</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1777064848922</updated>
+    </task>
+    <task id="LOCAL-00018" summary="WP5.3: History screen + reconstructed SummaryScreen Closes #24">
+      <option name="closed" value="true" />
+      <created>1777065690057</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1777065690057</updated>
+    </task>
+    <task id="LOCAL-00019" summary="WP5.4: Historical fatigue baseline (engine feedback loop) Closes #25">
+      <option name="closed" value="true" />
+      <created>1777067930808</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1777067930808</updated>
+    </task>
+    <task id="LOCAL-00020" summary="  chore(lint): replace prints with debugPrint, drop dead code&#10;  feat(history): swipe-to-delete with confirmation dialog&#10;  feat(a11y): Semantics + live regions across Home, RepCounter, Calibration, Summary&#10;  refactor(replay): hoist warmup const, extract _parseFrame, drop dead code&#10;  feat(settings): CSV export with share sheet&#10;  perf(workout): Selector for rep counter to skip pose-frame rebuilds">
+      <option name="closed" value="true" />
+      <created>1777076359308</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1777076359308</updated>
+    </task>
+    <task id="LOCAL-00021" summary="feat(T5.3): DTW reference scoring + history pagination (Layer 1)">
+      <option name="closed" value="true" />
+      <created>1777124920820</created>
+      <option name="number" value="00021" />
+      <option name="presentableId" value="LOCAL-00021" />
+      <option name="project" value="LOCAL" />
+      <updated>1777124920820</updated>
+    </task>
+    <task id="LOCAL-00022" summary="BIG UPDATE ON DESIGN">
+      <option name="closed" value="true" />
+      <created>1777254406292</created>
+      <option name="number" value="00022" />
+      <option name="presentableId" value="LOCAL-00022" />
+      <option name="project" value="LOCAL" />
+      <updated>1777254406292</updated>
+    </task>
+    <option name="localTasksCounter" value="23" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -220,7 +335,17 @@
     <MESSAGE value="feat: enhance home screen layout with subtitle truncation and add finish workout button" />
     <MESSAGE value="feat: implement curl view detection and enhance form analysis with rep tempo, quality score, bilateral asymmetry, fatigue detection" />
     <MESSAGE value="feat: design-quality biceps curl summary screen with per-rep quality chart, form analysis, and coaching insights" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat: design-quality biceps curl summary screen with per-rep quality chart, form analysis, and coaching insights" />
+    <MESSAGE value="fix: continuous curl view re-detection with hysteresis and idle-state deferral" />
+    <MESSAGE value="feat: enhance camera and pose detection services with improved format handling and error logging" />
+    <MESSAGE value="feat: initialize project structure with essential configuration files and dependencies, Week 11: per-user ROM profile + T2.4 dataset pipeline + data-driven thresholds" />
+    <MESSAGE value="WP5.1: SQLite engine + ProfileRepository + JSON migration Closes #22" />
+    <MESSAGE value="WP5.2: Session write path on workout completion Closes #23" />
+    <MESSAGE value="WP5.3: History screen + reconstructed SummaryScreen Closes #24" />
+    <MESSAGE value="WP5.4: Historical fatigue baseline (engine feedback loop) Closes #25" />
+    <MESSAGE value="  chore(lint): replace prints with debugPrint, drop dead code&#10;  feat(history): swipe-to-delete with confirmation dialog&#10;  feat(a11y): Semantics + live regions across Home, RepCounter, Calibration, Summary&#10;  refactor(replay): hoist warmup const, extract _parseFrame, drop dead code&#10;  feat(settings): CSV export with share sheet&#10;  perf(workout): Selector for rep counter to skip pose-frame rebuilds" />
+    <MESSAGE value="feat(T5.3): DTW reference scoring + history pagination (Layer 1)" />
+    <MESSAGE value="BIG UPDATE ON DESIGN" />
+    <option name="LAST_COMMIT_MESSAGE" value="BIG UPDATE ON DESIGN" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

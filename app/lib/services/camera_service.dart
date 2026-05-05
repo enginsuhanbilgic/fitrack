@@ -1,6 +1,7 @@
-import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+
+import '../core/platform_config.dart';
 
 /// Thin wrapper around CameraController.
 /// Hides platform details so screens only see [onFrame] callbacks.
@@ -21,7 +22,9 @@ class CameraService {
   bool get isFrontCamera =>
       _ctrl?.description.lensDirection == CameraLensDirection.front;
 
-  /// Initialise the front camera in NV21 format.
+  /// Initialise the front camera.
+  /// Android: NV21 format (single plane)
+  /// iOS: yuv420 format (3 planes: Y, U, V)
   Future<void> init() async {
     final cameras = await availableCameras();
     if (cameras.isEmpty) throw Exception('No cameras found');
@@ -35,27 +38,28 @@ class CameraService {
       front,
       ResolutionPreset.medium, // 480 × 640 — good balance
       enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.nv21,
+      // Android: NV21 (single plane), iOS: yuv420 (3 planes)
+      imageFormatGroup: PlatformConfig.instance.cameraImageFormat,
     );
 
     await _ctrl!.initialize();
   }
 
-  /// Start streaming frames. [onFrame] delivers NV21 bytes + dimensions.
-  void startStream(
-    void Function(Uint8List nv21, int width, int height) onFrame,
-  ) {
+  /// Start streaming frames. [onFrame] delivers the raw CameraImage.
+  void startStream(void Function(CameraImage image) onFrame) {
     if (_streaming || _ctrl == null) return;
     _streaming = true;
 
+    int frameCount = 0;
     _ctrl!.startImageStream((CameraImage image) {
-      // camera package on Android with NV21 delivers a single plane.
-      final plane = image.planes.first;
-      onFrame(
-        Uint8List.fromList(plane.bytes),
-        image.width,
-        image.height,
-      );
+      frameCount++;
+      if (frameCount % 30 == 0) {
+        debugPrint(
+          'DEBUG [CameraService]: Frame #$frameCount - ${image.width}x${image.height}, planes: ${image.planes.length}',
+        );
+      }
+
+      onFrame(image);
     });
   }
 

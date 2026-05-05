@@ -1,0 +1,178 @@
+{
+  "buckets": [
+    {
+      "end_angle": {
+        "ci_high_deg": 167.385,
+        "ci_low_deg": 166.443,
+        "design_effect": 1.0,
+        "effective_n": 9,
+        "icc": 0.0,
+        "method": "fsm_safe_min(start_p20, end_p20) + 1\u00b0 gap \u2014 corrects post-rep overshoot asymmetry",
+        "n": 9,
+        "outliers_rejected": 0,
+        "point_estimate_deg": 177.942,
+        "safety_margin_deg": 6.0,
+        "source_percentile": 20.0,
+        "value_deg": 171.942
+      },
+      "invariant_violations": [],
+      "invariants_passed": true,
+      "n_clips": 1,
+      "peak_angle": {
+        "ci_high_deg": 21.855,
+        "ci_low_deg": 19.021,
+        "design_effect": 1.0,
+        "effective_n": 8,
+        "icc": 0.0,
+        "method": "harrell_davis_percentile + bca_bootstrap",
+        "n": 8,
+        "outliers_rejected": 1,
+        "point_estimate_deg": 14.748,
+        "safety_margin_deg": 5.0,
+        "source_percentile": 75.0,
+        "value_deg": 19.748
+      },
+      "peak_exit_angle": {
+        "ci_high_deg": 36.855,
+        "ci_low_deg": 34.021,
+        "design_effect": 1.0,
+        "effective_n": 8,
+        "icc": 0.0,
+        "method": "derived_offset_from_peak",
+        "n": 8,
+        "outliers_rejected": 1,
+        "point_estimate_deg": 29.748,
+        "safety_margin_deg": 5.0,
+        "source_percentile": 75.0,
+        "value_deg": 34.748
+      },
+      "safety_margin_deg": 5.0,
+      "side": "both",
+      "start_angle": {
+        "ci_high_deg": 173.385,
+        "ci_low_deg": 172.443,
+        "design_effect": 1.0,
+        "effective_n": 9,
+        "icc": 0.0,
+        "method": "harrell_davis_percentile + bca_bootstrap",
+        "n": 9,
+        "outliers_rejected": 0,
+        "point_estimate_deg": 177.942,
+        "safety_margin_deg": 5.0,
+        "source_percentile": 20.0,
+        "value_deg": 172.942
+      },
+      "view": "front"
+    },
+    {
+      "end_angle": {
+        "ci_high_deg": 138.838,
+        "ci_low_deg": 137.492,
+        "design_effect": 1.0,
+        "effective_n": 3,
+        "icc": 0.0,
+        "method": "fsm_safe_min(start_p20, end_p20) + 1\u00b0 gap \u2014 corrects post-rep overshoot asymmetry",
+        "n": 3,
+        "outliers_rejected": 2,
+        "point_estimate_deg": 148.853,
+        "safety_margin_deg": 6.0,
+        "source_percentile": 20.0,
+        "value_deg": 142.853
+      },
+      "invariant_violations": [],
+      "invariants_passed": true,
+      "n_clips": 1,
+      "peak_angle": {
+        "ci_high_deg": 60.445,
+        "ci_low_deg": 57.651,
+        "design_effect": 1.0,
+        "effective_n": 5,
+        "icc": 0.0,
+        "method": "harrell_davis_percentile + bca_bootstrap",
+        "n": 5,
+        "outliers_rejected": 0,
+        "point_estimate_deg": 54.625,
+        "safety_margin_deg": 5.0,
+        "source_percentile": 75.0,
+        "value_deg": 59.625
+      },
+      "peak_exit_angle": {
+        "ci_high_deg": 75.445,
+        "ci_low_deg": 72.651,
+        "design_effect": 1.0,
+        "effective_n": 5,
+        "icc": 0.0,
+        "method": "derived_offset_from_peak",
+        "n": 5,
+        "outliers_rejected": 0,
+        "point_estimate_deg": 69.625,
+        "safety_margin_deg": 5.0,
+        "source_percentile": 75.0,
+        "value_deg": 74.625
+      },
+      "safety_margin_deg": 5.0,
+      "side": "left",
+      "start_angle": {
+        "ci_high_deg": 144.838,
+        "ci_low_deg": 143.492,
+        "design_effect": 1.0,
+        "effective_n": 4,
+        "icc": 0.0,
+        "method": "harrell_davis_percentile + bca_bootstrap",
+        "n": 4,
+        "outliers_rejected": 1,
+        "point_estimate_deg": 148.853,
+        "safety_margin_deg": 5.0,
+        "source_percentile": 20.0,
+        "value_deg": 143.853
+      },
+      "view": "side"
+    }
+  ],
+  "cross_validation": {
+    "folds": [
+      {
+        "end_hd_p20": 178.06,
+        "held_out_clip": "clip_001_you_side_right_good",
+        "n_train_reps": 9,
+        "peak_hd_p75": 14.57,
+        "start_hd_p20": 177.94
+      },
+      {
+        "end_hd_p20": 145.28,
+        "held_out_clip": "clip_004_you_front_both_good",
+        "n_train_reps": 5,
+        "peak_hd_p75": 54.62,
+        "start_hd_p20": 149.02
+      }
+    ],
+    "interpretation": "Lower std => thresholds generalize better across clips. Std >10\u00b0 suggests heterogeneous data or insufficient n.",
+    "n_folds": 2,
+    "summary": {
+      "end_p20_mean": 161.67,
+      "end_p20_std": 23.18,
+      "peak_p75_mean": 34.59,
+      "peak_p75_std": 28.32,
+      "start_p20_mean": 163.48,
+      "start_p20_std": 20.45
+    }
+  },
+  "dataset_summary": {
+    "good_clips": 2,
+    "good_rows": 14,
+    "total_clips": 6,
+    "total_rows": 63
+  },
+  "methodology": {
+    "bootstrap_resamples": 10000,
+    "bootstrap_seed": 1234,
+    "bucketing": "Per (view, side) \u2014 mirrors shipping CurlRomProfile",
+    "cluster_correction": "Design effect via ICC (Kish, 1965)",
+    "confidence_interval": "BCa bootstrap (Efron & Tibshirani, 1993)",
+    "cross_validation": "Leave-one-clip-out",
+    "outlier_rejection": "MAD-based, threshold 3.5 (Leys et al., 2013)",
+    "percentile_estimator": "Harrell-Davis (Harrell & Davis, 1982)",
+    "safety_margin": "Data-driven 2\u03c3 rest-noise floor (MAD-scaled)"
+  },
+  "peak_exit_gap_deg": 15.0
+}
