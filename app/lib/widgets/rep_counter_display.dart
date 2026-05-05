@@ -13,6 +13,9 @@ class RepCounterDisplay extends StatefulWidget {
   final RepState state;
   final double? jointAngle;
   final List<FormError> activeErrors;
+  final int leftReps;
+  final int rightReps;
+  final bool showPerArm;
 
   const RepCounterDisplay({
     super.key,
@@ -21,6 +24,9 @@ class RepCounterDisplay extends StatefulWidget {
     required this.state,
     this.jointAngle,
     this.activeErrors = const [],
+    this.leftReps = 0,
+    this.rightReps = 0,
+    this.showPerArm = false,
   });
 
   @override

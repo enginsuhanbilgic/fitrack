@@ -15,7 +15,66 @@ export 'curl/curl_strategy.dart'
     show RomThresholdsProvider, CurlRepCommitCallback;
 export 'curl/dtw_scorer.dart' show DtwScore;
 
-/// Snapshot returned after every frame — everything the UI needs.
+// ── Per-arm state machine (biceps curl only) ─────────────
+
+/// Holds all state for one arm's rep-counting FSM.
+class _ArmFsm {
+  RepState state = RepState.idle;
+  int reps = 0;
+  final List<double> _buf = [];
+  bool reachedPeak = false;
+  DateTime? _lastTransition;
+  DateTime? _stateStart;
+
+  static const int _window = 3;
+
+  void addAngle(double angle) {
+    _buf.add(angle);
+    if (_buf.length > _window) _buf.removeAt(0);
+  }
+
+  double? get smoothed {
+    if (_buf.isEmpty) return null;
+    return _buf.reduce((a, b) => a + b) / _buf.length;
+  }
+
+  bool get isDebouncing {
+    if (_lastTransition == null) return false;
+    return DateTime.now().difference(_lastTransition!) < kStateDebounce;
+  }
+
+  bool get isStuck {
+    if (state == RepState.idle || _stateStart == null) return false;
+    return DateTime.now().difference(_stateStart!) > kStuckStateLimit;
+  }
+
+  void transition(RepState next) {
+    state = next;
+    final now = DateTime.now();
+    _lastTransition = now;
+    _stateStart = now;
+  }
+
+  void forceIdle() {
+    state = RepState.idle;
+    reachedPeak = false;
+    _stateStart = null;
+    _lastTransition = DateTime.now(); // keeps debounce active after reset
+  }
+
+  void reset() {
+    state = RepState.idle;
+    reps = 0;
+    _buf.clear();
+    reachedPeak = false;
+    _lastTransition = null;
+    _stateStart = null;
+  }
+}
+
+// ── RepSnapshot ──────────────────────────────────────────
+
+/// Everything the UI needs after every frame.
 class RepSnapshot {
   final int reps;
   final int sets;
@@ -29,6 +88,9 @@ class RepSnapshot {
   final bool fatigueDetected;
   final int eccentricTooFastCount;
   final Set<FormError> errorsTriggered;
+  /// Per-arm rep counts — only meaningful for bicepsCurl; both 0 otherwise.
+  final int leftReps;
+  final int rightReps;
 
   /// Most recent peak forward-lean (deg, signed positive). Squat only.
   final double? squatLastRepLeanDeg;
@@ -73,6 +135,13 @@ class RepCounter {
 
   late final ExerciseStrategy _strategy;
 
+  // ── Curl per-arm FSMs ─────────────────────────────────
+  final _ArmFsm _leftArm = _ArmFsm();
+  final _ArmFsm _rightArm = _ArmFsm();
+  // Which arm currently owns form analysis (null = neither, mid-rep).
+  bool? _formArmIsLeft;
+
+  // ── Squat / push-up single FSM ────────────────────────
   RepState _state = RepState.idle;
   int _reps = 0;
   int _sets = 1;
@@ -184,14 +253,14 @@ class RepCounter {
     ExerciseType.pushUp => PushUpStrategy(),
   };
 
+  // ── Public API ────────────────────────────────────────
+
   RepSnapshot update(PoseResult result) {
     final now = DateTime.now();
     final angle = _strategy.computePrimaryAngle(result);
     _lastAngle = angle;
 
-    if (angle == null) {
-      return _snapshot();
-    }
+    if (angle == null) return _snapshot();
 
     _angleBuffer.add(angle);
     if (_angleBuffer.length > _smoothWindow) _angleBuffer.removeAt(0);
@@ -203,7 +272,6 @@ class RepCounter {
         _resetToIdle();
         return _snapshot();
       }
-    }
 
     // Debounce gate (invariant 1).
     if (_lastTransitionTime != null &&
