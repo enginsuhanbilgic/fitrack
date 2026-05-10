@@ -344,7 +344,7 @@ void main() {
       final vm = buildVm(exercise: ExerciseType.squat);
       expect(vm.detectedCurlView, CurlCameraView.unknown);
       expect(vm.profile, isNull);
-      expect(vm.needsCalibrationHint(), isTrue);
+      expect(vm.needsCalibrationHint(), isFalse);
       vm.dispose();
     });
 
@@ -352,6 +352,7 @@ void main() {
       final vm = buildVm(exercise: ExerciseType.pushUp);
       expect(vm.detectedCurlView, CurlCameraView.unknown);
       expect(vm.profile, isNull);
+      expect(vm.needsCalibrationHint(), isTrue);
       vm.dispose();
     });
 

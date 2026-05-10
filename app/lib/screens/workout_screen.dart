@@ -442,7 +442,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         // ── CALIBRATION overlay ─────────────────────────────────────────────
         if (phase == WorkoutPhase.calibration && calibrationSummary == null)
           CalibrationOverlay(
+            exercise: widget.exercise,
             repsDetected: _vm.calibrationReps,
+            progressTarget: _vm.calibrationProgressTarget,
+            progressLabel: _vm.calibrationProgressLabel,
+            instruction: _vm.calibrationInstruction,
             currentAngle: _vm.calibrationCurrentAngle,
             detectedView: _vm.detectedCurlView,
             secondsRemaining: _vm.calibrationError == null
@@ -656,10 +660,13 @@ class _TopHudBar extends StatelessWidget {
                       const SizedBox(height: 3),
                       Text(
                         exercise.label.toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          letterSpacing: 1.4,
+                          letterSpacing: 0,
                           color: isLight
                               ? const Color(0xFF4A4E3D)
                               : const Color(0xFFC4C9AC),
@@ -671,7 +678,8 @@ class _TopHudBar extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 // Right action buttons
-                if (exercise.isCurl && phase != WorkoutPhase.calibration)
+                if ((exercise.isCurl || exercise == ExerciseType.pushUp) &&
+                    phase != WorkoutPhase.calibration)
                   _HudIconButton(
                     icon: needsCalibration ? Icons.tune : Icons.tune,
                     onTap: onCalibration,
@@ -693,7 +701,8 @@ class _TopHudBar extends StatelessWidget {
                     danger: true,
                   ),
                 ],
-                if (!(exercise.isCurl && phase != WorkoutPhase.calibration) &&
+                if (!((exercise.isCurl || exercise == ExerciseType.pushUp) &&
+                        phase != WorkoutPhase.calibration) &&
                     phase != WorkoutPhase.active)
                   // Spacer to balance the back button on the left
                   const SizedBox(width: 40),
@@ -871,6 +880,8 @@ class _SetupBanner extends StatelessWidget {
 
     final text = vm.setupOkFrames > 0
         ? 'Almost there… (${vm.setupOkFrames} / $kSetupCheckFrames)'
+        : exercise == ExerciseType.pushUp
+        ? 'Side view: keep shoulder, elbow, wrist, hip and ankle visible'
         : exercise == ExerciseType.squat
         ? 'Stand sideways — left or right side to the camera'
         : 'Step back until your full body is visible';
@@ -910,6 +921,8 @@ class _SetupBanner extends StatelessWidget {
                 Flexible(
                   child: Text(
                     text,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: isLight ? const Color(0xFF1A1C14) : Colors.white,
                       fontSize: 14,
@@ -966,6 +979,8 @@ class _FramingHintBanner extends StatelessWidget {
                 Flexible(
                   child: Text(
                     hint,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: isLight ? const Color(0xFF5A3A00) : Colors.white,
                       fontSize: 14,
@@ -1043,6 +1058,8 @@ class _InfoBanner extends StatelessWidget {
                 Flexible(
                   child: Text(
                     text,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: isLight ? const Color(0xFF1A1C14) : Colors.white,
                       fontSize: 14,
@@ -1249,6 +1266,7 @@ class _CoachToastState extends State<_CoachToast>
   Widget build(BuildContext context) {
     final tip = _tips[_index];
     final isLight = Theme.of(context).brightness == Brightness.light;
+    final bottomPad = MediaQuery.paddingOf(context).bottom;
     final cyanColor = isLight
         ? const Color(0xFF007A85)
         : const Color(0xFF00EEFC);
@@ -1256,7 +1274,7 @@ class _CoachToastState extends State<_CoachToast>
     return Positioned(
       left: 16,
       right: 16,
-      bottom: 148,
+      bottom: bottomPad + 172,
       child: FadeTransition(
         opacity: _fadeAnim,
         child: SlideTransition(
@@ -1317,13 +1335,15 @@ class _CoachToastState extends State<_CoachToast>
                               color: cyanColor,
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
-                              letterSpacing: 1.2,
+                              letterSpacing: 0,
                               height: 1,
                             ),
                           ),
                           const SizedBox(height: 4),
                           Text(
                             tip.text,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: isLight
                                   ? const Color(0xFF1A1C14)
@@ -1357,6 +1377,9 @@ class _MinimalHud extends StatelessWidget {
   static const int _targetReps = 12;
 
   static String _formErrorLabel(FormError e) {
+    if (e == FormError.pushUpShortRom) return 'Go lower';
+    if (e == FormError.hipSag) return 'Keep your body straight';
+    if (e == FormError.squatDepth) return 'Go deeper';
     final spaced = e.name.replaceAllMapped(
       RegExp(r'([A-Z])'),
       (m) => ' ${m[0]}',
@@ -1370,6 +1393,9 @@ class _MinimalHud extends StatelessWidget {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final errors = snapshot.formErrors;
     final progress = (snapshot.reps / _targetReps).clamp(0.0, 1.0);
+    final size = MediaQuery.sizeOf(context);
+    final bottomPad = MediaQuery.paddingOf(context).bottom;
+    final repFontSize = size.height < 700 ? 70.0 : 84.0;
 
     // Accent glow color for text shadow
     final accentColor = isLight
@@ -1400,10 +1426,10 @@ class _MinimalHud extends StatelessWidget {
                     Text(
                       '${snapshot.reps}',
                       style: TextStyle(
-                        fontSize: 84,
+                        fontSize: repFontSize,
                         fontWeight: FontWeight.w900,
                         color: accentColor,
-                        letterSpacing: -4,
+                        letterSpacing: 0,
                         height: 1,
                         shadows: [
                           Shadow(
@@ -1434,7 +1460,7 @@ class _MinimalHud extends StatelessWidget {
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
                             color: ft.textDim,
-                            letterSpacing: 1.4,
+                            letterSpacing: 0,
                           ),
                         ),
                         Text(
@@ -1464,7 +1490,7 @@ class _MinimalHud extends StatelessWidget {
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
               child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+                padding: EdgeInsets.fromLTRB(16, 14, 16, bottomPad + 16),
                 decoration: BoxDecoration(
                   color: isLight
                       ? const Color(0xDEF4F2EC)
@@ -1493,7 +1519,7 @@ class _MinimalHud extends StatelessWidget {
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
                             color: ft.textDim,
-                            letterSpacing: 1.4,
+                            letterSpacing: 0,
                           ),
                         ),
                         const Spacer(),
@@ -1503,7 +1529,7 @@ class _MinimalHud extends StatelessWidget {
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
                             color: ft.accent,
-                            letterSpacing: 1.2,
+                            letterSpacing: 0,
                           ),
                         ),
                       ],
@@ -1536,7 +1562,7 @@ class _MinimalHud extends StatelessWidget {
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
                               ),
-                              maxLines: 1,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -1611,22 +1637,29 @@ class _StatCell extends StatelessWidget {
         children: [
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 9,
               fontWeight: FontWeight.w700,
               color: ft.textDim,
-              letterSpacing: 1.4,
+              letterSpacing: 0,
             ),
           ),
           const SizedBox(height: 2),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: valueColor ?? ft.textStrong,
-              letterSpacing: -0.5,
-              height: 1,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: valueColor ?? ft.textStrong,
+                letterSpacing: 0,
+                height: 1,
+              ),
             ),
           ),
         ],
