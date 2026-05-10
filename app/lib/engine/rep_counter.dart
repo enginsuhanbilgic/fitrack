@@ -17,61 +17,6 @@ export 'curl/dtw_scorer.dart' show DtwScore;
 
 // ── Per-arm state machine (biceps curl only) ─────────────
 
-/// Holds all state for one arm's rep-counting FSM.
-class _ArmFsm {
-  RepState state = RepState.idle;
-  int reps = 0;
-  final List<double> _buf = [];
-  bool reachedPeak = false;
-  DateTime? _lastTransition;
-  DateTime? _stateStart;
-
-  static const int _window = 3;
-
-  void addAngle(double angle) {
-    _buf.add(angle);
-    if (_buf.length > _window) _buf.removeAt(0);
-  }
-
-  double? get smoothed {
-    if (_buf.isEmpty) return null;
-    return _buf.reduce((a, b) => a + b) / _buf.length;
-  }
-
-  bool get isDebouncing {
-    if (_lastTransition == null) return false;
-    return DateTime.now().difference(_lastTransition!) < kStateDebounce;
-  }
-
-  bool get isStuck {
-    if (state == RepState.idle || _stateStart == null) return false;
-    return DateTime.now().difference(_stateStart!) > kStuckStateLimit;
-  }
-
-  void transition(RepState next) {
-    state = next;
-    final now = DateTime.now();
-    _lastTransition = now;
-    _stateStart = now;
-  }
-
-  void forceIdle() {
-    state = RepState.idle;
-    reachedPeak = false;
-    _stateStart = null;
-    _lastTransition = DateTime.now(); // keeps debounce active after reset
-  }
-
-  void reset() {
-    state = RepState.idle;
-    reps = 0;
-    _buf.clear();
-    reachedPeak = false;
-    _lastTransition = null;
-    _stateStart = null;
-  }
-}
-
 // ── RepSnapshot ──────────────────────────────────────────
 
 /// Everything the UI needs after every frame.
@@ -88,6 +33,7 @@ class RepSnapshot {
   final bool fatigueDetected;
   final int eccentricTooFastCount;
   final Set<FormError> errorsTriggered;
+
   /// Per-arm rep counts — only meaningful for bicepsCurl; both 0 otherwise.
   final int leftReps;
   final int rightReps;
@@ -114,6 +60,8 @@ class RepSnapshot {
     this.fatigueDetected = false,
     this.eccentricTooFastCount = 0,
     this.errorsTriggered = const {},
+    this.leftReps = 0,
+    this.rightReps = 0,
     this.squatLastRepLeanDeg,
     this.squatLastRepKneeShiftRatio,
     this.squatLastRepHeelLiftRatio,
@@ -136,11 +84,6 @@ class RepCounter {
   late final ExerciseStrategy _strategy;
 
   // ── Curl per-arm FSMs ─────────────────────────────────
-  final _ArmFsm _leftArm = _ArmFsm();
-  final _ArmFsm _rightArm = _ArmFsm();
-  // Which arm currently owns form analysis (null = neither, mid-rep).
-  bool? _formArmIsLeft;
-
   // ── Squat / push-up single FSM ────────────────────────
   RepState _state = RepState.idle;
   int _reps = 0;
@@ -150,6 +93,9 @@ class RepCounter {
 
   /// Per-rep squat quality scores accumulated this session (squat only).
   final List<double> _squatRepQualities = [];
+
+  /// Per-rep push-up quality scores accumulated this session (push-up only).
+  final List<double> _pushUpRepQualities = [];
 
   /// Squat-only completion callback. Fires once per committed squat rep
   /// with the analyzer's per-rep snapshot. Squat workouts use this to
@@ -272,6 +218,7 @@ class RepCounter {
         _resetToIdle();
         return _snapshot();
       }
+    }
 
     // Debounce gate (invariant 1).
     if (_lastTransitionTime != null &&
@@ -294,6 +241,7 @@ class RepCounter {
     if (output.repCommitted) {
       _reps++;
       _onSquatCommit();
+      _onPushUpCommit();
     }
 
     if (output.nextState != _state) {
@@ -333,6 +281,7 @@ class RepCounter {
     _lastErrors = const [];
     _lastAngle = null;
     _squatRepQualities.clear();
+    _pushUpRepQualities.clear();
     _strategy.onReset();
   }
 
@@ -381,14 +330,26 @@ class RepCounter {
     }
   }
 
+  void _onPushUpCommit() {
+    final strategy = _strategy;
+    if (strategy is! PushUpStrategy) return;
+    final quality = strategy.lastRepQuality;
+    if (quality != null) _pushUpRepQualities.add(quality);
+  }
+
   RepSnapshot _snapshot() {
     // Surface exercise-specific fields only when the active strategy matches.
     // One-per-frame downcast — acceptable cost for cross-layer clarity.
     final strategy = _strategy;
     final isCurl = strategy is CurlStrategy;
     final isSquat = strategy is SquatStrategy;
+    final isPushUp = strategy is PushUpStrategy;
     final squatAvg = isSquat && _squatRepQualities.isNotEmpty
         ? _squatRepQualities.reduce((a, b) => a + b) / _squatRepQualities.length
+        : null;
+    final pushUpAvg = isPushUp && _pushUpRepQualities.isNotEmpty
+        ? _pushUpRepQualities.reduce((a, b) => a + b) /
+              _pushUpRepQualities.length
         : null;
     return RepSnapshot(
       reps: _reps,
@@ -399,13 +360,19 @@ class RepCounter {
       detectedView: isCurl ? strategy.lockedView : CurlCameraView.unknown,
       lastRepQuality: isCurl
           ? strategy.formExtras.lastRepQuality
-          : (isSquat ? strategy.lastRepQuality : null),
+          : (isSquat
+                ? strategy.lastRepQuality
+                : (isPushUp ? strategy.lastRepQuality : null)),
       averageQuality: isCurl
           ? strategy.formExtras.averageQuality
-          : (isSquat ? squatAvg : null),
+          : (isSquat ? squatAvg : (isPushUp ? pushUpAvg : null)),
       repQualities: isCurl
           ? strategy.formExtras.repQualities
-          : (isSquat ? List.unmodifiable(_squatRepQualities) : const []),
+          : (isSquat
+                ? List.unmodifiable(_squatRepQualities)
+                : (isPushUp
+                      ? List.unmodifiable(_pushUpRepQualities)
+                      : const [])),
       fatigueDetected: isCurl ? strategy.formExtras.fatigueDetected : false,
       eccentricTooFastCount: isCurl
           ? strategy.formExtras.eccentricTooFastCount

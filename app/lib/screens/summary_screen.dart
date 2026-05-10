@@ -401,6 +401,8 @@ class _SummaryScreenState extends State<SummaryScreen> {
     FormError.excessiveForwardLean => Icons.architecture,
     FormError.heelLift => Icons.vertical_align_bottom,
     FormError.forwardKneeShift => Icons.compare_arrows_rounded,
+    FormError.hipSag => Icons.straighten_rounded,
+    FormError.pushUpShortRom => Icons.unfold_less,
     _ => Icons.error_outline,
   };
 
@@ -424,8 +426,9 @@ class _SummaryScreenState extends State<SummaryScreen> {
     FormError.excessiveForwardLean => 'Excessive Forward Lean',
     FormError.heelLift => 'Heel Lift',
     FormError.forwardKneeShift => 'Forward Knee Shift',
+    FormError.hipSag => 'Body Line Lost',
+    FormError.pushUpShortRom => 'Shallow Push-up',
     FormError.trunkTibia => 'Trunk-Tibia (legacy)',
-    _ => err.name,
   };
 
   /// 5-tier knee-shift bucket label (plan flow-decision plan-time #1).
@@ -2157,10 +2160,16 @@ class _SummaryScreenState extends State<SummaryScreen> {
 
   Widget _buildSimpleSummary(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
+    final quality = _meanRepQuality();
+    final pushUpErrors = errorsTriggered
+        .where(
+          (err) => err == FormError.hipSag || err == FormError.pushUpShortRom,
+        )
+        .toList();
+
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(32),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Icon(
@@ -2184,7 +2193,19 @@ class _SummaryScreenState extends State<SummaryScreen> {
           _StatRow(label: 'Sets', value: '$totalSets'),
           const SizedBox(height: 16),
           _StatRow(label: 'Duration', value: _formatDuration(sessionDuration)),
-          const Spacer(),
+          if (quality != null) ...[
+            const SizedBox(height: 16),
+            _StatRow(label: 'Form', value: '${(quality * 100).round()}%'),
+          ],
+          if (repQualities.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            _buildRepQualityStrip(context),
+          ],
+          if (pushUpErrors.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            _buildSquatFormIssuesCard(pushUpErrors, context),
+          ],
+          const SizedBox(height: 40),
           ElevatedButton(
             onPressed: () =>
                 Navigator.of(context).popUntil((route) => route.isFirst),

@@ -23,24 +23,44 @@ import 'package:flutter_test/flutter_test.dart';
 /// plausible positions. The push-up FSM is angle-driven; the pose is only
 /// used by the form analyzer's hip-sag evaluation, which tolerates
 /// imperfect geometry.
-PoseResult buildPose() {
-  PoseLandmark lm(int t, double x, double y) =>
-      PoseLandmark(type: t, x: x, y: y, confidence: 0.9);
+PoseResult buildPose({bool sagging = false}) {
+  PoseLandmark lm(int t, double x, double y, {double confidence = 0.9}) =>
+      PoseLandmark(type: t, x: x, y: y, confidence: confidence);
+
+  final leftShoulder = sagging
+      ? lm(LM.leftShoulder, 0.20, 0.50)
+      : lm(LM.leftShoulder, 0.45, 0.30);
+  final rightShoulder = sagging
+      ? lm(LM.rightShoulder, 0.20, 0.50)
+      : lm(LM.rightShoulder, 0.55, 0.30);
+  final leftHip = sagging
+      ? lm(LM.leftHip, 0.55, 0.85)
+      : lm(LM.leftHip, 0.46, 0.70);
+  final rightHip = sagging
+      ? lm(LM.rightHip, 0.55, 0.85)
+      : lm(LM.rightHip, 0.54, 0.70);
+  final leftAnkle = sagging
+      ? lm(LM.leftAnkle, 0.90, 0.50)
+      : lm(LM.leftAnkle, 0.46, 0.95);
+  final rightAnkle = sagging
+      ? lm(LM.rightAnkle, 0.90, 0.50)
+      : lm(LM.rightAnkle, 0.54, 0.95);
+
   return PoseResult(
     inferenceTime: const Duration(milliseconds: 10),
     landmarks: [
-      lm(LM.leftShoulder, 0.45, 0.30),
-      lm(LM.rightShoulder, 0.55, 0.30),
+      leftShoulder,
+      rightShoulder,
       lm(LM.leftElbow, 0.42, 0.50),
       lm(LM.rightElbow, 0.58, 0.50),
       lm(LM.leftWrist, 0.40, 0.65),
       lm(LM.rightWrist, 0.60, 0.65),
-      lm(LM.leftHip, 0.46, 0.70),
-      lm(LM.rightHip, 0.54, 0.70),
+      leftHip,
+      rightHip,
       lm(LM.leftKnee, 0.46, 0.85),
       lm(LM.rightKnee, 0.54, 0.85),
-      lm(LM.leftAnkle, 0.46, 0.95),
-      lm(LM.rightAnkle, 0.54, 0.95),
+      leftAnkle,
+      rightAnkle,
     ],
   );
 }
@@ -49,10 +69,11 @@ StrategyFrameOutput tickAt({
   required PushUpStrategy strategy,
   required RepState state,
   required double angle,
+  PoseResult? pose,
 }) {
   return strategy.tick(
     StrategyFrameInput(
-      pose: buildPose(),
+      pose: pose ?? buildPose(),
       smoothedAngle: angle,
       now: DateTime.now(),
       state: state,
@@ -156,7 +177,49 @@ void main() {
       out = tickAt(strategy: strategy, state: RepState.ascending, angle: 165);
       expect(out.nextState, RepState.idle);
       expect(out.repCommitted, isTrue);
+      expect(strategy.lastRepQuality, 1.0);
     });
+
+    test(
+      'sagging body line still commits rep with hipSag and lower quality',
+      () {
+        final strategy = PushUpStrategy();
+        final sagPose = buildPose(sagging: true);
+
+        tickAt(
+          strategy: strategy,
+          state: RepState.idle,
+          angle: 150,
+          pose: sagPose,
+        );
+        tickAt(
+          strategy: strategy,
+          state: RepState.descending,
+          angle: 85,
+          pose: sagPose,
+        );
+        tickAt(
+          strategy: strategy,
+          state: RepState.bottom,
+          angle: 95,
+          pose: sagPose,
+        );
+        final out = tickAt(
+          strategy: strategy,
+          state: RepState.ascending,
+          angle: 165,
+          pose: sagPose,
+        );
+
+        expect(out.repCommitted, isTrue);
+        expect(out.formErrors, contains(FormError.hipSag));
+        expect(strategy.lastRepQuality, lessThan(1.0));
+        expect(
+          strategy.lastBodyLineDeviationDeg,
+          greaterThan(kHipSagDeviation),
+        );
+      },
+    );
 
     test('three consecutive reps each commit once', () {
       final strategy = PushUpStrategy();
@@ -188,6 +251,24 @@ void main() {
         ExerciseType.pushUp,
       ).landmarkIndices;
       expect(PushUpStrategy().requiredLandmarkIndices, expected);
+    });
+
+    test('primary angle uses the visible side instead of averaging sides', () {
+      PoseLandmark lm(int type, double x, double y, double confidence) =>
+          PoseLandmark(type: type, x: x, y: y, confidence: confidence);
+      final pose = PoseResult(
+        inferenceTime: const Duration(milliseconds: 10),
+        landmarks: [
+          lm(LM.leftShoulder, 0.45, 0.30, 0.1),
+          lm(LM.leftElbow, 0.42, 0.50, 0.1),
+          lm(LM.leftWrist, 0.40, 0.65, 0.1),
+          lm(LM.rightShoulder, 0.60, 0.30, 0.9),
+          lm(LM.rightElbow, 0.60, 0.50, 0.9),
+          lm(LM.rightWrist, 0.80, 0.50, 0.9),
+        ],
+      );
+
+      expect(PushUpStrategy().computePrimaryAngle(pose), closeTo(90, 0.01));
     });
   });
 

@@ -348,6 +348,16 @@ const double kQualitySquatHeelLiftMaxDeduction = 0.10;
 /// Max shoulder-hip-ankle collinearity deviation for hip sag (degrees).
 const double kHipSagDeviation = 15.0;
 
+/// Maximum quality deduction for losing a straight shoulder-hip-ankle line
+/// during a push-up. Applied proportionally once deviation exceeds
+/// [kHipSagDeviation].
+const double kQualityPushUpHipSagMaxDeduction = 0.35;
+
+/// Deduction for a committed push-up rep that does not reach the configured
+/// bottom elbow angle. This is mostly a guard for future relaxed-counting
+/// modes; the current FSM normally requires the bottom gate before commit.
+const double kQualityPushUpShortRomDeduction = 0.30;
+
 // ── Visual feedback ──────────────────────────────────────
 /// Duration in ms to highlight offending landmarks after a form error.
 const int kHighlightDurationMs = 1500;
