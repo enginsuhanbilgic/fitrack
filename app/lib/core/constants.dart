@@ -301,8 +301,36 @@ const double kPushUpStartAngle = 160.0;
 /// DESCENDING → BOTTOM when elbow angle drops below this.
 const double kPushUpBottomAngle = 90.0;
 
+/// A push-up attempt that reverses above bottom but reaches at least this
+/// elbow angle is counted as a shallow/faulty rep instead of being discarded.
+const double kPushUpShallowRepMaxAngle = 130.0;
+
 /// ASCENDING → IDLE when elbow angle returns above this → rep++.
 const double kPushUpEndAngle = 160.0;
+
+/// Push-up calibration accepts only realistic top-lockout elbow angles.
+const double kPushUpCalibrationTopMinAngle = 145.0;
+const double kPushUpCalibrationTopMaxAngle = 180.0;
+
+/// Push-up calibration accepts only realistic bottom-position elbow angles.
+const double kPushUpCalibrationBottomMinAngle = 55.0;
+const double kPushUpCalibrationBottomMaxAngle = 135.0;
+
+/// Minimum personal ROM excursion required before saving a push-up profile.
+const double kPushUpCalibrationMinExcursion = 30.0;
+
+/// Hold duration for each push-up calibration pose.
+const int kPushUpCalibrationHoldSeconds = 3;
+
+/// Maximum angle spread allowed while holding a calibration pose.
+const double kPushUpCalibrationHoldMaxSpread = 10.0;
+
+/// Personal push-up threshold margins derived from calibrated top/bottom.
+const double kPushUpProfileStartMargin = 12.0;
+const double kPushUpProfileEndMargin = 10.0;
+const double kPushUpProfileBottomMargin = 8.0;
+const double kPushUpProfileShallowMargin = 35.0;
+const double kPushUpProfileMinGateGap = 6.0;
 
 // ── Squat form thresholds ────────────────────────────────
 /// (DEPRECATED 2026-04-25, Squat Master Rebuild) Max trunk-tibia deviation
@@ -354,8 +382,7 @@ const double kHipSagDeviation = 15.0;
 const double kQualityPushUpHipSagMaxDeduction = 0.35;
 
 /// Deduction for a committed push-up rep that does not reach the configured
-/// bottom elbow angle. This is mostly a guard for future relaxed-counting
-/// modes; the current FSM normally requires the bottom gate before commit.
+/// bottom elbow angle.
 const double kQualityPushUpShortRomDeduction = 0.30;
 
 // ── Visual feedback ──────────────────────────────────────

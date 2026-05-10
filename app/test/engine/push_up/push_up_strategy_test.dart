@@ -13,6 +13,7 @@ library;
 import 'package:fitrack/core/constants.dart';
 import 'package:fitrack/core/types.dart';
 import 'package:fitrack/engine/exercise_strategy.dart';
+import 'package:fitrack/engine/push_up/push_up_rom_profile.dart';
 import 'package:fitrack/engine/push_up/push_up_strategy.dart';
 import 'package:fitrack/models/landmark_types.dart';
 import 'package:fitrack/models/pose_landmark.dart';
@@ -151,6 +152,72 @@ void main() {
       );
       expect(out.nextState, RepState.ascending);
       expect(out.repCommitted, isFalse);
+    });
+
+    test(
+      'DESCENDING commits shallow rep when attempt returns to extension',
+      () {
+        final strategy = PushUpStrategy();
+
+        tickAt(strategy: strategy, state: RepState.idle, angle: 150);
+        tickAt(
+          strategy: strategy,
+          state: RepState.descending,
+          angle: kPushUpShallowRepMaxAngle,
+        );
+        final out = tickAt(
+          strategy: strategy,
+          state: RepState.descending,
+          angle: kPushUpEndAngle,
+        );
+
+        expect(out.nextState, RepState.idle);
+        expect(out.repCommitted, isTrue);
+        expect(out.formErrors, contains(FormError.pushUpShortRom));
+        expect(strategy.lastRepQuality, lessThan(1.0));
+      },
+    );
+
+    test(
+      'DESCENDING ignores tiny dip that never reaches shallow threshold',
+      () {
+        final strategy = PushUpStrategy();
+
+        tickAt(strategy: strategy, state: RepState.idle, angle: 150);
+        tickAt(
+          strategy: strategy,
+          state: RepState.descending,
+          angle: kPushUpShallowRepMaxAngle + 10,
+        );
+        final out = tickAt(
+          strategy: strategy,
+          state: RepState.descending,
+          angle: kPushUpEndAngle,
+        );
+
+        expect(out.nextState, RepState.idle);
+        expect(out.repCommitted, isFalse);
+        expect(out.formErrors, isEmpty);
+      },
+    );
+
+    test('uses personalized thresholds from push-up calibration', () {
+      const thresholds = PushUpRomThresholds(
+        startAngle: 150,
+        bottomAngle: 105,
+        shallowRepMaxAngle: 125,
+        endAngle: 150,
+      );
+      final strategy = PushUpStrategy(thresholds: thresholds);
+
+      var out = tickAt(strategy: strategy, state: RepState.idle, angle: 155);
+      expect(out.nextState, RepState.idle);
+
+      out = tickAt(strategy: strategy, state: RepState.idle, angle: 145);
+      expect(out.nextState, RepState.descending);
+
+      out = tickAt(strategy: strategy, state: RepState.descending, angle: 102);
+      expect(out.nextState, RepState.bottom);
     });
   });
 

@@ -20,6 +20,7 @@ import '../app.dart';
 import '../core/constants.dart';
 import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
+import '../engine/push_up/push_up_rom_profile.dart';
 import '../services/app_services.dart';
 import '../services/db/profile_repository.dart';
 import '../services/session_exporter.dart';
@@ -37,6 +38,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late ProfileRepository _repository;
   bool _servicesResolved = false;
   CurlRomProfile? _profile;
+  PushUpRomProfile? _pushUpProfile;
   bool _loading = true;
   bool _showDetails = false;
   bool _dtwScoringEnabled = false;
@@ -62,6 +64,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _loading = true);
     final services = AppServicesScope.of(context);
     final p = await _repository.loadCurl();
+    final pushUpProfile = await _repository.loadPushUp();
     final dtw = await services.preferencesRepository.getEnableDtwScoring();
     final longFemur = await services.preferencesRepository
         .getSquatLongFemurLifter();
@@ -80,6 +83,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() {
       _profile = p;
+      _pushUpProfile = pushUpProfile;
       _dtwScoringEnabled = dtw;
       _squatLongFemurLifter = longFemur;
       _diagnosticDisableAutoCalibration = diagnosticDisableAutoCal;
@@ -204,6 +208,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (ok == true) {
       await _repository.resetCurl();
+      await _repository.resetPushUp();
       await _reload();
     }
   }
@@ -235,9 +240,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ), */
             ListTile(
               leading: const Icon(Icons.rotate_90_degrees_ccw),
-              title: const Text('Side view'),
-              subtitle: const Text('Turn sideways to the camera'),
+              title: const Text('Biceps curl side view'),
+              subtitle: const Text('Stand sideways to the camera'),
               onTap: () => Navigator.pop(ctx, ExerciseType.bicepsCurlSide),
+            ),
+            ListTile(
+              leading: const Icon(Icons.accessibility_new),
+              title: const Text('Push-up side view'),
+              subtitle: const Text('Calibrate top and bottom push-up depth'),
+              onTap: () => Navigator.pop(ctx, ExerciseType.pushUp),
             ),
             const SizedBox(height: 8),
           ],
@@ -309,6 +320,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 _ProfileSection(
                   profile: _profile,
+                  pushUpProfile: _pushUpProfile,
                   showDetails: _showDetails,
                   onToggleDetails: (v) => setState(() => _showDetails = v),
                 ),
@@ -543,11 +555,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
 class _ProfileSection extends StatelessWidget {
   final CurlRomProfile? profile;
+  final PushUpRomProfile? pushUpProfile;
   final bool showDetails;
   final ValueChanged<bool> onToggleDetails;
 
   const _ProfileSection({
     required this.profile,
+    required this.pushUpProfile,
     required this.showDetails,
     required this.onToggleDetails,
   });
@@ -605,6 +619,44 @@ class _ProfileSection extends StatelessWidget {
                 title: const Text('Show details'),
                 value: showDetails,
                 onChanged: onToggleDetails,
+              ),
+            const Divider(height: 28),
+            Row(
+              children: [
+                const Icon(Icons.accessibility_new, color: Color(0xFF00E676)),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Push-up Profile',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                _StatusPill(
+                  label: pushUpProfile?.isCalibrated == true
+                      ? 'Calibrated'
+                      : 'Uncalibrated',
+                  color: pushUpProfile?.isCalibrated == true
+                      ? const Color(0xFF00E676)
+                      : theme.colorScheme.onSurface.withValues(alpha: 0.38),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (pushUpProfile == null)
+              Text(
+                'Not calibrated. Use Recalibrate to record your top and bottom push-up angles.',
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
+                ),
+              )
+            else
+              Text(
+                'Top ${pushUpProfile!.topAngle.toStringAsFixed(0)}° · '
+                'Bottom ${pushUpProfile!.bottomAngle.toStringAsFixed(0)}° · '
+                'ROM ${pushUpProfile!.romDegrees.toStringAsFixed(0)}°',
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
+                ),
               ),
           ],
         ),

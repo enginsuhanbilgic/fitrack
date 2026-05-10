@@ -15,6 +15,7 @@ import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 
 import '../../engine/curl/curl_rom_profile.dart';
+import '../../engine/push_up/push_up_rom_profile.dart';
 import '../telemetry_log.dart';
 
 abstract class ProfileRepository {
@@ -22,6 +23,11 @@ abstract class ProfileRepository {
   Future<void> saveCurl(CurlRomProfile profile);
   Future<void> resetCurl();
   Future<bool> existsCurl();
+
+  Future<PushUpRomProfile?> loadPushUp() async => null;
+  Future<void> savePushUp(PushUpRomProfile profile) async {}
+  Future<void> resetPushUp() async {}
+  Future<bool> existsPushUp() async => false;
 }
 
 class SqliteProfileRepository implements ProfileRepository {
@@ -33,6 +39,7 @@ class SqliteProfileRepository implements ProfileRepository {
   /// schema evolutions of the embedded JSON; forward-compatible with future
   /// exercise profiles (e.g. `squat_profile_v1`).
   static const String curlKey = 'curl_profile_v1';
+  static const String pushUpKey = 'push_up_profile_v1';
 
   @override
   Future<bool> existsCurl() async {
@@ -81,10 +88,67 @@ class SqliteProfileRepository implements ProfileRepository {
   }
 
   @override
+  Future<bool> existsPushUp() async {
+    final rows = await _db.query(
+      'profiles',
+      columns: <String>['profile_key'],
+      where: 'profile_key = ?',
+      whereArgs: <Object?>[pushUpKey],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  @override
+  Future<PushUpRomProfile?> loadPushUp() async {
+    final rows = await _db.query(
+      'profiles',
+      columns: <String>['profile_json'],
+      where: 'profile_key = ?',
+      whereArgs: <Object?>[pushUpKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final raw = rows.first['profile_json'] as String?;
+    if (raw == null) return null;
+    try {
+      final j = jsonDecode(raw) as Map<String, dynamic>;
+      return PushUpRomProfile.fromJson(j);
+    } catch (e, st) {
+      TelemetryLog.instance.log(
+        'schema.migration_failed',
+        'Failed to load push-up profile from sqlite; deleting row. error=$e',
+        data: <String, Object?>{'stackTrace': st.toString()},
+      );
+      try {
+        await _db.delete(
+          'profiles',
+          where: 'profile_key = ?',
+          whereArgs: <Object?>[pushUpKey],
+        );
+      } catch (_) {
+        // best-effort cleanup
+      }
+      return null;
+    }
+  }
+
+  @override
   Future<void> saveCurl(CurlRomProfile profile) async {
     final json = jsonEncode(profile.toJson());
     await _db.insert('profiles', <String, Object?>{
       'profile_key': curlKey,
+      'profile_json': json,
+      'schema_version': 1,
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<void> savePushUp(PushUpRomProfile profile) async {
+    final json = jsonEncode(profile.toJson());
+    await _db.insert('profiles', <String, Object?>{
+      'profile_key': pushUpKey,
       'profile_json': json,
       'schema_version': 1,
       'updated_at': DateTime.now().millisecondsSinceEpoch,
@@ -99,15 +163,28 @@ class SqliteProfileRepository implements ProfileRepository {
       whereArgs: <Object?>[curlKey],
     );
   }
+
+  @override
+  Future<void> resetPushUp() async {
+    await _db.delete(
+      'profiles',
+      where: 'profile_key = ?',
+      whereArgs: <Object?>[pushUpKey],
+    );
+  }
 }
 
 /// In-memory double for tests and previews. Matches `InMemoryRomProfileStore`'s
 /// deep-copy semantics so tests don't accidentally depend on reference equality.
 class InMemoryProfileRepository implements ProfileRepository {
   CurlRomProfile? _profile;
+  PushUpRomProfile? _pushUpProfile;
 
   @override
   Future<bool> existsCurl() async => _profile != null;
+
+  @override
+  Future<bool> existsPushUp() async => _pushUpProfile != null;
 
   @override
   Future<CurlRomProfile?> loadCurl() async {
@@ -128,5 +205,26 @@ class InMemoryProfileRepository implements ProfileRepository {
   @override
   Future<void> resetCurl() async {
     _profile = null;
+  }
+
+  @override
+  Future<PushUpRomProfile?> loadPushUp() async {
+    final p = _pushUpProfile;
+    if (p == null) return null;
+    return PushUpRomProfile.fromJson(
+      jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>,
+    );
+  }
+
+  @override
+  Future<void> savePushUp(PushUpRomProfile profile) async {
+    _pushUpProfile = PushUpRomProfile.fromJson(
+      jsonDecode(jsonEncode(profile.toJson())) as Map<String, dynamic>,
+    );
+  }
+
+  @override
+  Future<void> resetPushUp() async {
+    _pushUpProfile = null;
   }
 }

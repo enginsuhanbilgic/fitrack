@@ -7,6 +7,7 @@ import 'curl/curl_form_analyzer_extras.dart';
 import 'curl/curl_strategy.dart';
 import 'curl/dtw_scorer.dart';
 import 'exercise_strategy.dart';
+import 'push_up/push_up_rom_profile.dart';
 import 'push_up/push_up_strategy.dart';
 import 'squat/squat_strategy.dart';
 
@@ -14,6 +15,8 @@ import 'squat/squat_strategy.dart';
 export 'curl/curl_strategy.dart'
     show RomThresholdsProvider, CurlRepCommitCallback;
 export 'curl/dtw_scorer.dart' show DtwScore;
+export 'push_up/push_up_rom_profile.dart'
+    show PushUpRomProfile, PushUpRomThresholds;
 
 // ── Per-arm state machine (biceps curl only) ─────────────
 
@@ -122,6 +125,7 @@ class RepCounter {
     bool squatLongFemurLifter = false,
     SquatFormThresholds squatFormThresholds = SquatFormThresholds.defaults,
     SquatRepCommitCallback? onSquatRepCommit,
+    PushUpRomThresholds pushUpThresholds = PushUpRomThresholds.defaults,
   }) : _onSquatRepCommit = onSquatRepCommit {
     _strategy = _buildStrategy(
       exercise: exercise,
@@ -136,6 +140,7 @@ class RepCounter {
       squatVariant: squatVariant,
       squatLongFemurLifter: squatLongFemurLifter,
       squatFormThresholds: squatFormThresholds,
+      pushUpThresholds: pushUpThresholds,
     );
   }
 
@@ -152,6 +157,7 @@ class RepCounter {
     SquatVariant squatVariant = SquatVariant.bodyweight,
     bool squatLongFemurLifter = false,
     SquatFormThresholds squatFormThresholds = SquatFormThresholds.defaults,
+    PushUpRomThresholds pushUpThresholds = PushUpRomThresholds.defaults,
   }) => switch (exercise) {
     ExerciseType.bicepsCurlFront => CurlStrategy(
       exerciseType: ExerciseType.bicepsCurlFront,
@@ -196,7 +202,7 @@ class RepCounter {
       longFemurLifter: squatLongFemurLifter,
       formThresholds: squatFormThresholds,
     ),
-    ExerciseType.pushUp => PushUpStrategy(),
+    ExerciseType.pushUp => PushUpStrategy(thresholds: pushUpThresholds),
   };
 
   // ── Public API ────────────────────────────────────────
@@ -258,6 +264,13 @@ class RepCounter {
   /// or when the active exercise is not biceps curl.
   CurlCameraView updateSetupView(PoseResult pose) =>
       _strategy.updateSetupView(pose);
+
+  void updatePushUpThresholds(PushUpRomThresholds thresholds) {
+    final strategy = _strategy;
+    if (strategy is PushUpStrategy) {
+      strategy.updateThresholds(thresholds);
+    }
+  }
 
   /// Start a new set — resets reps, keeps set count.
   void nextSet() {

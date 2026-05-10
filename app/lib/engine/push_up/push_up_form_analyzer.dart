@@ -4,6 +4,7 @@ import '../../models/landmark_types.dart';
 import '../../models/pose_result.dart';
 import '../angle_utils.dart';
 import '../form_analyzer_base.dart';
+import 'push_up_rom_profile.dart';
 
 /// Form analyzer for side-view push-ups.
 ///
@@ -14,6 +15,11 @@ import '../form_analyzer_base.dart';
 /// Rep-boundary error:
 ///   - Partial ROM: rep completed without elbow angle reaching kPushUpBottomAngle.
 class PushUpFormAnalyzer extends FormAnalyzerBase {
+  PushUpFormAnalyzer({
+    PushUpRomThresholds thresholds = PushUpRomThresholds.defaults,
+  }) : _thresholds = thresholds;
+
+  PushUpRomThresholds _thresholds;
   double? _minElbowAngle;
   double? _maxBodyLineDeviationDeg;
   double? _lastRepQuality;
@@ -26,6 +32,16 @@ class PushUpFormAnalyzer extends FormAnalyzerBase {
 
   /// Largest shoulder-hip-ankle deviation observed on the most recent rep.
   double? get lastBodyLineDeviationDeg => _lastBodyLineDeviationDeg;
+
+  /// True when the user moved far enough down to treat the attempt as a
+  /// shallow push-up if they return to full extension before reaching bottom.
+  bool get hasShallowRepAttempt =>
+      _minElbowAngle != null &&
+      _minElbowAngle! <= _thresholds.shallowRepMaxAngle;
+
+  void updateThresholds(PushUpRomThresholds thresholds) {
+    _thresholds = thresholds;
+  }
 
   @override
   void onRepStart(PoseResult startSnapshot) {
@@ -66,7 +82,7 @@ class PushUpFormAnalyzer extends FormAnalyzerBase {
   List<FormError> consumeCompletionErrors() {
     final errors = <FormError>[];
     final shortRom =
-        _minElbowAngle != null && _minElbowAngle! >= kPushUpBottomAngle;
+        _minElbowAngle != null && _minElbowAngle! >= _thresholds.bottomAngle;
     if (shortRom) {
       errors.add(FormError.pushUpShortRom);
     }

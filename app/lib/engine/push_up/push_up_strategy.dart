@@ -6,14 +6,19 @@ import '../angle_utils.dart';
 import '../exercise_strategy.dart';
 import '../form_analyzer_base.dart';
 import 'push_up_form_analyzer.dart';
+import 'push_up_rom_profile.dart';
 
 /// Push-up FSM encapsulated as a strategy.
 ///
 /// No session-scoped state — all tracking resets per rep.
 class PushUpStrategy extends ExerciseStrategy {
-  PushUpStrategy();
+  PushUpStrategy({
+    PushUpRomThresholds thresholds = PushUpRomThresholds.defaults,
+  }) : _thresholds = thresholds,
+       _form = PushUpFormAnalyzer(thresholds: thresholds);
 
-  final PushUpFormAnalyzer _form = PushUpFormAnalyzer();
+  PushUpRomThresholds _thresholds;
+  final PushUpFormAnalyzer _form;
 
   @override
   ExerciseType get exercise => ExerciseType.pushUp;
@@ -41,6 +46,11 @@ class PushUpStrategy extends ExerciseStrategy {
 
   double? get lastBodyLineDeviationDeg => _form.lastBodyLineDeviationDeg;
 
+  void updateThresholds(PushUpRomThresholds thresholds) {
+    _thresholds = thresholds;
+    _form.updateThresholds(thresholds);
+  }
+
   @override
   StrategyFrameOutput tick(StrategyFrameInput input) {
     final smoothed = input.smoothedAngle;
@@ -58,25 +68,31 @@ class PushUpStrategy extends ExerciseStrategy {
 
     switch (input.state) {
       case RepState.idle:
-        if (smoothed < kPushUpStartAngle) {
+        if (smoothed < _thresholds.startAngle) {
           nextState = RepState.descending;
           _form.onRepStart(pose);
+          _form.trackAngle(smoothed);
         }
       case RepState.descending:
         errors = _form.evaluate(pose, now: input.now);
-        if (smoothed < kPushUpBottomAngle) {
+        if (smoothed < _thresholds.bottomAngle) {
           nextState = RepState.bottom;
-        } else if (smoothed > kPushUpStartAngle) {
+        } else if (smoothed >= _thresholds.endAngle) {
+          if (_form.hasShallowRepAttempt) {
+            final completionErrors = _form.consumeCompletionErrors();
+            errors = [...errors, ...completionErrors];
+            repCommitted = true;
+          }
           nextState = RepState.idle;
         }
       case RepState.bottom:
         errors = _form.evaluate(pose, now: input.now);
-        if (smoothed > kPushUpBottomAngle) {
+        if (smoothed > _thresholds.bottomAngle) {
           nextState = RepState.ascending;
         }
       case RepState.ascending:
         errors = _form.evaluate(pose, now: input.now);
-        if (smoothed >= kPushUpEndAngle) {
+        if (smoothed >= _thresholds.endAngle) {
           final completionErrors = _form.consumeCompletionErrors();
           errors = [...errors, ...completionErrors];
           repCommitted = true;

@@ -111,6 +111,8 @@ class CalibrationSummary {
   const CalibrationSummary({required this.viewLabel, required this.sidesLabel});
 }
 
+enum _PushUpCalibrationStage { topHold, bottomHold, rise }
+
 /// All engine, phase, calibration, TTS and UI-observable state for a single
 /// workout session. UI subscribes via [ChangeNotifier]; the widget never owns
 /// mutable state beyond what the framework itself requires (controllers etc.).
@@ -198,6 +200,7 @@ class WorkoutViewModel extends ChangeNotifier {
     dCutoff: kOneEuroDisplayDCutoff,
   );
   CurlRomProfile? _profile;
+  PushUpRomProfile? _pushUpProfile;
   final CurlAutoCalibrator _autoCalibrator = CurlAutoCalibrator();
   bool _profileDirty = false;
 
@@ -211,6 +214,15 @@ class WorkoutViewModel extends ChangeNotifier {
   double? _calibrationCurrentAngle;
   final List<RepExtreme> _calibrationCollected = [];
   CalibrationSummary? _calibrationSummary;
+  _PushUpCalibrationStage _pushUpCalibrationStage =
+      _PushUpCalibrationStage.topHold;
+  DateTime? _pushUpCalibrationHoldStartedAt;
+  final List<double> _pushUpCalibrationHoldSamples = [];
+  double? _pushUpCalibrationTopAngle;
+  double? _pushUpCalibrationBottomAngle;
+  int _pushUpCalibrationBottomSampleCount = 0;
+  String _pushUpCalibrationInstruction =
+      'Hold the top push-up position with your body straight.';
 
   // ── Lifecycle / phase ──────────────────────────────────
   bool _isReady = false;
@@ -435,6 +447,13 @@ class WorkoutViewModel extends ChangeNotifier {
   String? get calibrationError => _calibrationError;
   double? get calibrationCurrentAngle => _calibrationCurrentAngle;
   CalibrationSummary? get calibrationSummary => _calibrationSummary;
+  int get calibrationProgressTarget =>
+      exercise == ExerciseType.pushUp ? 3 : kCalibrationMinReps;
+  String get calibrationProgressLabel =>
+      exercise == ExerciseType.pushUp ? 'steps' : 'reps';
+  String get calibrationInstruction => exercise == ExerciseType.pushUp
+      ? _pushUpCalibrationInstruction
+      : 'Curl through your full natural range — $kCalibrationMinReps reps.';
 
   /// True once a `forceCalibration: true` session has finished its calibration
   /// summary and should pop back to whatever route launched the recalibrate
@@ -584,6 +603,8 @@ class WorkoutViewModel extends ChangeNotifier {
             );
           }
         }
+      } else if (exercise == ExerciseType.pushUp) {
+        _pushUpProfile = await _profileRepository.loadPushUp();
       }
       _repCounter = RepCounter(
         exercise: exercise,
@@ -601,8 +622,11 @@ class WorkoutViewModel extends ChangeNotifier {
           _squatSensitivity,
         ),
         onSquatRepCommit: _handleSquatRepCommit,
+        pushUpThresholds:
+            _pushUpProfile?.thresholds ?? PushUpRomThresholds.defaults,
       );
-      if (exercise.isCurl && forceCalibration) {
+      if ((exercise.isCurl || exercise == ExerciseType.pushUp) &&
+          forceCalibration) {
         // Personal calibration is opt-in only — Settings → Recalibrate sets
         // `forceCalibration`. We never launch it automatically.
         _enterCalibration();
@@ -1109,6 +1133,14 @@ class WorkoutViewModel extends ChangeNotifier {
     _calibrationError = null;
     _calibrationCurrentAngle = null;
     _calibrationCollected.clear();
+    _resetPushUpCalibrationState();
+    if (exercise == ExerciseType.pushUp) {
+      TelemetryLog.instance.log('pushup_calibration.start', 'phase entered');
+      _tts.speak('Hold the top push-up position with your body straight.');
+      _startCalibrationTimeout();
+      notifyListeners();
+      return;
+    }
     _calibrationDetector = RepBoundaryDetector();
     _calibrationSub = _calibrationDetector!.extremes.listen(_onCalibrationRep);
     TelemetryLog.instance.log('calibration.start', 'phase entered');
@@ -1126,9 +1158,23 @@ class WorkoutViewModel extends ChangeNotifier {
       notifyListeners();
       if (_calibrationSecondsRemaining <= 0) {
         t.cancel();
-        _failCalibration("Didn't see any reps — try again or skip.");
+        final message = exercise == ExerciseType.pushUp
+            ? "Couldn't complete calibration — try again or skip."
+            : "Didn't see any reps — try again or skip.";
+        _failCalibration(message);
       }
     });
+  }
+
+  void _resetPushUpCalibrationState() {
+    _pushUpCalibrationStage = _PushUpCalibrationStage.topHold;
+    _pushUpCalibrationHoldStartedAt = null;
+    _pushUpCalibrationHoldSamples.clear();
+    _pushUpCalibrationTopAngle = null;
+    _pushUpCalibrationBottomAngle = null;
+    _pushUpCalibrationBottomSampleCount = 0;
+    _pushUpCalibrationInstruction =
+        'Hold the top push-up position with your body straight.';
   }
 
   void _onCalibrationRep(RepExtreme rep) {
@@ -1245,6 +1291,8 @@ class WorkoutViewModel extends ChangeNotifier {
     _calibrationSub = null;
     _calibrationDetector?.dispose();
     _calibrationDetector = null;
+    _pushUpCalibrationHoldStartedAt = null;
+    _pushUpCalibrationHoldSamples.clear();
   }
 
   /// Hole #1 trigger: called whenever `_detectedCurlView` flips to a non-unknown
@@ -1288,6 +1336,11 @@ class WorkoutViewModel extends ChangeNotifier {
   }
 
   void _updateCalibration(PoseResult result, List<PoseLandmark> smoothed) {
+    if (exercise == ExerciseType.pushUp) {
+      _updatePushUpCalibration(result, smoothed);
+      return;
+    }
+
     final view = _repCounter.updateSetupView(result);
     if (view != _detectedCurlView) _detectedCurlView = view;
 
@@ -1307,6 +1360,258 @@ class WorkoutViewModel extends ChangeNotifier {
     _landmarks = smoothed;
     _calibrationCurrentAngle = angle;
     notifyListeners();
+  }
+
+  void _updatePushUpCalibration(
+    PoseResult result,
+    List<PoseLandmark> smoothed,
+  ) {
+    final angle = _pushUpCalibrationElbowAngle(result);
+    final bodyDeviation = _pushUpCalibrationBodyLineDeviation(result);
+    _landmarks = smoothed;
+    _calibrationCurrentAngle = angle;
+    if (angle == null || bodyDeviation == null) {
+      notifyListeners();
+      return;
+    }
+
+    switch (_pushUpCalibrationStage) {
+      case _PushUpCalibrationStage.topHold:
+        _trackPushUpCalibrationHold(
+          angle: angle,
+          isAllowed: (a) =>
+              a >= kPushUpCalibrationTopMinAngle &&
+              a <= kPushUpCalibrationTopMaxAngle &&
+              bodyDeviation <= kHipSagDeviation,
+          outOfRangeInstruction:
+              'Start at the top with elbows nearly straight and your body in one line.',
+          onComplete: (avg) {
+            _pushUpCalibrationTopAngle = avg;
+            _pushUpCalibrationStage = _PushUpCalibrationStage.bottomHold;
+            _pushUpCalibrationHoldStartedAt = null;
+            _pushUpCalibrationHoldSamples.clear();
+            _calibrationReps = 1;
+            _pushUpCalibrationInstruction =
+                'Lower as far as you comfortably can and hold that bottom position.';
+            _tts.speak('Go all the way down and hold.');
+          },
+        );
+      case _PushUpCalibrationStage.bottomHold:
+        final top = _pushUpCalibrationTopAngle;
+        _trackPushUpCalibrationHold(
+          angle: angle,
+          isAllowed: (a) =>
+              top != null &&
+              a >= kPushUpCalibrationBottomMinAngle &&
+              a <= kPushUpCalibrationBottomMaxAngle &&
+              (top - a) >= kPushUpCalibrationMinExcursion &&
+              bodyDeviation <= kHipSagDeviation,
+          outOfRangeInstruction:
+              'Hold your lowest controlled push-up position with your body straight.',
+          onComplete: (avg) {
+            _pushUpCalibrationBottomAngle = avg;
+            _pushUpCalibrationBottomSampleCount =
+                _pushUpCalibrationHoldSamples.length;
+            _pushUpCalibrationStage = _PushUpCalibrationStage.rise;
+            _pushUpCalibrationHoldStartedAt = null;
+            _pushUpCalibrationHoldSamples.clear();
+            _calibrationReps = 2;
+            _pushUpCalibrationInstruction =
+                'Push back up to the top position and stop there.';
+            _tts.speak('Push back up.');
+          },
+        );
+      case _PushUpCalibrationStage.rise:
+        final top = _pushUpCalibrationTopAngle;
+        final bottom = _pushUpCalibrationBottomAngle;
+        if (top != null &&
+            bottom != null &&
+            angle >= top - kPushUpProfileEndMargin) {
+          _completePushUpCalibration(bottomAngle: bottom);
+          return;
+        }
+        _pushUpCalibrationInstruction =
+            'Push back up to the top position and stop there.';
+        break;
+    }
+
+    notifyListeners();
+  }
+
+  void _trackPushUpCalibrationHold({
+    required double angle,
+    required bool Function(double angle) isAllowed,
+    required String outOfRangeInstruction,
+    required ValueChanged<double> onComplete,
+  }) {
+    if (!isAllowed(angle)) {
+      _pushUpCalibrationHoldStartedAt = null;
+      _pushUpCalibrationHoldSamples.clear();
+      _pushUpCalibrationInstruction = outOfRangeInstruction;
+      return;
+    }
+
+    final now = DateTime.now();
+    _pushUpCalibrationHoldStartedAt ??= now;
+    _pushUpCalibrationHoldSamples.add(angle);
+    _pushUpCalibrationInstruction = switch (_pushUpCalibrationStage) {
+      _PushUpCalibrationStage.topHold =>
+        'Hold the top push-up position with your body straight.',
+      _PushUpCalibrationStage.bottomHold =>
+        'Hold your lowest controlled position.',
+      _PushUpCalibrationStage.rise =>
+        'Push back up to the top position and stop there.',
+    };
+
+    final elapsed = now.difference(_pushUpCalibrationHoldStartedAt!).inSeconds;
+    if (elapsed < kPushUpCalibrationHoldSeconds) return;
+
+    final spread = _angleSpread(_pushUpCalibrationHoldSamples);
+    if (spread > kPushUpCalibrationHoldMaxSpread) {
+      _pushUpCalibrationHoldStartedAt = null;
+      _pushUpCalibrationHoldSamples.clear();
+      _pushUpCalibrationInstruction = 'Hold still for a few seconds.';
+      return;
+    }
+
+    final avg =
+        _pushUpCalibrationHoldSamples.reduce((a, b) => a + b) /
+        _pushUpCalibrationHoldSamples.length;
+    onComplete(avg);
+  }
+
+  void _completePushUpCalibration({required double bottomAngle}) {
+    final top = _pushUpCalibrationTopAngle;
+    if (top == null) {
+      _failCalibration('Top position was not captured. Try again.');
+      return;
+    }
+
+    PushUpRomProfile profile;
+    try {
+      profile = PushUpRomProfile.calibrated(
+        topAngle: top,
+        bottomAngle: bottomAngle,
+        sampleCount: _pushUpCalibrationBottomSampleCount,
+      );
+    } catch (e) {
+      _failCalibration(e.toString());
+      return;
+    }
+
+    _calibrationTimeoutTimer?.cancel();
+    _pushUpProfile = profile;
+    _repCounter.updatePushUpThresholds(profile.thresholds);
+    unawaited(
+      _profileRepository.savePushUp(profile).catchError((Object e) {
+        TelemetryLog.instance.log('pushup_profile.save_failed', e.toString());
+      }),
+    );
+    _calibrationReps = 3;
+    TelemetryLog.instance.log(
+      'pushup_calibration.complete',
+      'top=${top.toStringAsFixed(1)} bottom=${bottomAngle.toStringAsFixed(1)}',
+    );
+    _calibrationSummary = CalibrationSummary(
+      viewLabel: 'Push-up ROM',
+      sidesLabel:
+          'Top ${top.toStringAsFixed(0)}° · Bottom ${bottomAngle.toStringAsFixed(0)}°',
+    );
+    notifyListeners();
+    Timer(const Duration(seconds: 2), () {
+      _calibrationSummary = null;
+      if (forceCalibration) {
+        _disposeCalibrationResources();
+        _shouldExitAfterCalibration = true;
+        notifyListeners();
+        return;
+      }
+      _exitCalibration(toPhase: WorkoutPhase.setupCheck);
+    });
+  }
+
+  double? _pushUpCalibrationElbowAngle(PoseResult result) {
+    final left = _pushUpSideElbowAngle(result, isLeft: true);
+    final right = _pushUpSideElbowAngle(result, isLeft: false);
+    if (left == null && right == null) return null;
+    if (left == null) return right!.$1;
+    if (right == null) return left.$1;
+    return left.$2 >= right.$2 ? left.$1 : right.$1;
+  }
+
+  (double, double)? _pushUpSideElbowAngle(
+    PoseResult result, {
+    required bool isLeft,
+  }) {
+    final shoulder = result.landmark(
+      isLeft ? LM.leftShoulder : LM.rightShoulder,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final elbow = result.landmark(
+      isLeft ? LM.leftElbow : LM.rightElbow,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final wrist = result.landmark(
+      isLeft ? LM.leftWrist : LM.rightWrist,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final elbowAngle = angleDeg(shoulder, elbow, wrist);
+    if (shoulder == null ||
+        elbow == null ||
+        wrist == null ||
+        elbowAngle == null) {
+      return null;
+    }
+    return (
+      elbowAngle,
+      shoulder.confidence + elbow.confidence + wrist.confidence,
+    );
+  }
+
+  double? _pushUpCalibrationBodyLineDeviation(PoseResult result) {
+    final left = _pushUpSideBodyLineDeviation(result, isLeft: true);
+    final right = _pushUpSideBodyLineDeviation(result, isLeft: false);
+    if (left == null && right == null) return null;
+    if (left == null) return right!.$1;
+    if (right == null) return left.$1;
+    return left.$2 >= right.$2 ? left.$1 : right.$1;
+  }
+
+  (double, double)? _pushUpSideBodyLineDeviation(
+    PoseResult result, {
+    required bool isLeft,
+  }) {
+    final shoulder = result.landmark(
+      isLeft ? LM.leftShoulder : LM.rightShoulder,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final hip = result.landmark(
+      isLeft ? LM.leftHip : LM.rightHip,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final ankle = result.landmark(
+      isLeft ? LM.leftAnkle : LM.rightAnkle,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final hipAngle = angleDeg(shoulder, hip, ankle);
+    if (shoulder == null || hip == null || ankle == null || hipAngle == null) {
+      return null;
+    }
+    return (
+      (180.0 - hipAngle).abs(),
+      shoulder.confidence + hip.confidence + ankle.confidence,
+    );
+  }
+
+  double _angleSpread(List<double> values) {
+    if (values.isEmpty) return 0;
+    var min = values.first;
+    var max = values.first;
+    for (final value in values.skip(1)) {
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+    return max - min;
   }
 
   // ── Frame pipeline ────────────────────────────────────
@@ -1942,6 +2247,10 @@ class WorkoutViewModel extends ChangeNotifier {
   /// Same signal the gear-icon badge uses: profile missing OR no bucket
   /// reached calibration minimum samples.
   bool needsCalibrationHint() {
+    if (exercise == ExerciseType.pushUp) {
+      return _pushUpProfile == null || !_pushUpProfile!.isCalibrated;
+    }
+    if (!exercise.isCurl) return false;
     final profile = _profile;
     if (profile == null) return true;
     if (profile.buckets.isEmpty) return true;

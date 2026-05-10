@@ -15,6 +15,10 @@ import '../core/types.dart';
 class CalibrationOverlay extends StatelessWidget {
   /// 0..[kCalibrationMinReps]. Drives the progress dots.
   final int repsDetected;
+  final int progressTarget;
+  final String progressLabel;
+  final String instruction;
+  final ExerciseType exercise;
 
   /// Current smoothed elbow angle in degrees, if known. Null while pose is
   /// not yet locked.
@@ -42,6 +46,11 @@ class CalibrationOverlay extends StatelessWidget {
     required this.detectedView,
     required this.secondsRemaining,
     required this.onSkip,
+    this.progressTarget = kCalibrationMinReps,
+    this.progressLabel = 'reps',
+    this.instruction =
+        'Curl through your full natural range — $kCalibrationMinReps reps.',
+    this.exercise = ExerciseType.bicepsCurlSide,
     this.errorMessage,
     this.onRetry,
   });
@@ -49,6 +58,7 @@ class CalibrationOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final viewLocked = detectedView != CurlCameraView.unknown;
+    final isCurl = exercise.isCurl;
 
     return Stack(
       children: [
@@ -80,9 +90,7 @@ class CalibrationOverlay extends StatelessWidget {
                 Semantics(
                   liveRegion: true,
                   child: Text(
-                    errorMessage ??
-                        'Curl through your full natural range — '
-                            '$kCalibrationMinReps reps.',
+                    errorMessage ?? instruction,
                     style: TextStyle(
                       color: errorMessage == null
                           ? Colors.white
@@ -94,6 +102,7 @@ class CalibrationOverlay extends StatelessWidget {
                   ),
                 ),
                 if (errorMessage == null &&
+                    isCurl &&
                     detectedView != CurlCameraView.unknown) ...[
                   const SizedBox(height: 8),
                   Text(
@@ -130,12 +139,9 @@ class CalibrationOverlay extends StatelessWidget {
               Semantics(
                 liveRegion: true,
                 label:
-                    'Calibration progress: $repsDetected of $kCalibrationMinReps reps detected',
+                    'Calibration progress: $repsDetected of $progressTarget $progressLabel detected',
                 excludeSemantics: true,
-                child: _RepDots(
-                  detected: repsDetected,
-                  target: kCalibrationMinReps,
-                ),
+                child: _RepDots(detected: repsDetected, target: progressTarget),
               ),
               const SizedBox(height: 24),
               if (currentAngle != null)
@@ -171,16 +177,19 @@ class CalibrationOverlay extends StatelessWidget {
                   children: [
                     _Chip(
                       icon: Icons.videocam,
-                      label: viewLocked
+                      label: !isCurl
+                          ? 'Side view'
+                          : viewLocked
                           ? (!kCurlFrontViewEnabled &&
                                     detectedView == CurlCameraView.front
                                 ? 'Side view needed'
                                 : _viewLabel(detectedView))
                           : 'Detecting view…',
                       colored:
-                          viewLocked &&
-                          !(!kCurlFrontViewEnabled &&
-                              detectedView == CurlCameraView.front),
+                          !isCurl ||
+                          (viewLocked &&
+                              !(!kCurlFrontViewEnabled &&
+                                  detectedView == CurlCameraView.front)),
                     ),
                     if (secondsRemaining != null)
                       _Chip(

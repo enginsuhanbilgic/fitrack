@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:fitrack/core/types.dart';
 import 'package:fitrack/engine/curl/curl_rom_profile.dart';
+import 'package:fitrack/engine/push_up/push_up_rom_profile.dart';
 import 'package:fitrack/services/db/profile_repository.dart';
 import 'package:fitrack/services/telemetry_log.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -103,6 +104,28 @@ void main() {
       await expectLater(repo.resetCurl(), completes);
     });
 
+    test('savePushUp then loadPushUp round-trips profile', () async {
+      final p = PushUpRomProfile.calibrated(topAngle: 170, bottomAngle: 82);
+      await repo.savePushUp(p);
+
+      final loaded = (await repo.loadPushUp())!;
+      expect(loaded.topAngle, 170);
+      expect(loaded.bottomAngle, 82);
+      expect(await repo.existsPushUp(), isTrue);
+    });
+
+    test('resetPushUp deletes only the push-up row', () async {
+      await repo.saveCurl(CurlRomProfile());
+      await repo.savePushUp(
+        PushUpRomProfile.calibrated(topAngle: 170, bottomAngle: 82),
+      );
+
+      await repo.resetPushUp();
+
+      expect(await repo.existsPushUp(), isFalse);
+      expect(await repo.existsCurl(), isTrue);
+    });
+
     test('loadCurl returns null and deletes row on corrupt JSON', () async {
       await db.insert('profiles', <String, Object?>{
         'profile_key': SqliteProfileRepository.curlKey,
@@ -182,6 +205,18 @@ void main() {
       expect(await repo.existsCurl(), isTrue);
       await repo.resetCurl();
       expect(await repo.existsCurl(), isFalse);
+    });
+
+    test('stores push-up profile independently', () async {
+      final repo = InMemoryProfileRepository();
+      final p = PushUpRomProfile.calibrated(topAngle: 168, bottomAngle: 88);
+      await repo.savePushUp(p);
+
+      final loaded = (await repo.loadPushUp())!;
+      expect(loaded.topAngle, 168);
+      expect(loaded.bottomAngle, 88);
+      expect(await repo.existsCurl(), isFalse);
+      expect(await repo.existsPushUp(), isTrue);
     });
   });
 }
