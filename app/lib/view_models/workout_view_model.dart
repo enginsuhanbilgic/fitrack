@@ -264,6 +264,21 @@ class WorkoutViewModel extends ChangeNotifier {
   Timer? _viewFlipBannerTimer;
   static const Duration _kViewFlipBannerDuration = Duration(seconds: 2);
 
+  static const List<int> _pushUpLeftSideLandmarks = [
+    LM.leftShoulder,
+    LM.leftElbow,
+    LM.leftWrist,
+    LM.leftHip,
+    LM.leftAnkle,
+  ];
+  static const List<int> _pushUpRightSideLandmarks = [
+    LM.rightShoulder,
+    LM.rightElbow,
+    LM.rightWrist,
+    LM.rightHip,
+    LM.rightAnkle,
+  ];
+
   // Per-frame display state.
   List<PoseLandmark> _landmarks = [];
   RepSnapshot _snapshot = const RepSnapshot(
@@ -359,6 +374,16 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.heelLift: [LM.leftHeel, LM.rightHeel],
     // trunkTibia retained — legacy session rendering path.
     FormError.trunkTibia: [LM.leftHip, LM.rightHip],
+    // Push-up
+    FormError.hipSag: [
+      LM.leftShoulder,
+      LM.rightShoulder,
+      LM.leftHip,
+      LM.rightHip,
+      LM.leftAnkle,
+      LM.rightAnkle,
+    ],
+    FormError.pushUpShortRom: [LM.leftElbow, LM.rightElbow],
   };
 
   WorkoutViewModel({
@@ -1329,11 +1354,15 @@ class WorkoutViewModel extends ChangeNotifier {
           // ignore: deprecated_member_use_from_same_package
           exercise == ExerciseType.bicepsCurl &&
               _detectedCurlView != CurlCameraView.front;
+      final isSidePushUp = exercise == ExerciseType.pushUp;
       final List<int> gatePrimary;
       final List<int>? gateAlt;
       if (isSideCurl) {
         gatePrimary = const [11, 13, 15]; // left arm trio
         gateAlt = const [12, 14, 16]; // right arm trio
+      } else if (isSidePushUp) {
+        gatePrimary = _pushUpLeftSideLandmarks;
+        gateAlt = _pushUpRightSideLandmarks;
       } else {
         gatePrimary = ExerciseRequirements.forExerciseAndView(
           exercise,
@@ -1418,6 +1447,77 @@ class WorkoutViewModel extends ChangeNotifier {
   }
 
   // ── SETUP_CHECK ────────────────────────────────────────
+  bool _landmarkGroupVisible(
+    PoseResult result,
+    List<int> indices, {
+    required double minConfidence,
+  }) => indices.every(
+    (idx) => result.landmark(idx, minConfidence: minConfidence) != null,
+  );
+
+  bool _pushUpSideVisible(PoseResult result, {required double minConfidence}) =>
+      _landmarkGroupVisible(
+        result,
+        _pushUpLeftSideLandmarks,
+        minConfidence: minConfidence,
+      ) ||
+      _landmarkGroupVisible(
+        result,
+        _pushUpRightSideLandmarks,
+        minConfidence: minConfidence,
+      );
+
+  bool _pushUpAnySideLandmarkVisible(
+    PoseResult result, {
+    required double minConfidence,
+  }) {
+    for (final idx in {
+      ..._pushUpLeftSideLandmarks,
+      ..._pushUpRightSideLandmarks,
+    }) {
+      if (result.landmark(idx, minConfidence: minConfidence) != null) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Map<int, Color> _pushUpSetupLandmarkColors(
+    PoseResult result, {
+    required double minConfidence,
+  }) {
+    final leftVisible = _landmarkGroupVisible(
+      result,
+      _pushUpLeftSideLandmarks,
+      minConfidence: minConfidence,
+    );
+    final rightVisible = _landmarkGroupVisible(
+      result,
+      _pushUpRightSideLandmarks,
+      minConfidence: minConfidence,
+    );
+    if (leftVisible || rightVisible) {
+      return {
+        for (final idx
+            in leftVisible
+                ? _pushUpLeftSideLandmarks
+                : _pushUpRightSideLandmarks)
+          idx: const Color(0xFF00E676),
+      };
+    }
+
+    final colors = <int, Color>{};
+    for (final idx in {
+      ..._pushUpLeftSideLandmarks,
+      ..._pushUpRightSideLandmarks,
+    }) {
+      colors[idx] = result.landmark(idx, minConfidence: minConfidence) != null
+          ? const Color(0xFF00E676)
+          : Colors.redAccent;
+    }
+    return colors;
+  }
+
   void _updateSetupCheck(PoseResult result, List<PoseLandmark> smoothed) {
     if (exercise.isCurl) {
       final view = _repCounter.updateSetupView(result);
@@ -1425,7 +1525,7 @@ class WorkoutViewModel extends ChangeNotifier {
     }
 
     final requirements = ExerciseRequirements.forExercise(exercise);
-    final colors = <int, Color>{};
+    var colors = <int, Color>{};
     var allVisible = true;
 
     // Curl exercises apply a stricter confidence floor during setup to reject
@@ -1434,13 +1534,21 @@ class WorkoutViewModel extends ChangeNotifier {
         ? kSetupCurlMinConfidence
         : kMinLandmarkConfidence;
 
-    for (final idx in requirements.landmarkIndices) {
-      final lm = result.landmark(idx, minConfidence: setupConfidence);
-      if (lm != null) {
-        colors[idx] = const Color(0xFF00E676);
-      } else {
-        colors[idx] = Colors.redAccent;
-        allVisible = false;
+    if (exercise == ExerciseType.pushUp) {
+      allVisible = _pushUpSideVisible(result, minConfidence: setupConfidence);
+      colors = _pushUpSetupLandmarkColors(
+        result,
+        minConfidence: setupConfidence,
+      );
+    } else {
+      for (final idx in requirements.landmarkIndices) {
+        final lm = result.landmark(idx, minConfidence: setupConfidence);
+        if (lm != null) {
+          colors[idx] = const Color(0xFF00E676);
+        } else {
+          colors[idx] = Colors.redAccent;
+          allVisible = false;
+        }
       }
     }
 
@@ -1515,10 +1623,13 @@ class WorkoutViewModel extends ChangeNotifier {
     }
 
     final requirements = ExerciseRequirements.forExercise(exercise);
-    final allVisible = requirements.landmarkIndices.every(
-      (idx) =>
-          result.landmark(idx, minConfidence: kMinLandmarkConfidence) != null,
-    );
+    final allVisible = exercise == ExerciseType.pushUp
+        ? _pushUpSideVisible(result, minConfidence: kMinLandmarkConfidence)
+        : requirements.landmarkIndices.every(
+            (idx) =>
+                result.landmark(idx, minConfidence: kMinLandmarkConfidence) !=
+                null,
+          );
 
     if (!allVisible) {
       _countdownTimer?.cancel();
@@ -1553,8 +1664,17 @@ class WorkoutViewModel extends ChangeNotifier {
               null,
         )
         .length;
+    final hasRequiredPose = exercise == ExerciseType.pushUp
+        ? _pushUpSideVisible(result, minConfidence: kMinLandmarkConfidence)
+        : visible == total;
+    final hasPartialPose = exercise == ExerciseType.pushUp
+        ? _pushUpAnySideLandmarkVisible(
+            result,
+            minConfidence: kMinLandmarkConfidence,
+          )
+        : visible > 0;
 
-    if (visible == total) {
+    if (hasRequiredPose) {
       _absenceStart = null;
       _occlusionStart = null;
 
@@ -1622,7 +1742,7 @@ class WorkoutViewModel extends ChangeNotifier {
       _landmarks = smoothed;
       _snapshot = snapshot;
       notifyListeners();
-    } else if (visible > 0) {
+    } else if (hasPartialPose) {
       // Partial occlusion — user still present.
       _absenceStart = null;
       _occlusionResumeFrames = 0;

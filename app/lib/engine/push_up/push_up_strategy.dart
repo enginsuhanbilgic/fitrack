@@ -27,28 +27,28 @@ class PushUpStrategy extends ExerciseStrategy {
 
   @override
   double? computePrimaryAngle(PoseResult pose) {
-    final leftAngle = angleDeg(
-      pose.landmark(LM.leftShoulder, minConfidence: kMinLandmarkConfidence),
-      pose.landmark(LM.leftElbow, minConfidence: kMinLandmarkConfidence),
-      pose.landmark(LM.leftWrist, minConfidence: kMinLandmarkConfidence),
-    );
-    final rightAngle = angleDeg(
-      pose.landmark(LM.rightShoulder, minConfidence: kMinLandmarkConfidence),
-      pose.landmark(LM.rightElbow, minConfidence: kMinLandmarkConfidence),
-      pose.landmark(LM.rightWrist, minConfidence: kMinLandmarkConfidence),
-    );
-    if (leftAngle != null && rightAngle != null) {
-      return (leftAngle + rightAngle) / 2.0;
-    }
-    return leftAngle ?? rightAngle;
+    final left = _sideElbowAngle(pose, isLeft: true);
+    final right = _sideElbowAngle(pose, isLeft: false);
+    if (left == null && right == null) return null;
+    if (left == null) return right!.angleDeg;
+    if (right == null) return left.angleDeg;
+    return left.confidenceSum >= right.confidenceSum
+        ? left.angleDeg
+        : right.angleDeg;
   }
+
+  double? get lastRepQuality => _form.lastRepQuality;
+
+  double? get lastBodyLineDeviationDeg => _form.lastBodyLineDeviationDeg;
 
   @override
   StrategyFrameOutput tick(StrategyFrameInput input) {
     final smoothed = input.smoothedAngle;
     final pose = input.pose;
 
-    if (input.state == RepState.descending || input.state == RepState.bottom) {
+    if (input.state == RepState.descending ||
+        input.state == RepState.bottom ||
+        input.state == RepState.ascending) {
       _form.trackAngle(smoothed);
     }
 
@@ -63,6 +63,7 @@ class PushUpStrategy extends ExerciseStrategy {
           _form.onRepStart(pose);
         }
       case RepState.descending:
+        errors = _form.evaluate(pose, now: input.now);
         if (smoothed < kPushUpBottomAngle) {
           nextState = RepState.bottom;
         } else if (smoothed > kPushUpStartAngle) {
@@ -97,4 +98,43 @@ class PushUpStrategy extends ExerciseStrategy {
 
   @override
   void onReset() => _form.reset();
+
+  _ElbowAngleCandidate? _sideElbowAngle(
+    PoseResult pose, {
+    required bool isLeft,
+  }) {
+    final shoulder = pose.landmark(
+      isLeft ? LM.leftShoulder : LM.rightShoulder,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final elbow = pose.landmark(
+      isLeft ? LM.leftElbow : LM.rightElbow,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final wrist = pose.landmark(
+      isLeft ? LM.leftWrist : LM.rightWrist,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final elbowAngle = angleDeg(shoulder, elbow, wrist);
+    if (shoulder == null ||
+        elbow == null ||
+        wrist == null ||
+        elbowAngle == null) {
+      return null;
+    }
+    return _ElbowAngleCandidate(
+      angleDeg: elbowAngle,
+      confidenceSum: shoulder.confidence + elbow.confidence + wrist.confidence,
+    );
+  }
+}
+
+class _ElbowAngleCandidate {
+  const _ElbowAngleCandidate({
+    required this.angleDeg,
+    required this.confidenceSum,
+  });
+
+  final double angleDeg;
+  final double confidenceSum;
 }
