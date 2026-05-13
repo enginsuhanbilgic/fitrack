@@ -294,6 +294,65 @@ const double kSquatBottomAngle = 90.0;
 /// ASCENDING → IDLE when knee angle returns above this → rep++.
 const double kSquatEndAngle = 160.0;
 
+// ── Squat FSM thresholds — High sensitivity (research, 2026-05-13) ─
+/// Tightened gates for `FeedbackSensitivity.high`. Source: deep-research
+/// biomechanical spec (2026-05-13). Medium-sensitivity defaults (160/90/160)
+/// are preserved bit-for-bit; see [kSquatStartAngle] / [kSquatBottomAngle] /
+/// [kSquatEndAngle] above for the existing values.
+///
+/// Wired into the FSM via [SquatRomThresholdSet.forSensitivity] — these
+/// constants are unreferenced today and become live the first time a session
+/// runs at High sensitivity. Existing-user behavior at Medium is unchanged.
+const double kSquatStartAngleHigh = 165.0;
+const double kSquatBottomAngleHigh = 88.0;
+const double kSquatEndAngleHigh = 163.0;
+
+// ── Squat form thresholds — High sensitivity (research, 2026-05-13) ─
+/// Tightened form-error thresholds for `FeedbackSensitivity.high`. Citations:
+///   - 42° BW lean: Straub & Powers 2024 base (40°) + 2° noise margin.
+///   - 48° HBBS lean: Glassbrook 2017 + Straub & Powers synthesis.
+///   - 0.32 knee-shift: deep-research 0.35 minus 0.03 strictness buffer.
+///   - 0.025 heel-lift: Macrum 2012 "2.5% of leg length" exact value.
+///
+/// Foundation PR: these constants are defined but not yet consumed by
+/// `SquatFormThresholds.forSensitivity(high)` — that method continues to
+/// return defaults + additive deltas. A later PR re-points `forSensitivity`
+/// at these values once telemetry-derived squat thresholds land.
+const double kSquatLeanWarnDegBodyweightHigh = 42.0;
+const double kSquatLeanWarnDegHBBSHigh = 48.0;
+const double kSquatKneeShiftWarnRatioHigh = 0.32;
+const double kSquatHeelLiftWarnRatioHigh = 0.025;
+
+// ── Squat personal calibration ──────────────────────────
+/// Minimum reps required for squat personal calibration to commit. Mirrors
+/// [kCalibrationMinReps] (curl) and lives as a separate constant so a future
+/// per-exercise dial can diverge the two values without a refactor.
+const int kSquatCalibrationMinReps = 3;
+
+/// Minimum ROM excursion (degrees) for a squat rep to qualify as a valid
+/// calibration sample. CANONICAL NAME — referenced by upcoming Parts 5, 6, 8
+/// of the squat overhaul plan. Looser than the curl floor (25°) because squat
+/// reps with shallow knee flexion still carry calibration value via the
+/// long-femur path.
+const double kSquatMinViableRomDegrees = 40.0;
+
+/// Margin added to `observedMinKneeAngle` when deriving the BOTTOM gate from
+/// a calibrated profile. Mirrors [kPushUpProfileBottomMargin] / the curl
+/// profile's peak-tolerance pattern — the gate sits a touch *above* the
+/// observed deepest angle so a noisy rep doesn't fail the user's own bar.
+const double kSquatProfileBottomMargin = 5.0;
+
+/// Margin subtracted from `observedMaxKneeAngle` for the START gate. Wider
+/// than the END margin so the FSM enters DESCENDING decisively before the
+/// user is committed to the rep.
+const double kSquatProfileStartMargin = 10.0;
+
+/// Margin subtracted from `observedMaxKneeAngle` for the END gate. Tighter
+/// than the START margin so the rep doesn't commit prematurely — mirrors
+/// curl's `start > end` FSM invariant (which prevents jitter at the top from
+/// flipping into a new rep before the user has stabilized).
+const double kSquatProfileEndMargin = 5.0;
+
 // ── Push-up FSM thresholds (degrees) ────────────────────
 /// IDLE → DESCENDING when elbow angle drops below this.
 const double kPushUpStartAngle = 160.0;

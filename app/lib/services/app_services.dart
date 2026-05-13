@@ -15,6 +15,7 @@ import 'db/database_service.dart';
 import 'db/preferences_repository.dart';
 import 'db/profile_repository.dart';
 import 'db/session_repository.dart';
+import 'db/user_profile_repository.dart';
 
 class AppServices {
   const AppServices({
@@ -22,12 +23,14 @@ class AppServices {
     required this.profileRepository,
     required this.sessionRepository,
     required this.preferencesRepository,
+    required this.userProfileRepository,
   });
 
   final DatabaseService databaseService;
   final ProfileRepository profileRepository;
   final SessionRepository sessionRepository;
   final PreferencesRepository preferencesRepository;
+  final UserProfileRepository userProfileRepository;
 }
 
 class AppServicesScope extends InheritedWidget {

@@ -17,6 +17,7 @@
 library;
 
 import 'package:fitrack/core/constants.dart';
+import 'package:fitrack/core/squat_rom_defaults.dart';
 import 'package:fitrack/core/types.dart';
 import 'package:fitrack/engine/exercise_strategy.dart';
 import 'package:fitrack/engine/squat/squat_strategy.dart';
@@ -339,6 +340,137 @@ void main() {
       expect(s.lastRepQuality, isNotNull);
       expect(s.lastRepQuality! >= 0.0, isTrue);
       expect(s.lastRepQuality! <= 1.0, isTrue);
+    });
+  });
+
+  group('SquatStrategy — sensitivity-aware ROM (Part 1, 2026-05-13)', () {
+    test(
+      'default (Medium) strategy uses defaults: starts at <160, commits >=160',
+      () {
+        // Regression guard: the default constructor must continue to drive
+        // an unchanged Medium-sensitivity FSM. A rep that bottoms at 80° (well
+        // below the Medium 90° gate) commits cleanly through driveRep, which
+        // pins each transition against the literal default thresholds.
+        final s = SquatStrategy();
+        final out = driveRep(strategy: s, minAngle: 80);
+        expect(out.repCommitted, isTrue);
+      },
+    );
+
+    test('Medium strategy enters BOTTOM at 89° (below default 90° gate)', () {
+      final s = SquatStrategy();
+      // Walk IDLE → DESCENDING → BOTTOM with minAngle = 89°.
+      tickAt(strategy: s, state: RepState.idle, angle: 150, hipY: 0.50);
+      final out = tickAt(
+        strategy: s,
+        state: RepState.descending,
+        angle: 89,
+        hipY: 0.60,
+      );
+      expect(out.nextState, RepState.bottom);
+    });
+
+    test(
+      'High strategy idle→descending gate is 165° (looser than default 160°)',
+      () {
+        // The High START gate sits at 165°. An angle at 161° must enter
+        // DESCENDING under High (because 161 < 165), where under Medium it
+        // would not (because 161 > 160). This pins the start-side delta.
+        final highTuple = SquatRomThresholdSet.forSensitivity(
+          FeedbackSensitivity.high,
+        );
+        final s = SquatStrategy(romThresholds: highTuple);
+        final out = tickAt(
+          strategy: s,
+          state: RepState.idle,
+          angle: 161,
+          hipY: 0.50,
+        );
+        expect(out.nextState, RepState.descending);
+      },
+    );
+
+    test('Medium idle→descending gate stays at 160° (regression guard)', () {
+      // The Medium START gate is 160°. An angle at 161° must NOT enter
+      // DESCENDING (because 161 > 160). This is the regression mirror to
+      // the High test above — confirms the gate moved only under High.
+      final s = SquatStrategy();
+      final out = tickAt(
+        strategy: s,
+        state: RepState.idle,
+        angle: 161,
+        hipY: 0.50,
+      );
+      expect(out.nextState, RepState.idle);
+    });
+
+    test('High strategy ascending→idle gate is 163° '
+        '(commits between 163° and 165°)', () {
+      // The High END gate sits at 163°. An angle of 163.5° must commit the
+      // rep under High (because 163.5 >= 163). Under Medium (END = 160°)
+      // this would also commit, so to make the test discriminate we use
+      // 162° in the asymmetric pair below.
+      final highTuple = SquatRomThresholdSet.forSensitivity(
+        FeedbackSensitivity.high,
+      );
+      final s = SquatStrategy(romThresholds: highTuple);
+
+      // Drive the FSM through to ASCENDING using the default BOTTOM gate
+      // (Part 1 keeps `_effectiveBottomAngle = kSquatBottomAngle`).
+      tickAt(strategy: s, state: RepState.idle, angle: 150, hipY: 0.50);
+      tickAt(strategy: s, state: RepState.descending, angle: 80, hipY: 0.60);
+      tickAt(strategy: s, state: RepState.bottom, angle: 80, hipY: 0.60);
+      tickAt(strategy: s, state: RepState.bottom, angle: 85, hipY: 0.55);
+
+      // 162° is below the High END gate (163°) → no commit.
+      final notYet = tickAt(
+        strategy: s,
+        state: RepState.ascending,
+        angle: 162,
+        hipY: 0.50,
+      );
+      expect(notYet.repCommitted, isFalse);
+      expect(notYet.nextState, RepState.ascending);
+
+      // 164° crosses the gate → commit.
+      final committed = tickAt(
+        strategy: s,
+        state: RepState.ascending,
+        angle: 164,
+        hipY: 0.50,
+      );
+      expect(committed.repCommitted, isTrue);
+      expect(committed.nextState, RepState.idle);
+    });
+
+    test('High BOTTOM angle is defined in the tuple but NOT yet consumed by '
+        'the FSM in Part 1 (effective BOTTOM stays at the long-femur '
+        "path's 90° default)", () {
+      // Part 1 wires START and END to the tuple; BOTTOM continues to flow
+      // through `_effectiveBottomAngle`, which is initialized to
+      // `kSquatBottomAngle` (90°) regardless of sensitivity. The High
+      // tuple's `bottomAngle = 88` is therefore *defined* but unused
+      // at FSM transition time. A later PR is expected to wire this in
+      // (and replace this test). The test exists to make that wiring
+      // change visible: when it lands, this test fails and the developer
+      // confirms the new wiring is intentional.
+      final highTuple = SquatRomThresholdSet.forSensitivity(
+        FeedbackSensitivity.high,
+      );
+      expect(highTuple.bottomAngle, 88.0);
+
+      final s = SquatStrategy(romThresholds: highTuple);
+      // Without driving the long-femur path, effective BOTTOM is 90°. A
+      // rep at 89° still crosses into BOTTOM under Part 1 wiring.
+      tickAt(strategy: s, state: RepState.idle, angle: 150, hipY: 0.50);
+      final out = tickAt(
+        strategy: s,
+        state: RepState.descending,
+        angle: 89,
+        hipY: 0.60,
+      );
+      expect(out.nextState, RepState.bottom);
+      expect(s.effectiveBottomAngle, kSquatBottomAngle);
     });
   });
 }

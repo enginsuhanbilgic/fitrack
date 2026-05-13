@@ -90,7 +90,7 @@ class SessionExporter {
       'session_id,rep_index,quality,min_angle,max_angle,side,view,'
       'threshold_source,bucket_updated,rejected_outlier,concentric_ms,'
       'squat_lean_deg,squat_knee_shift_ratio,squat_heel_lift_ratio,'
-      'squat_variant,'
+      'squat_variant,squat_min_knee_angle,squat_max_knee_angle,'
       'biceps_lean_deg,biceps_shoulder_drift_ratio,biceps_elbow_drift_ratio,'
       'biceps_back_lean_deg,biceps_elbow_drift_signed,'
       'form_errors',
@@ -115,6 +115,8 @@ class SessionExporter {
             _csvField(r.squatKneeShiftRatio?.toStringAsFixed(4) ?? ''),
             _csvField(r.squatHeelLiftRatio?.toStringAsFixed(4) ?? ''),
             _csvField(r.squatVariant?.name ?? ''),
+            _csvField(r.squatMinKneeAngle?.toStringAsFixed(2) ?? ''),
+            _csvField(r.squatMaxKneeAngle?.toStringAsFixed(2) ?? ''),
             _csvField(r.bicepsLeanDeg?.toStringAsFixed(2) ?? ''),
             _csvField(r.bicepsShoulderDriftRatio?.toStringAsFixed(4) ?? ''),
             _csvField(r.bicepsElbowDriftRatio?.toStringAsFixed(4) ?? ''),

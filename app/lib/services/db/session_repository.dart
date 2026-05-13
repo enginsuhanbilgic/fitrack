@@ -158,6 +158,8 @@ class SqliteSessionRepository implements SessionRepository {
             'squat_knee_shift_ratio': squatMetric?.kneeShiftRatio,
             'squat_heel_lift_ratio': squatMetric?.heelLiftRatio,
             'squat_variant': squatMetric == null ? null : variantName,
+            'squat_min_knee_angle': squatMetric?.minKneeAngle,
+            'squat_max_knee_angle': squatMetric?.maxKneeAngle,
           });
         }
       }
@@ -379,6 +381,8 @@ LIMIT ?
       squatVariant: squatVariantName == null
           ? null
           : _safeSquatVariant(squatVariantName),
+      squatMinKneeAngle: (row['squat_min_knee_angle'] as num?)?.toDouble(),
+      squatMaxKneeAngle: (row['squat_max_knee_angle'] as num?)?.toDouble(),
       bicepsLeanDeg: (row['biceps_lean_deg'] as num?)?.toDouble(),
       bicepsShoulderDriftRatio: (row['biceps_shoulder_drift_ratio'] as num?)
           ?.toDouble(),
@@ -525,6 +529,8 @@ class InMemorySessionRepository implements SessionRepository {
               squatKneeShiftRatio: squatMetric?.kneeShiftRatio,
               squatHeelLiftRatio: squatMetric?.heelLiftRatio,
               squatVariant: squatMetric == null ? null : s.event.squatVariant,
+              squatMinKneeAngle: squatMetric?.minKneeAngle,
+              squatMaxKneeAngle: squatMetric?.maxKneeAngle,
             );
           });
     return SessionDetail(

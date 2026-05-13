@@ -8,6 +8,7 @@ import 'services/db/json_migrator.dart';
 import 'services/db/preferences_repository.dart';
 import 'services/db/profile_repository.dart';
 import 'services/db/session_repository.dart';
+import 'services/db/user_profile_repository.dart';
 import 'services/telemetry_log.dart';
 
 /// Exposes the app-wide [ValueNotifier<ThemeMode>] to the widget tree.
@@ -70,6 +71,7 @@ class _FiTrackAppState extends State<FiTrackApp> {
         profileRepository: SqliteProfileRepository(handle),
         sessionRepository: SqliteSessionRepository(handle),
         preferencesRepository: prefs,
+        userProfileRepository: SqliteUserProfileRepository(handle),
       );
     } catch (e, st) {
       // Bootstrap failure is recoverable: fall back to in-memory repos so the
@@ -84,6 +86,7 @@ class _FiTrackAppState extends State<FiTrackApp> {
         profileRepository: InMemoryProfileRepository(),
         sessionRepository: InMemorySessionRepository(),
         preferencesRepository: InMemoryPreferencesRepository(),
+        userProfileRepository: InMemoryUserProfileRepository(),
       );
     }
   }

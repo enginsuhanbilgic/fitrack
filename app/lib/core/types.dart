@@ -233,6 +233,8 @@ class SquatRepMetrics {
     required this.leanDeg,
     required this.kneeShiftRatio,
     required this.heelLiftRatio,
+    this.minKneeAngle,
+    this.maxKneeAngle,
   });
 
   final int repIndex;
@@ -240,6 +242,17 @@ class SquatRepMetrics {
   final double? leanDeg;
   final double? kneeShiftRatio;
   final double? heelLiftRatio;
+
+  /// Minimum knee angle reached during this rep (degrees). Persisted in
+  /// `reps.squat_min_knee_angle` (schema v9). Null for reconstructed
+  /// pre-v9 sessions and for any rep whose analyzer couldn't measure the
+  /// knee throughout the descent.
+  final double? minKneeAngle;
+
+  /// Maximum knee angle observed during this rep (degrees). Typically the
+  /// top-of-rep extension. Persisted in `reps.squat_max_knee_angle`
+  /// (schema v9). Same NULL semantics as [minKneeAngle].
+  final double? maxKneeAngle;
 }
 
 /// Per-rep biceps-curl side-view form metrics. Populated only when the

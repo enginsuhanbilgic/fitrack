@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../core/types.dart';
+import '../../models/user_profile.dart' show Units;
 
 abstract class PreferencesRepository {
   /// User-selected theme mode. Defaults to [ThemeMode.system].
@@ -58,6 +59,23 @@ abstract class PreferencesRepository {
   /// paths are personal and are never modified.
   Future<FeedbackSensitivity> getFeedbackSensitivity();
   Future<void> setFeedbackSensitivity(FeedbackSensitivity value);
+
+  /// Display + input units. Defaults to [Units.metric] (cm, kg). Storage
+  /// is always metric — this preference only affects formatting and form
+  /// inputs in [EditProfileScreen]. Toggling units never mutates any saved
+  /// height_cm / weight_kg values.
+  Future<Units> getUnits();
+  Future<void> setUnits(Units value);
+
+  /// Whether spoken coaching cues (TTS) play during workouts. Defaults to
+  /// `true`. Read at workout start and frozen for the session.
+  Future<bool> getTtsEnabled();
+  Future<void> setTtsEnabled(bool value);
+
+  /// Whether haptic feedback fires on rep completion / form errors.
+  /// Defaults to `true`. Read at workout start and frozen for the session.
+  Future<bool> getHapticsEnabled();
+  Future<void> setHapticsEnabled(bool value);
 }
 
 class SqlitePreferencesRepository implements PreferencesRepository {
@@ -73,6 +91,9 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   static const String _kSquatDebugSessionKey = 'squat_debug_session';
   static const String _kThemeModeKey = 'theme_mode';
   static const String _kFeedbackSensitivityKey = 'feedback_sensitivity';
+  static const String _kUnitsKey = 'units';
+  static const String _kTtsEnabledKey = 'tts_enabled';
+  static const String _kHapticsEnabledKey = 'haptics_enabled';
 
   @override
   Future<SquatVariant> getSquatVariant() async {
@@ -239,6 +260,75 @@ class SqlitePreferencesRepository implements PreferencesRepository {
     'dark' => ThemeMode.dark,
     _ => ThemeMode.system,
   };
+
+  @override
+  Future<Units> getUnits() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kUnitsKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return Units.metric;
+    final raw = rows.first['value'] as String?;
+    if (raw == null) return Units.metric;
+    try {
+      return Units.values.byName(raw);
+    } catch (_) {
+      return Units.metric;
+    }
+  }
+
+  @override
+  Future<void> setUnits(Units value) async {
+    await _db.insert('preferences', {
+      'key': _kUnitsKey,
+      'value': value.name,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<bool> getTtsEnabled() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kTtsEnabledKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return true;
+    return rows.first['value'] != 'false';
+  }
+
+  @override
+  Future<void> setTtsEnabled(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kTtsEnabledKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<bool> getHapticsEnabled() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kHapticsEnabledKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return true;
+    return rows.first['value'] != 'false';
+  }
+
+  @override
+  Future<void> setHapticsEnabled(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kHapticsEnabledKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
 }
 
 /// In-memory test double. No SQLite dependency.
@@ -250,6 +340,9 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   bool _squatDebugSession = false;
   FeedbackSensitivity _feedbackSensitivity = FeedbackSensitivity.medium;
   ThemeMode _themeMode = ThemeMode.system;
+  Units _units = Units.metric;
+  bool _ttsEnabled = true;
+  bool _hapticsEnabled = true;
 
   @override
   Future<SquatVariant> getSquatVariant() async => _squatVariant;
@@ -307,5 +400,29 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   @override
   Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;
+  }
+
+  @override
+  Future<Units> getUnits() async => _units;
+
+  @override
+  Future<void> setUnits(Units value) async {
+    _units = value;
+  }
+
+  @override
+  Future<bool> getTtsEnabled() async => _ttsEnabled;
+
+  @override
+  Future<void> setTtsEnabled(bool value) async {
+    _ttsEnabled = value;
+  }
+
+  @override
+  Future<bool> getHapticsEnabled() async => _hapticsEnabled;
+
+  @override
+  Future<void> setHapticsEnabled(bool value) async {
+    _hapticsEnabled = value;
   }
 }

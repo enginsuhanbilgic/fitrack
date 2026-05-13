@@ -1,5 +1,6 @@
 import '../../core/constants.dart';
 import '../../core/squat_form_thresholds.dart';
+import '../../core/squat_rom_defaults.dart';
 import '../../core/types.dart';
 import '../../models/landmark_types.dart';
 import '../../models/pose_result.dart';
@@ -34,7 +35,9 @@ class SquatStrategy extends ExerciseStrategy {
     this.variant = SquatVariant.bodyweight,
     this.longFemurLifter = false,
     SquatFormThresholds formThresholds = SquatFormThresholds.defaults,
-  }) : _form = SquatFormAnalyzer(
+    SquatRomThresholdSet romThresholds = SquatRomDefaults.defaults,
+  }) : _romThresholds = romThresholds,
+       _form = SquatFormAnalyzer(
          variant: variant,
          longFemurLifter: longFemurLifter,
          formThresholds: formThresholds,
@@ -42,6 +45,13 @@ class SquatStrategy extends ExerciseStrategy {
 
   final SquatVariant variant;
   final bool longFemurLifter;
+
+  /// FSM threshold tuple resolved at construction time from the active
+  /// [FeedbackSensitivity]. Default ([SquatRomDefaults.defaults]) keeps
+  /// existing Medium-sensitivity behavior bit-for-bit. Callers wire this
+  /// via [SquatRomThresholdSet.forSensitivity] when constructing the
+  /// strategy from a session's resolved sensitivity.
+  final SquatRomThresholdSet _romThresholds;
 
   final SquatFormAnalyzer _form;
 
@@ -133,14 +143,14 @@ class SquatStrategy extends ExerciseStrategy {
 
     switch (input.state) {
       case RepState.idle:
-        if (smoothed < kSquatStartAngle) {
+        if (smoothed < _romThresholds.startAngle) {
           nextState = RepState.descending;
           _form.onRepStart(pose);
         }
       case RepState.descending:
         if (smoothed < _effectiveBottomAngle) {
           nextState = RepState.bottom;
-        } else if (smoothed > kSquatStartAngle) {
+        } else if (smoothed > _romThresholds.startAngle) {
           nextState = RepState.idle;
           _resetPerRepState();
         }
@@ -151,7 +161,7 @@ class SquatStrategy extends ExerciseStrategy {
           nextState = RepState.ascending;
         }
       case RepState.ascending:
-        if (smoothed >= kSquatEndAngle) {
+        if (smoothed >= _romThresholds.endAngle) {
           final completionErrors = _form.consumeCompletionErrorsWithDepth(
             _effectiveBottomAngle,
           );

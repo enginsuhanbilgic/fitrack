@@ -558,6 +558,59 @@ Post-session retrospective grading, **default-on for every exercise**. **Replace
 
 ---
 
+## 13d. User Profile & Production-Readiness Vocabulary (2026-05-13)
+
+These terms cover the local-only user profile, the dashboard aggregates,
+and the production-roadmap surfaces shipped in the
+`we-will-refine-the-eager-fountain` PR.
+
+| Term | Definition |
+|---|---|
+| **`UserProfile`** | Immutable value type in `app/lib/models/user_profile.dart`. Captures display name, optional demographics (age/gender/height/weight), fitness experience + primary goal, and an embedded `List<UserGoal>`. Persisted as the single row in the `user_profile` SQLite table (schema v8). |
+| **`UserGoal`** | Free-form goal item shown in the Profile tab's "Active Goals" list. Fields: `id` (creation timestamp), `title`, optional `detail`, optional `targetDate`, `completed` boolean. JSON-encoded into `user_profile.goals_json`. |
+| **`UserProfileRepository`** | Abstract repo + `SqliteUserProfileRepository` impl in `app/lib/services/db/user_profile_repository.dart`. Single-row semantics enforced by the DDL `CHECK (id = 1)`. Returns `null` from `load()` when the user has not yet completed Edit Profile — UI uses null as the "anonymous" sentinel. |
+| **`Units`** | Enum (`metric` / `imperial`) controlling **display + input** units only. Storage on disk is always metric (cm, kg). Conversion happens at the UI boundary in `app/lib/utils/units.dart`. Toggling units never mutates any saved height/weight. |
+| **`Gender`** | Enum (`male` / `female` / `preferNotToSay`) on `UserProfile`. Self-reported. Used for future calorie/load estimates; never gates any feature. |
+| **`ExperienceLevel`** | Enum (`beginner` / `intermediate` / `advanced`) on `UserProfile`. Reserved for future cold-start sensitivity defaults. The existing `FeedbackSensitivity` preference still wins when explicitly set. |
+| **`FitnessGoal`** | Enum (`buildMuscle` / `loseFat` / `improveForm` / `generalFitness`) on `UserProfile`. Surfaces in the Profile-tab hero subtitle. |
+| **Strain (proxy)** | Sum of `(reps × duration_minutes)` across the last 7 days, scaled so 50 rep-minutes ≈ 1 strain unit, then clamped to a 0..21 display range. Defined in `dashboard_aggregates.dart::computeStrain`. **Not** the Whoop metric — we have no HRV/sleep sensors. |
+| **Recovery (proxy)** | `min(daysSinceLastFatigueFlaggedSession / 7, 1.0)`. Defaults to `1.0` when no fatigue-flagged session exists ever. Defined in `dashboard_aggregates.dart::computeRecovery`. |
+| **Output (proxy)** | Mean `averageQuality` across last-7-day sessions. Already 0..1; UI multiplies by 100 for percentage display. Defined in `dashboard_aggregates.dart::computeOutput`. |
+| **`DashboardMetrics`** | Result bundle returned by `computeDashboardMetrics()` — single-pass computation of strain, recovery, output, weekly bars, total sessions, total hours, distinct exercise count (proxy "PRs"), and weekly rep count. Cached on `HomeViewModel.metrics`. |
+| **Weekly Volume bars** | Seven `int` rep counts, one per ISO weekday (index 0 = Mon, 6 = Sun) for the **current** Monday-anchored week. Empty bars render a 4-pixel "stub" so the weekday baseline reads visually with no data. |
+| **`EditProfileScreen`** | Form screen in `app/lib/screens/edit_profile_screen.dart` reachable from the Profile tab. Sections: Identity, Demographics, Fitness, Preferences (Units / TTS / Haptics). Required field: display name only. Validates: age 10–120, height 80–250 cm, weight 20–300 kg. |
+| **`PRODUCTION_ROADMAP.md`** | Project-root document tracking deferred production work. Phase 1 (this PR) ships local profile + placeholders. Phases 2–7 cover onboarding, backend choice, auth, cloud sync, photo avatar, GDPR-style controls. Live document — update phase status as work begins. |
+
+---
+
+## 13e. Squat Pipeline Overhaul Part 1 — Data Foundation (2026-05-13)
+
+These terms cover the pure-data foundation introduced by Part 1 of the squat
+pipeline overhaul. All constants and types in this section are **defined and
+shipped** by Part 1; some are consumed by later parts (annotated below).
+
+| Term | Definition |
+|---|---|
+| **`kSquatStartAngleHigh`** | Const `165.0`. High-sensitivity IDLE → DESCENDING gate. Source: deep-research biomechanical spec (2026-05-13). Looser than Medium (`160°`) so a higher knee extension at top is required before the FSM enters DESCENDING. Consumed by `SquatRomThresholdSet.forSensitivity(high)`. |
+| **`kSquatBottomAngleHigh`** | Const `88.0`. High-sensitivity DESCENDING → ASCENDING gate. Source: same spec. Tighter than Medium (`90°`) so deeper depth is required. **Defined but NOT yet consumed by the FSM** — the BOTTOM gate continues to come from `_effectiveBottomAngle` in `SquatStrategy` (the long-femur path) in Part 1; wiring deferred to a future PR. |
+| **`kSquatEndAngleHigh`** | Const `163.0`. High-sensitivity ASCENDING → IDLE commit gate. Source: same spec. Stricter than Medium (`160°`) so a fuller extension is required at the top of the rep. Consumed by `SquatRomThresholdSet.forSensitivity(high)`. |
+| **`kSquatLeanWarnDegBodyweightHigh`** | Const `42.0`. High-sensitivity excessive-forward-lean threshold for `SquatVariant.bodyweight`. Source: Straub & Powers 2024 (40° base) + 2° measurement-noise margin. **Defined but NOT yet consumed** — `SquatFormThresholds.forSensitivity(high)` continues to return `defaults + additive deltas` in Part 1; a later PR re-points it onto this constant. |
+| **`kSquatLeanWarnDegHBBSHigh`** | Const `48.0`. High-sensitivity lean threshold for `SquatVariant.highBarBackSquat`. Source: Glassbrook 2017 + Straub & Powers synthesis. Same "defined but not yet consumed" status as `kSquatLeanWarnDegBodyweightHigh`. |
+| **`kSquatKneeShiftWarnRatioHigh`** | Const `0.32`. High-sensitivity forward-knee-shift threshold. Source: deep-research 0.35 minus 0.03 strictness buffer. Same Part-1 status as the lean High constants. |
+| **`kSquatHeelLiftWarnRatioHigh`** | Const `0.025`. High-sensitivity heel-lift threshold. Source: Macrum 2012 "2.5% of leg length" exact value (vs. Medium's 0.03 engineering estimate). Same Part-1 status. |
+| **`kSquatCalibrationMinReps`** | Const `3`. Minimum reps for squat personal calibration to commit. Mirrors `kCalibrationMinReps` (curl). **Defined; consumed by future squat-calibration PRs.** Lives separately from the curl constant so a per-exercise dial can diverge values without a refactor. |
+| **`kSquatMinViableRomDegrees`** | Const `40.0`. Minimum ROM excursion (degrees) for a squat rep to qualify as a valid calibration sample. **CANONICAL NAME** — referenced by Parts 5, 6, 8 of the overhaul. Looser than the curl floor (`25°`) because squat reps with shallow knee flexion still carry calibration value via the long-femur path. |
+| **`kSquatProfileBottomMargin`** | Const `5.0`. Margin (degrees) added to `observedMinKneeAngle` when deriving the BOTTOM gate from a calibrated profile. Mirrors `kPushUpProfileBottomMargin` / the curl profile's peak-tolerance pattern — the gate sits a touch *above* the observed deepest angle so a noisy rep doesn't fail the user's own bar. **Defined; consumed by future squat-calibration PRs.** |
+| **`kSquatProfileStartMargin`** | Const `10.0`. Margin (degrees) subtracted from `observedMaxKneeAngle` for the START gate. Wider than the END margin so the FSM enters DESCENDING decisively before the user is committed to the rep. **Defined; consumed by future squat-calibration PRs.** |
+| **`kSquatProfileEndMargin`** | Const `5.0`. Margin (degrees) subtracted from `observedMaxKneeAngle` for the END gate. Tighter than the START margin so the rep doesn't commit prematurely — mirrors curl's `start > end` FSM invariant. **Defined; consumed by future squat-calibration PRs.** |
+| **`SquatRomThresholdSet.forSensitivity(FeedbackSensitivity)`** | Factory introduced in Part 1. Exhaustive switch over `FeedbackSensitivity` returning the High tuple (`165 / 88 / 163`) for `high` and `SquatRomDefaults.defaults` (`160 / 90 / 160`) for `medium`. Adding a future enum case (e.g. `low`) becomes a compile-time error here — the switch is the enforcement point. Consumed by `SquatStrategy(romThresholds: ...)`. |
+| **`SquatRomDefaults.forVariantAndSensitivity(variant, sensitivity)`** | Lookup added in Part 1. Variant-agnostic today — delegates to `SquatRomThresholdSet.forSensitivity(sensitivity)`. Signature kept symmetric with `forVariant` so a future per-variant ROM split (e.g. wider BOTTOM for HBBS) lands as a single method body change with no call-site churn. |
+| **`SquatRepMetrics.minKneeAngle`** | Nullable `double` field added in Part 1. Persisted in `reps.squat_min_knee_angle` (schema v9). The deepest knee angle reached during a rep — feeds the future personal-calibration pipeline. NULL on reconstructed pre-v9 sessions and on reps the analyzer couldn't measure throughout the descent. |
+| **`SquatRepMetrics.maxKneeAngle`** | Nullable `double` field added in Part 1. Persisted in `reps.squat_max_knee_angle` (schema v9). The maximum knee-angle observation during a rep (typically the top-of-rep extension). Same NULL semantics as `minKneeAngle`. |
+| **Schema v9** | Bumps `kDbSchemaVersion` to 9. Pure CREATE-style additive migration: `ALTER TABLE reps ADD COLUMN squat_min_knee_angle REAL` + `ALTER TABLE reps ADD COLUMN squat_max_knee_angle REAL`. Mirrored ALTERs added to `onCreate` so a fresh install gets the identical schema to a migrated DB. Populated only on squat rows; NULL on curl, push-up, and pre-v9 rows. **Plan-to-build deviation note:** the plan referenced "v8" — a parallel agent shipped v8 for `user_profile` during the same session, so the squat columns landed as v9 instead. Additive contract preserved through both steps. |
+
+---
+
 ## 14. Retired / Deprecated Terms
 
 When a term is retired, move its entry here with a `→ replacement` line and the retirement date. Do not delete outright — old commits still reference it.

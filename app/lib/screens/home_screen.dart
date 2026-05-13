@@ -11,11 +11,14 @@ import '../core/constants.dart';
 import '../core/theme.dart';
 import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
+import '../models/user_profile.dart';
 import '../services/app_services.dart';
 import '../services/db/profile_repository.dart';
 import '../services/db/session_dtos.dart';
+import '../utils/dashboard_aggregates.dart';
 import '../view_models/history_view_model.dart';
 import '../view_models/home_view_model.dart';
+import 'edit_profile_screen.dart';
 import 'history_detail_loader.dart';
 import 'mlkit_test_screen.dart';
 import 'settings_screen.dart';
@@ -40,6 +43,10 @@ class _HomeScreenState extends State<HomeScreen> {
   HomeViewModel? _homeVm;
   bool _servicesResolved = false;
   Color? _badgeColor;
+  // Keyed access to the History tab so the shell's app-bar filter button
+  // can delegate filter-sheet wiring back into the tab's own VM.
+  final GlobalKey<_HistoryTabState> _historyTabKey =
+      GlobalKey<_HistoryTabState>();
 
   static const List<(ProfileSide, CurlCameraView)> _expectedCombos = [
     (ProfileSide.left, CurlCameraView.sideLeft),
@@ -65,7 +72,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!_servicesResolved) {
       final services = AppServicesScope.of(context);
       _profileRepository = services.profileRepository;
-      _homeVm = HomeViewModel(repository: services.sessionRepository)..load();
+      _homeVm = HomeViewModel(
+        repository: services.sessionRepository,
+        userProfileRepository: services.userProfileRepository,
+      )..load();
       _servicesResolved = true;
       _refreshBadge();
     }
@@ -113,7 +123,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_tab == 0)
       _GearWithBadge(badgeColor: _badgeColor, onTap: _openSettings)
     else if (_tab == 2)
-      IconButton(icon: const Icon(Icons.filter_list), onPressed: () {}),
+      IconButton(
+        icon: const Icon(Icons.filter_list),
+        onPressed: _openHistoryFilter,
+        tooltip: 'Filter history',
+      ),
   ];
 
   @override
@@ -154,8 +168,12 @@ class _HomeScreenState extends State<HomeScreen> {
               MaterialPageRoute<void>(builder: (_) => const MLKitTestScreen()),
             ),
           ),
-          _HistoryTab(),
-          _ProfileTab(badgeColor: _badgeColor, onOpenSettings: _openSettings),
+          _HistoryTab(key: _historyTabKey),
+          _ProfileTab(
+            badgeColor: _badgeColor,
+            onOpenSettings: _openSettings,
+            onOpenEditProfile: _openEditProfile,
+          ),
         ],
       ),
       bottomNavigationBar: _FtNavBar(currentIndex: _tab, onTap: _onTabTap),
@@ -187,6 +205,37 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
     _refreshBadge();
+  }
+
+  /// Pushes [EditProfileScreen]; on Save (returns true) refreshes only the
+  /// user-profile slice of the dashboard VM so the new name + avatar
+  /// surface immediately without a full session re-fetch.
+  Future<void> _openEditProfile() async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(builder: (_) => const EditProfileScreen()),
+    );
+    if (saved == true) {
+      await _homeVm?.refreshUserProfile();
+    }
+  }
+
+  /// Opens the History filter bottom sheet, asks the user for an exercise
+  /// filter (or "All"), and forwards the choice to the History tab's VM.
+  /// Tab 2 mounts via a `GlobalKey` so we can poke its state imperatively
+  /// from the shared shell app bar.
+  Future<void> _openHistoryFilter() async {
+    final tabState = _historyTabKey.currentState;
+    final current = tabState?.currentFilter;
+    final picked = await showModalBottomSheet<_HistoryFilterChoice?>(
+      context: context,
+      backgroundColor: FiTrackColors.of(context).surface2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => _HistoryFilterSheet(initial: current),
+    );
+    if (picked == null) return;
+    await tabState?.applyFilter(picked.exercise);
   }
 
   Future<SquatVariant?> _showSquatVariantSheet() async {
@@ -377,74 +426,197 @@ class _StrainCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ft = FiTrackColors.of(context);
-    return FtAccentCard(
-      accentColor: ft.cyan,
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Consumer<HomeViewModel>(
+      builder: (_, vm, _) {
+        final m = vm.metrics;
+        // Strain ring uses 0..21 → 0..1 normalization for the ring fill.
+        final strainPct = (m.strain / 21.0).clamp(0.0, 1.0);
+        return FtAccentCard(
+          accentColor: ft.cyan,
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'DAILY PROGRESS',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.32,
-                      color: ft.textDim,
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'DAILY PROGRESS',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.32,
+                          color: ft.textDim,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Strain · Recovery · Output',
+                        style: TextStyle(fontSize: 12, color: ft.textMuted),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Strain · Recovery · Output',
-                    style: TextStyle(fontSize: 12, color: ft.textMuted),
+                  IconButton(
+                    icon: Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: ft.textMuted,
+                    ),
+                    onPressed: () => _showMetricsExplainer(context),
+                    tooltip: 'How are these calculated?',
                   ),
                 ],
               ),
-              const FtChip(label: 'Placeholder', tone: FtChipTone.cyan),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // Ring chart placeholder
-              Container(
-                width: 130,
-                height: 130,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: ft.surface3, width: 12),
-                ),
-                child: Center(
-                  child: Text(
-                    '—',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: ft.textMuted,
+              const SizedBox(height: 18),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  _StrainRing(
+                    progress: strainPct,
+                    label: m.strain.toStringAsFixed(1),
+                  ),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _MetricStatRow(
+                          label: 'Strain',
+                          value: m.strain.toStringAsFixed(1),
+                          ft: ft,
+                        ),
+                        const SizedBox(height: 14),
+                        _MetricStatRow(
+                          label: 'Recovery',
+                          value: '${(m.recovery * 100).round()}%',
+                          ft: ft,
+                        ),
+                        const SizedBox(height: 14),
+                        _MetricStatRow(
+                          label: 'Output',
+                          value: '${(m.output * 100).round()}%',
+                          ft: ft,
+                        ),
+                      ],
                     ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 20),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _PlaceholderStatRow(label: 'Strain', ft: ft),
-                    const SizedBox(height: 14),
-                    _PlaceholderStatRow(label: 'Recovery', ft: ft),
-                    const SizedBox(height: 14),
-                    _PlaceholderStatRow(label: 'Output', ft: ft),
-                  ],
-                ),
+                ],
               ),
             ],
+          ),
+        );
+      },
+    );
+  }
+
+  static void _showMetricsExplainer(BuildContext context) {
+    final ft = FiTrackColors.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: ft.surface2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'How these are calculated',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(ctx).colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _ExplainerRow(
+                title: 'Strain',
+                body:
+                    'Sum of (reps × minutes) over the last 7 days, scaled to a 0–21 range.',
+              ),
+              _ExplainerRow(
+                title: 'Recovery',
+                body:
+                    'Days since the last fatigue-flagged session, capped at 7 days = 100%.',
+              ),
+              _ExplainerRow(
+                title: 'Output',
+                body:
+                    'Average rep-quality score across last-7-day sessions (0–100%).',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExplainerRow extends StatelessWidget {
+  const _ExplainerRow({required this.title, required this.body});
+  final String title;
+  final String body;
+  @override
+  Widget build(BuildContext context) {
+    final ft = FiTrackColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: ft.accent,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(body, style: TextStyle(fontSize: 13, color: ft.textPrimary)),
+        ],
+      ),
+    );
+  }
+}
+
+class _StrainRing extends StatelessWidget {
+  const _StrainRing({required this.progress, required this.label});
+  final double progress;
+  final String label;
+  @override
+  Widget build(BuildContext context) {
+    final ft = FiTrackColors.of(context);
+    return SizedBox(
+      width: 130,
+      height: 130,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          SizedBox(
+            width: 130,
+            height: 130,
+            child: CircularProgressIndicator(
+              value: progress.clamp(0.0, 1.0),
+              strokeWidth: 12,
+              backgroundColor: ft.surface3,
+              valueColor: AlwaysStoppedAnimation<Color>(ft.cyan),
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
           ),
         ],
       ),
@@ -452,10 +624,15 @@ class _StrainCard extends StatelessWidget {
   }
 }
 
-class _PlaceholderStatRow extends StatelessWidget {
-  const _PlaceholderStatRow({required this.label, required this.ft});
+class _MetricStatRow extends StatelessWidget {
+  const _MetricStatRow({
+    required this.label,
+    required this.value,
+    required this.ft,
+  });
 
   final String label;
+  final String value;
   final FiTrackColors ft;
 
   @override
@@ -465,11 +642,11 @@ class _PlaceholderStatRow extends StatelessWidget {
       children: [
         Text(label, style: TextStyle(fontSize: 12, color: ft.textMuted)),
         Text(
-          '—',
+          value,
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
-            color: ft.textMuted,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
       ],
@@ -965,6 +1142,8 @@ class _ExerciseCard extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _HistoryTab extends StatefulWidget {
+  const _HistoryTab({super.key});
+
   @override
   State<_HistoryTab> createState() => _HistoryTabState();
 }
@@ -975,6 +1154,15 @@ class _HistoryTabState extends State<_HistoryTab>
 
   @override
   bool get wantKeepAlive => true;
+
+  /// Exposed to the shell so the app-bar filter sheet can pre-select the
+  /// user's current filter. Null = "All exercises".
+  ExerciseType? get currentFilter => _vm?.filter;
+
+  /// Apply a filter chosen in the shell's app-bar bottom sheet.
+  Future<void> applyFilter(ExerciseType? next) async {
+    await _vm?.setFilter(next);
+  }
 
   @override
   void didChangeDependencies() {
@@ -1069,86 +1257,103 @@ class _WeeklyVolumeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ft = FiTrackColors.of(context);
-    const heights = [40.0, 65.0, 50.0, 80.0, 55.0, 90.0, 72.0];
     const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-    // Saturday (index 5) is highlighted as today's peak.
-    const todayIdx = 5;
+    final todayIdx = DateTime.now().weekday - 1;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: ftCardDecoration(context),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Consumer<HomeViewModel>(
+      builder: (_, vm, _) {
+        final bars = vm.metrics.weeklyBars;
+        final maxBar = bars.isEmpty ? 1 : bars.reduce((a, b) => a > b ? a : b);
+        final hasData = bars.any((v) => v > 0);
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: ftCardDecoration(context),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'WEEKLY VOLUME',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.0,
-                      color: ft.textDim,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '42,180 lb',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -1.12,
-                      color: Theme.of(context).colorScheme.onSurface,
-                      height: 1.1,
-                    ),
-                  ),
-                ],
-              ),
-              const FtChip(label: '+8% wk', tone: FtChipTone.accent),
-            ],
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 64,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: List.generate(7, (i) {
-                final isToday = i == todayIdx;
-                final barH = heights[i] * 0.64;
-                return Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 400),
-                        margin: const EdgeInsets.symmetric(horizontal: 3),
-                        height: barH,
-                        decoration: BoxDecoration(
-                          color: isToday ? ft.accent : ft.surface5,
-                          borderRadius: BorderRadius.circular(3),
+                      Text(
+                        'WEEKLY VOLUME',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.0,
+                          color: ft.textDim,
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Text(
-                        days[i],
+                        hasData
+                            ? '${vm.metrics.weeklyRepCount} reps'
+                            : 'No reps yet',
                         style: TextStyle(
-                          fontSize: 9,
+                          fontSize: 28,
                           fontWeight: FontWeight.w700,
-                          color: isToday ? ft.accent : ft.textMuted,
+                          letterSpacing: -1.12,
+                          color: Theme.of(context).colorScheme.onSurface,
+                          height: 1.1,
                         ),
                       ),
                     ],
                   ),
-                );
-              }),
-            ),
+                  if (hasData)
+                    FtChip(
+                      label: '${vm.metrics.totalSessions} total',
+                      tone: FtChipTone.accent,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                height: 64,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: List.generate(7, (i) {
+                    final isToday = i == todayIdx;
+                    // Normalize the day's rep count to a 0..1 fraction of the
+                    // week's tallest bar, then scale to the available 64-pixel
+                    // height. Empty bars get a 4-pixel "stub" so the chart's
+                    // weekday baseline reads visually even with no data.
+                    final fraction = maxBar == 0 ? 0.0 : bars[i] / maxBar;
+                    final barH = bars[i] == 0 ? 4.0 : (8.0 + fraction * 56.0);
+                    return Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 400),
+                            margin: const EdgeInsets.symmetric(horizontal: 3),
+                            height: barH,
+                            decoration: BoxDecoration(
+                              color: isToday ? ft.accent : ft.surface5,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            days[i],
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: isToday ? ft.accent : ft.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -1513,168 +1718,319 @@ class _HistoryEmpty extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ProfileTab extends StatelessWidget {
-  const _ProfileTab({required this.badgeColor, required this.onOpenSettings});
+  const _ProfileTab({
+    required this.badgeColor,
+    required this.onOpenSettings,
+    required this.onOpenEditProfile,
+  });
 
   final Color? badgeColor;
   final Future<void> Function() onOpenSettings;
+  final Future<void> Function() onOpenEditProfile;
 
   @override
   Widget build(BuildContext context) {
     final ft = FiTrackColors.of(context);
-    return CustomScrollView(
-      slivers: [
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-          sliver: SliverList(
-            delegate: SliverChildListDelegate([
-              // Profile hero
-              Row(
-                children: [
-                  Container(
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      color: ft.surface3,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: ft.stroke),
-                    ),
-                    child: Icon(Icons.person, size: 32, color: ft.accent),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Alex Chen',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.48,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Powerlifter · 12-day streak',
-                          style: TextStyle(fontSize: 12, color: ft.textMuted),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: Icon(Icons.settings_outlined, color: ft.textMuted),
-                    onPressed: onOpenSettings,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
+    return Consumer<HomeViewModel>(
+      builder: (_, vm, _) {
+        final profile = vm.userProfile;
+        final m = vm.metrics;
+        final hasProfile = profile != null;
+        final goals = profile?.goals ?? const <UserGoal>[];
 
-              // Stats grid
-              Row(
-                children: [
-                  const Expanded(
-                    child: _ProfileStat(label: 'Sessions', value: '—'),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _ProfileStat(
-                      label: 'PRs',
-                      value: '—',
-                      color: ft.accent,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: _ProfileStat(label: 'Hours', value: '—'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // Goals
-              Text(
-                'ACTIVE GOALS',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                  color: ft.textDim,
-                ),
-              ),
-              const SizedBox(height: 10),
-              _GoalCard(
-                title: '315 lb Squat',
-                progress: 0.81,
-                detail: 'Current: 255 lb · 60 lb to go',
-                color: ft.accent,
-              ),
-              const SizedBox(height: 8),
-              _GoalCard(
-                title: '30-day Streak',
-                progress: 0.40,
-                detail: 'Day 12 of 30',
-                color: ft.cyan,
-              ),
-              const SizedBox(height: 16),
-
-              // Settings shortcut
-              Text(
-                'SETTINGS',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                  color: ft.textDim,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Container(
-                decoration: ftCardDecoration(context),
-                clipBehavior: Clip.hardEdge,
-                child: Column(
-                  children: [
-                    _SettingsRow(
-                      icon: Icons.settings_outlined,
-                      label: 'App Settings',
-                      onTap: onOpenSettings,
-                    ),
-                    Divider(height: 1, color: ft.stroke),
-                    _UnitsSelector(last: true),
-                  ],
-                ),
-              ),
-
-              if (badgeColor != null) ...[
-                const SizedBox(height: 16),
-                FtAccentCard(
-                  accentColor: ft.accent,
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
+        return CustomScrollView(
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  // Profile hero
+                  Row(
                     children: [
-                      Icon(Icons.tune, color: badgeColor, size: 20),
-                      const SizedBox(width: 12),
+                      _ProfileAvatar(profile: profile),
+                      const SizedBox(width: 14),
                       Expanded(
-                        child: Text(
-                          badgeColor == Colors.redAccent
-                              ? 'Calibration recommended — no biceps curl profile set yet.'
-                              : 'Some curl views not calibrated yet.',
-                          style: TextStyle(fontSize: 13, color: ft.textPrimary),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              hasProfile
+                                  ? profile.displayName
+                                  : 'Set up your profile',
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.48,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _heroSubtitle(profile, m),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: ft.textMuted,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      TextButton(
-                        onPressed: onOpenSettings,
-                        child: const Text('Settings'),
+                      IconButton(
+                        icon: Icon(Icons.edit_outlined, color: ft.textMuted),
+                        tooltip: 'Edit profile',
+                        onPressed: onOpenEditProfile,
                       ),
                     ],
                   ),
-                ),
-              ],
-            ]),
-          ),
-        ),
-      ],
+                  const SizedBox(height: 16),
+
+                  // Stats grid — driven by computed dashboard aggregates.
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _ProfileStat(
+                          label: 'Sessions',
+                          value: m.totalSessions.toString(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _ProfileStat(
+                          label: 'Exercises',
+                          value: m.personalRecords.toString(),
+                          color: ft.accent,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _ProfileStat(
+                          label: 'Hours',
+                          value: m.totalHours.toStringAsFixed(1),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // First-time CTA when no profile saved yet.
+                  if (!hasProfile) ...[
+                    FtAccentCard(
+                      accentColor: ft.accent,
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.account_circle_outlined,
+                            color: ft.accent,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'Add your name and personal info so we can tailor your '
+                              'training experience.',
+                              style: TextStyle(fontSize: 13),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton(
+                            onPressed: onOpenEditProfile,
+                            child: const Text('Set up'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Goals — only render the section header when the user
+                  // has at least one goal (or when they have a profile and
+                  // can therefore add one).
+                  if (hasProfile) ...[
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'ACTIVE GOALS',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.0,
+                            color: ft.textDim,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: onOpenEditProfile,
+                          icon: Icon(
+                            Icons.edit_outlined,
+                            size: 14,
+                            color: ft.textMuted,
+                          ),
+                          label: Text(
+                            'Edit profile',
+                            style: TextStyle(fontSize: 12, color: ft.textMuted),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    if (goals.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: ftCardDecoration(context),
+                        child: Text(
+                          'No goals yet. Edit your profile to add one — '
+                          'something like "30 push-ups in one set" or '
+                          '"3 sessions per week".',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: ft.textMuted,
+                            height: 1.4,
+                          ),
+                        ),
+                      )
+                    else
+                      for (int i = 0; i < goals.length; i++) ...[
+                        _GoalCard(
+                          title: goals[i].title,
+                          progress: goals[i].completed ? 1.0 : 0.0,
+                          detail:
+                              goals[i].detail ??
+                              (goals[i].completed
+                                  ? 'Completed'
+                                  : 'In progress'),
+                          color: i.isEven ? ft.accent : ft.cyan,
+                        ),
+                        if (i < goals.length - 1) const SizedBox(height: 8),
+                      ],
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Settings shortcut
+                  Text(
+                    'SETTINGS',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.0,
+                      color: ft.textDim,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    decoration: ftCardDecoration(context),
+                    clipBehavior: Clip.hardEdge,
+                    child: Column(
+                      children: [
+                        _SettingsRow(
+                          icon: Icons.account_circle_outlined,
+                          label: hasProfile ? 'Edit Profile' : 'Set up Profile',
+                          onTap: onOpenEditProfile,
+                        ),
+                        Divider(height: 1, color: ft.stroke),
+                        _SettingsRow(
+                          icon: Icons.settings_outlined,
+                          label: 'App Settings',
+                          onTap: onOpenSettings,
+                        ),
+                        Divider(height: 1, color: ft.stroke),
+                        _UnitsSelector(last: true),
+                      ],
+                    ),
+                  ),
+
+                  if (badgeColor != null) ...[
+                    const SizedBox(height: 16),
+                    FtAccentCard(
+                      accentColor: ft.accent,
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          Icon(Icons.tune, color: badgeColor, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              badgeColor == Colors.redAccent
+                                  ? 'Calibration recommended — no biceps curl profile set yet.'
+                                  : 'Some curl views not calibrated yet.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: ft.textPrimary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton(
+                            onPressed: onOpenSettings,
+                            child: const Text('Settings'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ]),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Generate the small line under the user's name. Prefers their fitness
+  /// goal + experience when both are set, falls back to a session count,
+  /// and ends with a generic prompt for fresh installs.
+  static String _heroSubtitle(UserProfile? p, DashboardMetrics m) {
+    if (p == null) {
+      return 'Add your details to personalize FiTrack.';
+    }
+    final parts = <String>[];
+    if (p.experience != null) parts.add(p.experience!.label);
+    if (p.primaryGoal != null) parts.add(p.primaryGoal!.label);
+    if (parts.isEmpty) {
+      if (m.totalSessions > 0) {
+        parts.add(
+          '${m.totalSessions} session${m.totalSessions == 1 ? '' : 's'} logged',
+        );
+      } else {
+        parts.add('Ready when you are');
+      }
+    }
+    return parts.join(' · ');
+  }
+}
+
+/// Profile hero avatar — picks emoji > initials > generic icon based on
+/// what the user has saved.
+class _ProfileAvatar extends StatelessWidget {
+  const _ProfileAvatar({required this.profile});
+  final UserProfile? profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final ft = FiTrackColors.of(context);
+    return Container(
+      width: 64,
+      height: 64,
+      decoration: BoxDecoration(
+        color: ft.surface3,
+        shape: BoxShape.circle,
+        border: Border.all(color: ft.stroke),
+      ),
+      alignment: Alignment.center,
+      child: profile == null
+          ? Icon(Icons.person, size: 32, color: ft.accent)
+          : profile!.avatarEmoji != null
+          ? Text(profile!.avatarEmoji!, style: const TextStyle(fontSize: 32))
+          : Text(
+              profile!.initials,
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                color: ft.accent,
+                letterSpacing: -0.5,
+              ),
+            ),
     );
   }
 }
@@ -1796,11 +2152,32 @@ class _UnitsSelector extends StatefulWidget {
 }
 
 class _UnitsSelectorState extends State<_UnitsSelector> {
-  String _selectedUnit = 'lb';
+  Units? _units;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_units == null) _hydrate();
+  }
+
+  Future<void> _hydrate() async {
+    final prefs = AppServicesScope.of(context).preferencesRepository;
+    final v = await prefs.getUnits();
+    if (!mounted) return;
+    setState(() => _units = v);
+  }
+
+  Future<void> _setUnits(Units next) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setUnits(next);
+    if (!mounted) return;
+    setState(() => _units = next);
+  }
 
   @override
   Widget build(BuildContext context) {
     final ft = FiTrackColors.of(context);
+    final label = _units == Units.imperial ? 'lb / in' : 'kg / cm';
     return InkWell(
       onTap: () => _showUnitsMenu(context),
       child: Padding(
@@ -1816,7 +2193,7 @@ class _UnitsSelectorState extends State<_UnitsSelector> {
               ),
             ),
             Text(
-              _selectedUnit,
+              _units == null ? '…' : label,
               style: TextStyle(fontSize: 13, color: ft.textMuted),
             ),
             const SizedBox(width: 4),
@@ -1851,28 +2228,28 @@ class _UnitsSelectorState extends State<_UnitsSelector> {
               ),
             ),
             ListTile(
-              leading: _selectedUnit == 'lb'
+              leading: _units == Units.imperial
                   ? Icon(Icons.check, color: ft.accent)
                   : null,
               title: Text(
-                'Pounds (lb)',
+                'Imperial (lb / in)',
                 style: TextStyle(color: Theme.of(ctx).colorScheme.onSurface),
               ),
               onTap: () {
-                setState(() => _selectedUnit = 'lb');
+                _setUnits(Units.imperial);
                 Navigator.pop(ctx);
               },
             ),
             ListTile(
-              leading: _selectedUnit == 'kg'
+              leading: _units == Units.metric
                   ? Icon(Icons.check, color: ft.accent)
                   : null,
               title: Text(
-                'Kilograms (kg)',
+                'Metric (kg / cm)',
                 style: TextStyle(color: Theme.of(ctx).colorScheme.onSurface),
               ),
               onTap: () {
-                setState(() => _selectedUnit = 'kg');
+                _setUnits(Units.metric);
                 Navigator.pop(ctx);
               },
             ),
@@ -2073,6 +2450,122 @@ class _SquatVariantSheetState extends State<_SquatVariantSheet> {
             ElevatedButton(
               onPressed: () => Navigator.of(context).pop(_selected),
               child: const Text('START'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// History filter — bottom sheet wired to _HistoryTabState.applyFilter
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Result returned from [_HistoryFilterSheet]. Wraps the chosen exercise
+/// (null = "All exercises") so the sheet's pop value is unambiguous —
+/// we can distinguish "user dismissed" (returns null at the showModalBottomSheet
+/// level) from "user picked All" (returns a [_HistoryFilterChoice] with
+/// `exercise == null`).
+class _HistoryFilterChoice {
+  const _HistoryFilterChoice(this.exercise);
+  final ExerciseType? exercise;
+}
+
+class _HistoryFilterSheet extends StatelessWidget {
+  const _HistoryFilterSheet({required this.initial});
+
+  final ExerciseType? initial;
+
+  /// Curl variants visible in History today. Skip the deprecated
+  /// `bicepsCurlFront` and the legacy `bicepsCurl` enum members so the
+  /// sheet only offers exercises the user can actually start.
+  static const List<ExerciseType> _filterableExercises = <ExerciseType>[
+    ExerciseType.bicepsCurlSide,
+    ExerciseType.squat,
+    ExerciseType.pushUp,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final ft = FiTrackColors.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Filter by exercise',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 14),
+            _FilterTile(
+              label: 'All exercises',
+              selected: initial == null,
+              onTap: () =>
+                  Navigator.of(context).pop(const _HistoryFilterChoice(null)),
+            ),
+            for (final ex in _filterableExercises)
+              _FilterTile(
+                label: ex.label,
+                selected: initial == ex,
+                onTap: () =>
+                    Navigator.of(context).pop(_HistoryFilterChoice(ex)),
+              ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text('Cancel', style: TextStyle(color: ft.textMuted)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FilterTile extends StatelessWidget {
+  const _FilterTile({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ft = FiTrackColors.of(context);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            Icon(
+              selected ? Icons.radio_button_checked : Icons.radio_button_off,
+              size: 20,
+              color: selected ? ft.accent : ft.textMuted,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
             ),
           ],
         ),

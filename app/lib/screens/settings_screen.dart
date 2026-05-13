@@ -45,6 +45,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _squatDebugSession = false;
   ThemeMode _themeMode = ThemeMode.system;
   FeedbackSensitivity _feedbackSensitivity = FeedbackSensitivity.medium;
+  bool _ttsEnabled = true;
+  bool _hapticsEnabled = true;
 
   @override
   void didChangeDependencies() {
@@ -71,6 +73,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final themeMode = await services.preferencesRepository.getThemeMode();
     final feedbackSensitivity = await services.preferencesRepository
         .getFeedbackSensitivity();
+    final tts = await services.preferencesRepository.getTtsEnabled();
+    final haptics = await services.preferencesRepository.getHapticsEnabled();
     if (!mounted) return;
     setState(() {
       _profile = p;
@@ -80,8 +84,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _squatDebugSession = squatDebug;
       _themeMode = themeMode;
       _feedbackSensitivity = feedbackSensitivity;
+      _ttsEnabled = tts;
+      _hapticsEnabled = haptics;
       _loading = false;
     });
+  }
+
+  Future<void> _setTtsEnabled(bool value) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setTtsEnabled(value);
+    TelemetryLog.instance.log(
+      'preferences.tts_enabled_changed',
+      'enabled=$value',
+    );
+    if (!mounted) return;
+    setState(() => _ttsEnabled = value);
+  }
+
+  Future<void> _setHapticsEnabled(bool value) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setHapticsEnabled(value);
+    TelemetryLog.instance.log(
+      'preferences.haptics_enabled_changed',
+      'enabled=$value',
+    );
+    if (!mounted) return;
+    setState(() => _hapticsEnabled = value);
   }
 
   Future<void> _setThemeMode(ThemeMode mode) async {
@@ -303,6 +331,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     selected: {_themeMode},
                     onSelectionChanged: (s) => _setThemeMode(s.first),
                   ),
+                ),
+                const Divider(),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 4),
+                  child: Text(
+                    'Audio & Haptics',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withValues(
+                        alpha: 0.54,
+                      ),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Spoken coaching (TTS)'),
+                  subtitle: const Text('Audio cues during workouts'),
+                  value: _ttsEnabled,
+                  onChanged: _setTtsEnabled,
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Haptic feedback'),
+                  subtitle: const Text(
+                    'Vibration on rep complete and form alerts',
+                  ),
+                  value: _hapticsEnabled,
+                  onChanged: _setHapticsEnabled,
                 ),
                 const Divider(),
                 Padding(

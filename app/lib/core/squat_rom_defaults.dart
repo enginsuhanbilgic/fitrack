@@ -71,6 +71,25 @@ class SquatRomThresholdSet {
 
   /// ASCENDING → IDLE when knee angle returns above this → rep++.
   final double endAngle;
+
+  /// Build the threshold tuple for the requested [FeedbackSensitivity].
+  ///
+  /// `medium` returns [SquatRomDefaults.defaults] — bit-for-bit identical to
+  /// the legacy hand-tuned constants ([kSquatStartAngle] / [kSquatBottomAngle]
+  /// / [kSquatEndAngle]). `high` returns the tighter research-derived gates
+  /// ([kSquatStartAngleHigh] / [kSquatBottomAngleHigh] / [kSquatEndAngleHigh]).
+  ///
+  /// Exhaustive switch — adding a future enum case is a compile error here.
+  factory SquatRomThresholdSet.forSensitivity(FeedbackSensitivity s) {
+    return switch (s) {
+      FeedbackSensitivity.high => const SquatRomThresholdSet(
+        startAngle: kSquatStartAngleHigh,
+        bottomAngle: kSquatBottomAngleHigh,
+        endAngle: kSquatEndAngleHigh,
+      ),
+      FeedbackSensitivity.medium => SquatRomDefaults.defaults,
+    };
+  }
 }
 
 /// Per-variant squat ROM defaults (currently variant-agnostic — values
@@ -97,4 +116,15 @@ class SquatRomDefaults {
   /// in `SquatStrategy.effectiveBottomAngle`. When telemetry-derived squat
   /// thresholds arrive, this method gains a `switch (variant)` body.
   static SquatRomThresholdSet forVariant(SquatVariant variant) => defaults;
+
+  /// Combined variant + sensitivity lookup. Today the result is variant-
+  /// agnostic — the sensitivity dial is the only axis that affects the FSM
+  /// gates here — so this delegates to [SquatRomThresholdSet.forSensitivity].
+  /// The signature is kept symmetric with [forVariant] so a future
+  /// per-variant ROM split (e.g. wider BOTTOM for HBBS) lands as a single
+  /// method body change with no call-site churn.
+  static SquatRomThresholdSet forVariantAndSensitivity(
+    SquatVariant variant,
+    FeedbackSensitivity sensitivity,
+  ) => SquatRomThresholdSet.forSensitivity(sensitivity);
 }

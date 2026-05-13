@@ -178,7 +178,7 @@ void main() {
         'session_id,rep_index,quality,min_angle,max_angle,side,view,'
         'threshold_source,bucket_updated,rejected_outlier,concentric_ms,'
         'squat_lean_deg,squat_knee_shift_ratio,squat_heel_lift_ratio,'
-        'squat_variant,'
+        'squat_variant,squat_min_knee_angle,squat_max_knee_angle,'
         'biceps_lean_deg,biceps_shoulder_drift_ratio,'
         'biceps_elbow_drift_ratio,biceps_back_lean_deg,'
         'biceps_elbow_drift_signed,'
@@ -253,11 +253,13 @@ void main() {
       // (min_angle, max_angle, side, view, threshold_source, bucket_updated,
       // rejected_outlier, concentric_ms, squat_lean_deg,
       // squat_knee_shift_ratio, squat_heel_lift_ratio, squat_variant,
+      // squat_min_knee_angle, squat_max_knee_angle,
       // biceps_lean_deg, biceps_shoulder_drift_ratio,
       // biceps_elbow_drift_ratio, biceps_back_lean_deg,
-      // biceps_elbow_drift_signed, form_errors). 21 total columns.
+      // biceps_elbow_drift_signed, form_errors). 23 total columns
+      // (post schema-v9: + squat_min_knee_angle, squat_max_knee_angle).
       expect(row.startsWith('9,1,0.7800,'), isTrue);
-      expect(row.split(',').length, 21);
+      expect(row.split(',').length, 23);
     });
 
     test('squat rep WITH metrics populates the 4 squat columns', () {
@@ -293,8 +295,9 @@ void main() {
       expect(row, contains(',0.2450,'));
       expect(row, contains(',0.0180,'));
       expect(row, contains(',highBarBackSquat,'));
-      // Field count must match the header (21 columns post-signed-add).
-      expect(row.split(',').length, 21);
+      // Field count must match the header (23 columns post schema-v9:
+      // + squat_min_knee_angle, squat_max_knee_angle).
+      expect(row.split(',').length, 23);
     });
 
     test('bicepsCurlSide rep WITH metrics populates the 5 biceps columns', () {
@@ -334,8 +337,9 @@ void main() {
       expect(row, contains(',3.25,'));
       // Negative signed value — sign must survive the round-trip.
       expect(row, contains(',-0.2680,'));
-      // Field count must match the header (21 columns post-signed-add).
-      expect(row.split(',').length, 21);
+      // Field count must match the header (23 columns post schema-v9:
+      // + squat_min_knee_angle, squat_max_knee_angle).
+      expect(row.split(',').length, 23);
     });
   });
 

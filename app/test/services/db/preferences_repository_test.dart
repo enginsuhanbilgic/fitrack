@@ -159,4 +159,119 @@ void main() {
       },
     );
   });
+
+  group('Schema v9 — squat min/max knee angle migration', () {
+    test('v3 → v9 step-up adds both new columns', () async {
+      // Build a v1-shaped baseline, then walk the migration ladder from v3
+      // to current (kDbSchemaVersion). This is the path a long-dormant
+      // installation upgrades through.
+      final db = await databaseFactoryFfi.openDatabase(
+        inMemoryDatabasePath,
+        options: OpenDatabaseOptions(
+          version: 1,
+          onConfigure: onConfigure,
+          onCreate: (db, _) async {
+            await db.execute(ddlProfiles);
+            await db.execute(ddlSessions);
+            await db.execute(ddlReps);
+            await db.execute(ddlFormErrors);
+            await db.execute(ddlFrameTelemetry);
+          },
+        ),
+      );
+
+      await onUpgrade(db, 3, kDbSchemaVersion);
+
+      final info = await db.rawQuery('PRAGMA table_info(reps)');
+      final cols = info.map((r) => r['name'] as String).toList();
+      expect(cols, contains('squat_min_knee_angle'));
+      expect(cols, contains('squat_max_knee_angle'));
+
+      await db.close();
+    });
+
+    test('v8 → v9 step-up adds both new columns', () async {
+      // The closest realistic upgrade path: a user one schema behind ships.
+      final db = await databaseFactoryFfi.openDatabase(
+        inMemoryDatabasePath,
+        options: OpenDatabaseOptions(
+          version: 1,
+          onConfigure: onConfigure,
+          onCreate: (db, _) async {
+            await db.execute(ddlProfiles);
+            await db.execute(ddlSessions);
+            await db.execute(ddlReps);
+            await db.execute(ddlFormErrors);
+            await db.execute(ddlFrameTelemetry);
+          },
+        ),
+      );
+
+      await onUpgrade(db, 8, kDbSchemaVersion);
+
+      final info = await db.rawQuery('PRAGMA table_info(reps)');
+      final cols = info.map((r) => r['name'] as String).toList();
+      expect(cols, contains('squat_min_knee_angle'));
+      expect(cols, contains('squat_max_knee_angle'));
+
+      await db.close();
+    });
+
+    test(
+      'pre-v9 rep rows pick up NULL for both new columns on upgrade',
+      () async {
+        // Seed a v1 DB with one rep row, then walk to current. The pre-existing
+        // row must survive and both new columns must be NULL on it.
+        final db = await databaseFactoryFfi.openDatabase(
+          inMemoryDatabasePath,
+          options: OpenDatabaseOptions(
+            version: 1,
+            onConfigure: onConfigure,
+            onCreate: (db, _) async {
+              await db.execute(ddlProfiles);
+              await db.execute(ddlSessions);
+              await db.execute(ddlReps);
+              await db.execute(ddlFormErrors);
+              await db.execute(ddlFrameTelemetry);
+            },
+          ),
+        );
+
+        await db.insert('sessions', <String, Object?>{
+          'exercise': 'squat',
+          'started_at': 1_700_000_000_000,
+          'duration_ms': 0,
+          'total_reps': 1,
+          'total_sets': 1,
+          'fatigue_detected': 0,
+          'asymmetry_detected': 0,
+          'eccentric_too_fast_count': 0,
+        });
+        final sessionId =
+            (await db.query(
+                  'sessions',
+                  orderBy: 'id DESC',
+                  limit: 1,
+                )).first['id']
+                as int;
+        await db.insert('reps', <String, Object?>{
+          'session_id': sessionId,
+          'rep_index': 1,
+          'quality': 0.8,
+        });
+
+        await onUpgrade(db, 1, kDbSchemaVersion);
+
+        final reps = await db.query('reps');
+        expect(reps, hasLength(1));
+        expect(reps.first['squat_min_knee_angle'], isNull);
+        expect(reps.first['squat_max_knee_angle'], isNull);
+        // Sanity: the row's pre-existing fields survive.
+        expect(reps.first['rep_index'], 1);
+        expect(reps.first['quality'], 0.8);
+
+        await db.close();
+      },
+    );
+  });
 }

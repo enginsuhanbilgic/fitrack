@@ -75,6 +75,8 @@ class RepRow {
     this.squatKneeShiftRatio,
     this.squatHeelLiftRatio,
     this.squatVariant,
+    this.squatMinKneeAngle,
+    this.squatMaxKneeAngle,
     this.bicepsLeanDeg,
     this.bicepsShoulderDriftRatio,
     this.bicepsElbowDriftRatio,
@@ -116,6 +118,16 @@ class RepRow {
   /// `SquatVariant.name` for the variant the session ran with. NULL on
   /// non-squat rows AND on squat rows written before schema v3.
   final SquatVariant? squatVariant;
+
+  /// Minimum knee angle reached during this rep (degrees). Persisted in
+  /// `reps.squat_min_knee_angle` from schema v9 onward. NULL on non-squat
+  /// rows AND on squat rows written before schema v9.
+  final double? squatMinKneeAngle;
+
+  /// Maximum knee angle observed during this rep (degrees). Persisted in
+  /// `reps.squat_max_knee_angle` from schema v9 onward. Same NULL semantics
+  /// as [squatMinKneeAngle].
+  final double? squatMaxKneeAngle;
 
   // ── Biceps side-view per-rep metrics (schema v5) ──
   /// Peak forward-trunk-lean delta (degrees) for this rep — analyzer's
