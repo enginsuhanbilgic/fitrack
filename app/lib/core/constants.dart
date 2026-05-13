@@ -229,6 +229,22 @@ const double kHeadSigmaDriftCap = 2.0;
 /// Minimum seconds between two audio cues of the same type.
 const double kFeedbackCooldownSec = 3.0;
 
+/// Per-error voice-cue cap when [TtsVerbosity.low] is selected. After this
+/// many fires of the same error in a single session, the voice falls silent
+/// for that error — visual highlights and the session-end summary still
+/// surface every fire. Tuned to 1 (single spoken reminder per cue per
+/// session) because the "low" tier exists for users who've internalized
+/// the coaching and want a quiet workout.
+const int kTtsVerbosityLowCap = 1;
+
+/// Per-error voice-cue cap when [TtsVerbosity.medium] is selected. After
+/// this many fires of the same error in a single session, the voice falls
+/// silent for that error — visual highlights and the session-end summary
+/// still surface every fire. Tuned to 3 (initial cue + two follow-ups)
+/// because most form errors fire 2-5 times per set, so the cap silences
+/// the *repeat* without missing the first warning. Default tier.
+const int kTtsVerbosityMediumCap = 3;
+
 // ── 1€ Filter defaults ──────────────────────────────────
 /// Paper defaults (Casiez et al., CHI 2012). Kept as the base for any
 /// consumer that wants the reference behavior (e.g. a future engine-side

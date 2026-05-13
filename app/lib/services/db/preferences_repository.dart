@@ -72,10 +72,39 @@ abstract class PreferencesRepository {
   Future<bool> getTtsEnabled();
   Future<void> setTtsEnabled(bool value);
 
+  /// How chatty the TTS coaching is when [getTtsEnabled] is true. Defaults
+  /// to [TtsVerbosity.medium]. Caps the number of times the voice fires
+  /// per *form error* per session; visual highlights and the session-end
+  /// summary are unaffected. Read at workout start and frozen for the
+  /// session.
+  Future<TtsVerbosity> getTtsVerbosity();
+  Future<void> setTtsVerbosity(TtsVerbosity value);
+
   /// Whether haptic feedback fires on rep completion / form errors.
   /// Defaults to `true`. Read at workout start and frozen for the session.
   Future<bool> getHapticsEnabled();
   Future<void> setHapticsEnabled(bool value);
+
+  // ── Demo Mode (revision 6 of `plans_of_claude/demo-mode-toggle.md`) ──
+
+  /// Whether Demo Mode is currently active. Defaults to `false`.
+  /// Flipped LAST in both `enableAndSeed()` and `disable()` so a partial
+  /// failure mid-toggle leaves the pref reflecting the pre-toggle state.
+  Future<bool> getDemoModeEnabled();
+  Future<void> setDemoModeEnabled(bool value);
+
+  /// Whether the user has answered the first-launch "Try with sample data?"
+  /// dialog. Defaults to `false`. Once true, the dialog never reappears.
+  Future<bool> getOnboardingChoiceMade();
+  Future<void> setOnboardingChoiceMade(bool value);
+
+  /// JSON-encoded backup of the user's real `user_profile` row taken before
+  /// `enableAndSeed()` overwrites it with Demo Alex. Restored by `disable()`
+  /// step 3 Case A. Null when no backup exists (fresh install OR user was
+  /// previously demo-only). See Gap 33 in the plan.
+  Future<String?> getUserProfileBackup();
+  Future<void> setUserProfileBackup(String? json);
+  Future<void> clearUserProfileBackup();
 }
 
 class SqlitePreferencesRepository implements PreferencesRepository {
@@ -93,7 +122,12 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   static const String _kFeedbackSensitivityKey = 'feedback_sensitivity';
   static const String _kUnitsKey = 'units';
   static const String _kTtsEnabledKey = 'tts_enabled';
+  static const String _kTtsVerbosityKey = 'tts_verbosity';
   static const String _kHapticsEnabledKey = 'haptics_enabled';
+  // ── Demo Mode keys (schema v10 / demo-mode-toggle.md) ──
+  static const String _kDemoModeEnabledKey = 'demo_mode_enabled';
+  static const String _kOnboardingChoiceMadeKey = 'onboarding_choice_made';
+  static const String _kUserProfileBackupKey = 'user_profile_backup';
 
   @override
   Future<SquatVariant> getSquatVariant() async {
@@ -310,6 +344,33 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   }
 
   @override
+  Future<TtsVerbosity> getTtsVerbosity() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kTtsVerbosityKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return TtsVerbosity.medium;
+    final raw = rows.first['value'] as String?;
+    if (raw == null) return TtsVerbosity.medium;
+    try {
+      return TtsVerbosity.values.byName(raw);
+    } catch (_) {
+      return TtsVerbosity.medium;
+    }
+  }
+
+  @override
+  Future<void> setTtsVerbosity(TtsVerbosity value) async {
+    await _db.insert('preferences', {
+      'key': _kTtsVerbosityKey,
+      'value': value.name,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
   Future<bool> getHapticsEnabled() async {
     final rows = await _db.query(
       'preferences',
@@ -329,6 +390,82 @@ class SqlitePreferencesRepository implements PreferencesRepository {
       'value': value.toString(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
+
+  @override
+  Future<bool> getDemoModeEnabled() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kDemoModeEnabledKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    return rows.first['value'] == 'true';
+  }
+
+  @override
+  Future<void> setDemoModeEnabled(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kDemoModeEnabledKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<bool> getOnboardingChoiceMade() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kOnboardingChoiceMadeKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    return rows.first['value'] == 'true';
+  }
+
+  @override
+  Future<void> setOnboardingChoiceMade(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kOnboardingChoiceMadeKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<String?> getUserProfileBackup() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kUserProfileBackupKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['value'] as String?;
+  }
+
+  @override
+  Future<void> setUserProfileBackup(String? json) async {
+    if (json == null) {
+      await clearUserProfileBackup();
+      return;
+    }
+    await _db.insert('preferences', {
+      'key': _kUserProfileBackupKey,
+      'value': json,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<void> clearUserProfileBackup() async {
+    await _db.delete(
+      'preferences',
+      where: 'key = ?',
+      whereArgs: [_kUserProfileBackupKey],
+    );
+  }
 }
 
 /// In-memory test double. No SQLite dependency.
@@ -342,7 +479,11 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   ThemeMode _themeMode = ThemeMode.system;
   Units _units = Units.metric;
   bool _ttsEnabled = true;
+  TtsVerbosity _ttsVerbosity = TtsVerbosity.medium;
   bool _hapticsEnabled = true;
+  bool _demoModeEnabled = false;
+  bool _onboardingChoiceMade = false;
+  String? _userProfileBackup;
 
   @override
   Future<SquatVariant> getSquatVariant() async => _squatVariant;
@@ -419,10 +560,47 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   }
 
   @override
+  Future<TtsVerbosity> getTtsVerbosity() async => _ttsVerbosity;
+
+  @override
+  Future<void> setTtsVerbosity(TtsVerbosity value) async {
+    _ttsVerbosity = value;
+  }
+
+  @override
   Future<bool> getHapticsEnabled() async => _hapticsEnabled;
 
   @override
   Future<void> setHapticsEnabled(bool value) async {
     _hapticsEnabled = value;
+  }
+
+  @override
+  Future<bool> getDemoModeEnabled() async => _demoModeEnabled;
+
+  @override
+  Future<void> setDemoModeEnabled(bool value) async {
+    _demoModeEnabled = value;
+  }
+
+  @override
+  Future<bool> getOnboardingChoiceMade() async => _onboardingChoiceMade;
+
+  @override
+  Future<void> setOnboardingChoiceMade(bool value) async {
+    _onboardingChoiceMade = value;
+  }
+
+  @override
+  Future<String?> getUserProfileBackup() async => _userProfileBackup;
+
+  @override
+  Future<void> setUserProfileBackup(String? json) async {
+    _userProfileBackup = json;
+  }
+
+  @override
+  Future<void> clearUserProfileBackup() async {
+    _userProfileBackup = null;
   }
 }

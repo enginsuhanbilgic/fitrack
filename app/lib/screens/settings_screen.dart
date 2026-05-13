@@ -26,6 +26,8 @@ import '../engine/squat/squat_rom_profile.dart'
     show SquatRomProfile;
 import '../services/app_services.dart';
 import '../services/db/profile_repository.dart';
+import '../services/db/user_profile_repository.dart';
+import '../services/demo/demo_service.dart';
 import '../services/telemetry_log.dart';
 import 'workout_screen.dart';
 
@@ -38,6 +40,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late ProfileRepository _repository;
+  late DemoService _demoService;
+  late UserProfileRepository _userProfileRepo;
   bool _servicesResolved = false;
   CurlRomProfile? _profile;
   PushUpRomProfile? _pushUpProfile;
@@ -47,16 +51,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _squatLongFemurLifter = false;
   bool _diagnosticDisableAutoCalibration = false;
   bool _squatDebugSession = false;
+  bool _demoEnabled = false;
+  bool _demoBusy = false;
   ThemeMode _themeMode = ThemeMode.system;
   FeedbackSensitivity _feedbackSensitivity = FeedbackSensitivity.medium;
   bool _ttsEnabled = true;
+  TtsVerbosity _ttsVerbosity = TtsVerbosity.medium;
   bool _hapticsEnabled = true;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_servicesResolved) {
-      _repository = AppServicesScope.of(context).profileRepository;
+      final services = AppServicesScope.of(context);
+      _repository = services.profileRepository;
+      _demoService = services.demoService;
+      _userProfileRepo = services.userProfileRepository;
       _servicesResolved = true;
       _reload();
     }
@@ -65,9 +75,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _reload() async {
     setState(() => _loading = true);
     final services = AppServicesScope.of(context);
-    final p = await _repository.loadCurl();
-    final pushUpProfile = await _repository.loadPushUp();
-    final squatProfile = await _repository.loadSquat();
+    // Demo Mode no longer seeds ROM profiles (operator decision,
+    // 2026-05-13 followup) — Settings ROM sections read live keys only.
+    // When Demo Mode is on and the user hasn't calibrated yet, the sections
+    // honestly show "Not calibrated", matching the cold-start workout path.
+    final liveCurl = await _repository.loadCurl();
+    final livePushUp = await _repository.loadPushUp();
+    final liveSquat = await _repository.loadSquat();
+    final demoOn = await _demoService.isEnabled();
     final longFemur = await services.preferencesRepository
         .getSquatLongFemurLifter();
     final diagnosticDisableAutoCal = await services.preferencesRepository
@@ -79,21 +94,76 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final feedbackSensitivity = await services.preferencesRepository
         .getFeedbackSensitivity();
     final tts = await services.preferencesRepository.getTtsEnabled();
+    final ttsVerbosity = await services.preferencesRepository.getTtsVerbosity();
     final haptics = await services.preferencesRepository.getHapticsEnabled();
     if (!mounted) return;
     setState(() {
-      _profile = p;
-      _pushUpProfile = pushUpProfile;
-      _squatProfile = squatProfile;
+      _profile = liveCurl;
+      _pushUpProfile = livePushUp;
+      _squatProfile = liveSquat;
       _squatLongFemurLifter = longFemur;
       _diagnosticDisableAutoCalibration = diagnosticDisableAutoCal;
       _squatDebugSession = squatDebug;
       _themeMode = themeMode;
       _feedbackSensitivity = feedbackSensitivity;
       _ttsEnabled = tts;
+      _ttsVerbosity = ttsVerbosity;
       _hapticsEnabled = haptics;
+      _demoEnabled = demoOn;
       _loading = false;
     });
+  }
+
+  /// Sample Data toggle handler. Wraps `enableAndSeed`/`disable` with a
+  /// confirmation dialog when enabling demo would overwrite a real user
+  /// profile (Gap 33), busy-spinner to prevent re-entry during the long
+  /// async op, and a full `_reload` afterward so the ROM cards refresh.
+  Future<void> _setDemoEnabled(bool value) async {
+    if (_demoBusy) return;
+    if (value) {
+      // Per Gap 33: warn the user before overwriting a real profile.
+      final realProfileExists =
+          (await _userProfileRepo.load()) != null &&
+          !await _userProfileRepo.isDemoRow();
+      if (realProfileExists && mounted) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Enable Sample Data?'),
+            content: const Text(
+              'Demo Mode will temporarily replace your profile with sample '
+              'data. Your saved profile will be restored when you turn '
+              'Demo Mode off.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+      }
+    }
+    setState(() => _demoBusy = true);
+    try {
+      if (value) {
+        await _demoService.enableAndSeed();
+      } else {
+        await _demoService.disable();
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _demoBusy = false);
+        await _reload();
+      }
+    }
   }
 
   Future<void> _confirmResetSquat() async {
@@ -134,6 +204,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (!mounted) return;
     setState(() => _ttsEnabled = value);
+  }
+
+  Future<void> _setTtsVerbosity(TtsVerbosity value) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setTtsVerbosity(value);
+    TelemetryLog.instance.log(
+      'preferences.tts_verbosity_changed',
+      'verbosity=${value.name}',
+    );
+    if (!mounted) return;
+    setState(() => _ttsVerbosity = value);
   }
 
   Future<void> _setHapticsEnabled(bool value) async {
@@ -225,7 +306,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (ok == true) {
+      // Curl-only reset. Prior to 2026-05-13 this also wiped the push-up
+      // profile, which contradicted the button label — push-up now has its
+      // own _confirmResetPushUp entrypoint.
       await _repository.resetCurl();
+      await _reload();
+    }
+  }
+
+  Future<void> _confirmResetPushUp() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset Push-Up Profile?'),
+        content: const Text(
+          'This deletes your calibrated push-up range. The push-up audit '
+          'will fall back to default thresholds until you recalibrate. '
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
       await _repository.resetPushUp();
       await _reload();
     }
@@ -296,9 +408,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _sectionHeader(BuildContext context, String label) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
+
+  Widget _subSectionHeader(BuildContext context, String label) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 4),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.4,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: _loading
@@ -306,121 +449,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                // ── 1. Calibration ─────────────────────────────────────────
+                // Curl and squat calibration sit together as one group with
+                // per-exercise subsections. Pre-2026-05-13 this was split:
+                // curl at the top, squat near the bottom — confusing scan.
+                _sectionHeader(context, 'Calibration'),
+                _subSectionHeader(context, 'Biceps curl'),
                 _ProfileSection(
                   profile: _profile,
-                  pushUpProfile: _pushUpProfile,
                   showDetails: _showDetails,
                   onToggleDetails: (v) => setState(() => _showDetails = v),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 12),
                 _ActionRow(
                   icon: Icons.refresh,
-                  label: 'Recalibrate',
+                  label: 'Recalibrate curl',
                   subtitle: 'Re-record your full range of motion.',
                   onTap: _recalibrate,
                 ),
-                const Divider(),
                 _ActionRow(
                   icon: Icons.delete_outline,
-                  label: 'Reset Profile',
+                  label: 'Reset curl profile',
                   subtitle: 'Delete all calibrated buckets.',
                   destructive: true,
                   onTap: _confirmReset,
                 ),
-                const Divider(),
-                _ActionRow(
-                  icon: Icons.science_outlined,
-                  label: 'Diagnostics',
-                  subtitle: '${TelemetryLog.instance.length} telemetry entries',
-                  onTap: _openDiagnostics,
-                ),
-                const Divider(),
-                Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 4),
-                  child: Text(
-                    'Appearance',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.54,
-                      ),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: SegmentedButton<ThemeMode>(
-                    segments: const [
-                      ButtonSegment(
-                        value: ThemeMode.system,
-                        icon: Icon(Icons.brightness_auto),
-                        label: Text('System'),
-                      ),
-                      ButtonSegment(
-                        value: ThemeMode.light,
-                        icon: Icon(Icons.light_mode),
-                        label: Text('Light'),
-                      ),
-                      ButtonSegment(
-                        value: ThemeMode.dark,
-                        icon: Icon(Icons.dark_mode),
-                        label: Text('Dark'),
-                      ),
-                    ],
-                    selected: {_themeMode},
-                    onSelectionChanged: (s) => _setThemeMode(s.first),
-                  ),
-                ),
-                const Divider(),
-                Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 4),
-                  child: Text(
-                    'Audio & Haptics',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.54,
-                      ),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: const Text('Spoken coaching (TTS)'),
-                  subtitle: const Text('Audio cues during workouts'),
-                  value: _ttsEnabled,
-                  onChanged: _setTtsEnabled,
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: const Text('Haptic feedback'),
-                  subtitle: const Text(
-                    'Vibration on rep complete and form alerts',
-                  ),
-                  value: _hapticsEnabled,
-                  onChanged: _setHapticsEnabled,
-                ),
-                const Divider(),
-                Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 4),
-                  child: Text(
-                    'Squat',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.54,
-                      ),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                ),
+                const SizedBox(height: 12),
+                _subSectionHeader(context, 'Squat'),
                 _SquatProfileSection(profile: _squatProfile),
                 _ActionRow(
                   icon: Icons.refresh,
@@ -455,21 +510,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   value: _squatLongFemurLifter,
                   onChanged: _setSquatLongFemurLifter,
                 ),
-                const Divider(),
-                Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 4),
-                  child: Text(
-                    'Feedback sensitivity',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.54,
+                const SizedBox(height: 12),
+                _subSectionHeader(context, 'Push-up'),
+                _PushUpProfileSection(profile: _pushUpProfile),
+                _ActionRow(
+                  icon: Icons.refresh,
+                  label: 'Recalibrate push-up',
+                  subtitle: 'Record your top and bottom push-up angles.',
+                  onTap: () => Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const WorkoutScreen(
+                        exercise: ExerciseType.pushUp,
+                        forceCalibration: true,
                       ),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.6,
                     ),
                   ),
                 ),
+                _ActionRow(
+                  icon: Icons.delete_outline,
+                  label: 'Reset push-up profile',
+                  subtitle:
+                      'Delete your calibrated push-up range — falls back to '
+                      'default thresholds.',
+                  destructive: true,
+                  onTap: _confirmResetPushUp,
+                ),
+                const Divider(),
+
+                // ── 2. Workout ─────────────────────────────────────────────
+                _sectionHeader(context, 'Workout'),
                 const ListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
@@ -489,20 +559,102 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onSelectionChanged: (s) => _setFeedbackSensitivity(s.first),
                   ),
                 ),
-                const Divider(),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Spoken coaching (TTS)'),
+                  subtitle: const Text('Audio cues during workouts'),
+                  value: _ttsEnabled,
+                  onChanged: _setTtsEnabled,
+                ),
+                // Voice frequency — caps repeats of the same form-error cue
+                // within a session. Visual highlights and the session-end
+                // summary are unaffected; only the audio falls quiet after
+                // the cap is hit. Disabled when TTS is off because there's
+                // nothing to limit.
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  enabled: _ttsEnabled,
+                  title: const Text('Voice frequency'),
+                  subtitle: Text(switch (_ttsVerbosity) {
+                    TtsVerbosity.low => 'Speak each form cue once per session',
+                    TtsVerbosity.medium =>
+                      'Speak each form cue up to $kTtsVerbosityMediumCap times per session',
+                    TtsVerbosity.high => 'Speak every form cue, every time',
+                  }),
+                ),
                 Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 4),
-                  child: Text(
-                    'Diagnostics',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.54,
-                      ),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.6,
-                    ),
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SegmentedButton<TtsVerbosity>(
+                    segments: [
+                      for (final v in TtsVerbosity.values)
+                        ButtonSegment(value: v, label: Text(v.label)),
+                    ],
+                    selected: {_ttsVerbosity},
+                    onSelectionChanged: _ttsEnabled
+                        ? (s) => _setTtsVerbosity(s.first)
+                        : null,
                   ),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Haptic feedback'),
+                  subtitle: const Text(
+                    'Vibration on rep complete and form alerts',
+                  ),
+                  value: _hapticsEnabled,
+                  onChanged: _setHapticsEnabled,
+                ),
+                const Divider(),
+
+                // ── 3. App ─────────────────────────────────────────────────
+                _sectionHeader(context, 'App'),
+                _subSectionHeader(context, 'Appearance'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: SegmentedButton<ThemeMode>(
+                    segments: const [
+                      ButtonSegment(
+                        value: ThemeMode.system,
+                        icon: Icon(Icons.brightness_auto),
+                        label: Text('System'),
+                      ),
+                      ButtonSegment(
+                        value: ThemeMode.light,
+                        icon: Icon(Icons.light_mode),
+                        label: Text('Light'),
+                      ),
+                      ButtonSegment(
+                        value: ThemeMode.dark,
+                        icon: Icon(Icons.dark_mode),
+                        label: Text('Dark'),
+                      ),
+                    ],
+                    selected: {_themeMode},
+                    onSelectionChanged: (s) => _setThemeMode(s.first),
+                  ),
+                ),
+                _SampleDataSection(
+                  enabled: _demoEnabled,
+                  busy: _demoBusy,
+                  onChanged: _setDemoEnabled,
+                ),
+                const Divider(),
+
+                // ── 4. Diagnostics & Advanced ──────────────────────────────
+                // Bottom of the page on purpose: low-frequency, some toggles
+                // are destructive to data quality if left on. The telemetry
+                // shortcut sits next to its companion toggles instead of
+                // floating above the destructive Reset Profile rows where it
+                // used to invite thumb-slips.
+                _sectionHeader(context, 'Diagnostics & Advanced'),
+                _ActionRow(
+                  icon: Icons.science_outlined,
+                  label: 'Diagnostics',
+                  subtitle: '${TelemetryLog.instance.length} telemetry entries',
+                  onTap: _openDiagnostics,
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -534,15 +686,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
+/// Biceps-curl-only calibration card. Push-up used to share this card —
+/// split out 2026-05-13 into [_PushUpProfileSection] so the Calibration
+/// section's subheadings ("Biceps curl" / "Squat" / "Push-up") honestly
+/// describe what lives under each.
 class _ProfileSection extends StatelessWidget {
   final CurlRomProfile? profile;
-  final PushUpRomProfile? pushUpProfile;
   final bool showDetails;
   final ValueChanged<bool> onToggleDetails;
 
   const _ProfileSection({
     required this.profile,
-    required this.pushUpProfile,
     required this.showDetails,
     required this.onToggleDetails,
   });
@@ -600,44 +754,6 @@ class _ProfileSection extends StatelessWidget {
                 title: const Text('Show details'),
                 value: showDetails,
                 onChanged: onToggleDetails,
-              ),
-            const Divider(height: 28),
-            Row(
-              children: [
-                const Icon(Icons.accessibility_new, color: Color(0xFF00E676)),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Push-up Profile',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                _StatusPill(
-                  label: pushUpProfile?.isCalibrated == true
-                      ? 'Calibrated'
-                      : 'Uncalibrated',
-                  color: pushUpProfile?.isCalibrated == true
-                      ? const Color(0xFF00E676)
-                      : theme.colorScheme.onSurface.withValues(alpha: 0.38),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (pushUpProfile == null)
-              Text(
-                'Not calibrated. Use Recalibrate to record your top and bottom push-up angles.',
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
-                ),
-              )
-            else
-              Text(
-                'Top ${pushUpProfile!.topAngle.toStringAsFixed(0)}° · '
-                'Bottom ${pushUpProfile!.bottomAngle.toStringAsFixed(0)}° · '
-                'ROM ${pushUpProfile!.romDegrees.toStringAsFixed(0)}°',
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
-                ),
               ),
           ],
         ),
@@ -865,6 +981,137 @@ class _SquatProfileSection extends StatelessWidget {
   }
 }
 
+/// Push-up calibration card. Mirrors [_SquatProfileSection]'s single-bucket
+/// shape (push-up profile has no per-side splits). Split out from
+/// [_ProfileSection] 2026-05-13 so the "Push-up" subheading on the Settings
+/// → Calibration screen actually corresponds to its own card.
+class _PushUpProfileSection extends StatelessWidget {
+  final PushUpRomProfile? profile;
+
+  const _PushUpProfileSection({required this.profile});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final p = profile;
+    final isCalibrated = p?.isCalibrated ?? false;
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.accessibility_new, color: Color(0xFF00E676)),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Push-up Profile',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                _StatusPill(
+                  label: isCalibrated ? 'Calibrated' : 'Uncalibrated',
+                  color: isCalibrated
+                      ? const Color(0xFF00E676)
+                      : theme.colorScheme.onSurface.withValues(alpha: 0.38),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (p == null)
+              Text(
+                'Not calibrated. Use Recalibrate to record your top and '
+                'bottom push-up angles.',
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
+                ),
+              )
+            else
+              Text(
+                'Top ${p.topAngle.toStringAsFixed(0)}° · '
+                'Bottom ${p.bottomAngle.toStringAsFixed(0)}° · '
+                'ROM ${p.romDegrees.toStringAsFixed(0)}°',
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "Sample Data" section on the Settings screen — a section header + the
+/// Demo Mode `SwitchListTile`. Extracted from `_SettingsScreenState.build`
+/// to keep the screen file scannable. The parent owns the demo state +
+/// the toggle handler (which talks to `DemoService.enableAndSeed/disable`
+/// with the Gap 33 confirmation dialog).
+class _SampleDataSection extends StatelessWidget {
+  const _SampleDataSection({
+    required this.enabled,
+    required this.busy,
+    required this.onChanged,
+  });
+
+  /// Current `DemoService.isEnabled()` value (cached in parent state).
+  final bool enabled;
+
+  /// True while `enableAndSeed`/`disable` is in flight. Replaces the switch's
+  /// trailing icon with a spinner and disables `onChanged` so the user can't
+  /// double-tap mid-operation.
+  final bool busy;
+
+  /// Toggle handler. Called with the new value when the user taps the switch.
+  /// Parent runs the Gap 33 confirmation dialog before delegating to
+  /// `DemoService.enableAndSeed` for the enable direction.
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 8, bottom: 4),
+          child: Text(
+            'Sample Data',
+            style: TextStyle(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.6,
+            ),
+          ),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: const Text('Demo Mode'),
+          subtitle: const Text(
+            "Loads Demo Alex's profile + 14 sample workouts. "
+            'Toggle off to remove sample data.',
+          ),
+          value: enabled,
+          onChanged: busy ? null : onChanged,
+          secondary: busy
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : null,
+        ),
+      ],
+    );
+  }
+}
+
 class _ActionRow extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -918,7 +1165,15 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
   }
 
   Future<void> _share() async {
-    final all = TelemetryLog.instance.entries.toList().reversed.toList();
+    // Gap 25: strip demo-tagged events from the SHARE output. The on-screen
+    // list (in `build`) keeps showing everything so developers can still
+    // see demo events locally — only the .txt + .json artifacts handed to
+    // the system share sheet drop them.
+    final all = TelemetryLog.instance.entries
+        .where((e) => e.data?['is_demo'] != true)
+        .toList()
+        .reversed
+        .toList();
     if (all.isEmpty) {
       ScaffoldMessenger.of(
         context,

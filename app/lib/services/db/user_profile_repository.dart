@@ -21,9 +21,27 @@ abstract class UserProfileRepository {
   /// "Set up your profile" CTA in that state.
   Future<UserProfile?> load();
 
-  /// Upserts the singleton row. The repository stamps `updatedAt` to the
-  /// current wall-clock time; callers do not need to set it themselves.
+  /// Upserts the singleton row, **preserving the existing `is_demo` flag**
+  /// (read-modify-write). Used by infrastructure paths that need
+  /// flag-preservation semantics. NOT called directly by EditProfileScreen
+  /// anymore — see ADR-8 of the demo-mode plan; user-driven saves go
+  /// through [saveAsReal] instead.
   Future<void> save(UserProfile profile);
+
+  /// Upserts the singleton row with `is_demo = 1`. Used by
+  /// `DemoService.enableAndSeed` step 4 to write Demo Alex.
+  Future<void> saveAsDemo(UserProfile profile);
+
+  /// Upserts the singleton row with `is_demo = 0`. Used by
+  /// `DemoService.disable` step 3 to restore the user_profile backup,
+  /// AND by `EditProfileScreen._save()` so user-driven saves promote
+  /// the row to real (per Gap 34).
+  Future<void> saveAsReal(UserProfile profile);
+
+  /// True iff the singleton row exists and has `is_demo = 1`. Returns
+  /// false if no row exists. Used by `DemoService.disable` step 3 to
+  /// distinguish "demo row → clear" from "promoted-to-real row → leave alone".
+  Future<bool> isDemoRow();
 
   /// Deletes the row. Used by future "Clear all data" flows; not surfaced
   /// in this PR. Idempotent — no-op if no row exists.
@@ -113,6 +131,45 @@ class SqliteUserProfileRepository implements UserProfileRepository {
 
   @override
   Future<void> save(UserProfile profile) async {
+    // Read-modify-write of the `is_demo` flag (per ADR-8). Preserves
+    // whatever the existing row's flag was; defaults to 0 when no row.
+    final existing = await _db.query(
+      _table,
+      columns: const <String>['is_demo'],
+      where: 'id = ?',
+      whereArgs: const <Object?>[_kSingletonId],
+      limit: 1,
+    );
+    final existingFlag = existing.isEmpty
+        ? 0
+        : ((existing.first['is_demo'] as int?) ?? 0);
+    await _writeRow(profile, isDemo: existingFlag == 1);
+  }
+
+  @override
+  Future<void> saveAsDemo(UserProfile profile) async {
+    await _writeRow(profile, isDemo: true);
+  }
+
+  @override
+  Future<void> saveAsReal(UserProfile profile) async {
+    await _writeRow(profile, isDemo: false);
+  }
+
+  @override
+  Future<bool> isDemoRow() async {
+    final rows = await _db.query(
+      _table,
+      columns: const <String>['is_demo'],
+      where: 'id = ?',
+      whereArgs: const <Object?>[_kSingletonId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    return ((rows.first['is_demo'] as int?) ?? 0) == 1;
+  }
+
+  Future<void> _writeRow(UserProfile profile, {required bool isDemo}) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     await _db.insert(_table, <String, Object?>{
       'id': _kSingletonId,
@@ -127,6 +184,7 @@ class SqliteUserProfileRepository implements UserProfileRepository {
       'goals_json': profile.encodeGoals(),
       'created_at': profile.createdAt.millisecondsSinceEpoch,
       'updated_at': now,
+      'is_demo': isDemo ? 1 : 0,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
@@ -156,6 +214,7 @@ class SqliteUserProfileRepository implements UserProfileRepository {
 /// reference.
 class InMemoryUserProfileRepository implements UserProfileRepository {
   UserProfile? _profile;
+  bool _isDemoFlag = false;
 
   @override
   Future<bool> exists() async => _profile != null;
@@ -165,11 +224,29 @@ class InMemoryUserProfileRepository implements UserProfileRepository {
 
   @override
   Future<void> save(UserProfile profile) async {
+    // Read-modify-write: preserve `_isDemoFlag` when an existing row is
+    // present. Defaults to false when no row exists yet.
     _profile = profile;
   }
 
   @override
+  Future<void> saveAsDemo(UserProfile profile) async {
+    _profile = profile;
+    _isDemoFlag = true;
+  }
+
+  @override
+  Future<void> saveAsReal(UserProfile profile) async {
+    _profile = profile;
+    _isDemoFlag = false;
+  }
+
+  @override
+  Future<bool> isDemoRow() async => _profile != null && _isDemoFlag;
+
+  @override
   Future<void> clear() async {
     _profile = null;
+    _isDemoFlag = false;
   }
 }

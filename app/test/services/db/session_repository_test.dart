@@ -1600,4 +1600,88 @@ void main() {
       await db.close();
     });
   });
+
+  group('SqliteSessionRepository.listSessions — qualitySeries', () {
+    late Database db;
+    late SqliteSessionRepository repo;
+
+    setUp(() async {
+      db = await openTestDb();
+      repo = SqliteSessionRepository(db);
+    });
+
+    tearDown(() async {
+      await db.close();
+    });
+
+    test(
+      'qualitySeries reflects per-rep quality in rep_index ASC order',
+      () async {
+        // buildCurlEvent seeds qualities as 0.80 + 0.01*i for 4 reps. We use
+        // closeTo to tolerate IEEE-754 drift from the test-helper's `+`
+        // composition (e.g. 0.80 + 0.02 → 0.8200000000000001).
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 4),
+          startedAt: DateTime(2026, 4, 25),
+        );
+        final list = await repo.listSessions();
+        expect(list, hasLength(1));
+        final series = list.first.qualitySeries;
+        expect(series, hasLength(4));
+        for (var i = 0; i < 4; i++) {
+          expect(series[i], closeTo(0.80 + 0.01 * i, 1e-9));
+        }
+      },
+    );
+
+    test('qualitySeries is empty when no reps were persisted', () async {
+      // Build an event with zero reps so no rep rows are inserted; the
+      // session row still goes in.
+      final empty = WorkoutCompletedEvent(
+        exercise: ExerciseType.bicepsCurlFront,
+        totalReps: 0,
+        totalSets: 0,
+        sessionDuration: const Duration(seconds: 5),
+        averageQuality: null,
+        detectedView: CurlCameraView.front,
+        repQualities: const <double>[],
+        fatigueDetected: false,
+        asymmetryDetected: false,
+        eccentricTooFastCount: 0,
+        errorsTriggered: const {},
+        curlRepRecords: const [],
+        curlBucketSummaries: const [],
+        bicepsSideRepMetrics: const [],
+      );
+      await repo.insertCompletedSession(
+        empty,
+        startedAt: DateTime(2026, 4, 26),
+      );
+      final list = await repo.listSessions();
+      expect(list, hasLength(1));
+      expect(list.first.qualitySeries, isEmpty);
+    });
+
+    test(
+      'qualitySeries is bucketed per-session across multiple rows',
+      () async {
+        // Three sessions with distinct rep counts → distinct series lengths.
+        // listSessions sorts started_at DESC so newest is first.
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 2), // qualities [0.80, 0.81]
+          startedAt: DateTime(2026, 4, 20),
+        );
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 5), // qualities [0.80..0.84]
+          startedAt: DateTime(2026, 4, 25),
+        );
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 3), // qualities [0.80..0.82]
+          startedAt: DateTime(2026, 4, 22),
+        );
+        final list = await repo.listSessions();
+        expect(list.map((s) => s.qualitySeries.length).toList(), [5, 3, 2]);
+      },
+    );
+  });
 }

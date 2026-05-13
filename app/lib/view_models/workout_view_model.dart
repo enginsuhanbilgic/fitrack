@@ -37,6 +37,7 @@ import '../services/pose/mlkit_pose_service.dart';
 import '../services/pose/pose_service.dart';
 import '../services/telemetry_log.dart';
 import '../services/tts_service.dart';
+import 'telemetry/pushup_rep_line.dart';
 
 /// Squat-specific session state bundled for the post-session Form Audit
 /// (Squat Pipeline Overhaul — Part 4).
@@ -255,6 +256,13 @@ class WorkoutViewModel extends ChangeNotifier {
   /// are unaffected.
   FeedbackSensitivity _feedbackSensitivity = FeedbackSensitivity.medium;
 
+  /// How chatty the spoken coaching is. Read from
+  /// [PreferencesRepository.getTtsVerbosity] during [init] and frozen for
+  /// the session. Caps the number of TTS fires per *form error* per
+  /// session — visual highlights and the session-end summary are
+  /// unaffected. See [_onFormErrors] for the gate.
+  TtsVerbosity _ttsVerbosity = TtsVerbosity.medium;
+
   /// Wall-clock timestamp of the most recent `pose.frame_metrics` emit.
   /// Throttles emission to roughly [kDebugFrameMetricsHz] regardless of
   /// the camera's frame rate. Null until the first debug-session frame.
@@ -421,6 +429,12 @@ class WorkoutViewModel extends ChangeNotifier {
 
   /// Monotonic rep index for squat.rep telemetry lines.
   int _squatDebugRepIndex = 0;
+
+  /// Monotonic rep index for pushup.rep telemetry lines. Parallels
+  /// `_squatDebugRepIndex` — incremented unconditionally on every push-up
+  /// rep commit so the offline derivation script can join rows by `rep=`.
+  /// Reset on session start / hard reset along with the rep counter.
+  int _pushUpDebugRepIndex = 0;
 
   /// Timestamp of the last squat frame-metric emission (throttle guard).
   DateTime? _lastSquatDebugFrameMetricsAt;
@@ -596,6 +610,7 @@ class WorkoutViewModel extends ChangeNotifier {
         // curl_debug.session_start telemetry log includes the real value.
         _feedbackSensitivity = await _preferencesRepository
             .getFeedbackSensitivity();
+        _ttsVerbosity = await _preferencesRepository.getTtsVerbosity();
         // Diagnostic flag — snapshot once, identical to other curl prefs.
         // A mid-session toggle in Settings has no effect on this run (matches
         // the squat long-femur "snapshot-on-construction" rule).
@@ -726,6 +741,7 @@ class WorkoutViewModel extends ChangeNotifier {
         squatPersistedFemurTorsoRatio: _squatProfile?.bucket?.femurTorsoRatio,
         pushUpThresholds:
             _pushUpProfile?.thresholds ?? PushUpRomThresholds.defaults,
+        onPushUpRepCommit: _handlePushUpRepCommit,
       );
       if ((exercise.isCurl ||
               exercise == ExerciseType.pushUp ||
@@ -2332,6 +2348,20 @@ class WorkoutViewModel extends ChangeNotifier {
   @visibleForTesting
   static String errorMessageForTest(FormError err) => _errorMessage(err);
 
+  /// Test seam: drives the same form-feedback coordinator path the
+  /// pose-loop drives, without needing to instantiate the engine or
+  /// pump pose frames. Used by the `TtsVerbosity` cap tests to assert
+  /// the gate behavior in isolation.
+  @visibleForTesting
+  void triggerFormErrorsForTest(List<FormError> errors) =>
+      _onFormErrors(errors);
+
+  /// Test seam: overrides the session's verbosity snapshot. The
+  /// production path reads this from `PreferencesRepository.getTtsVerbosity`
+  /// during [init]; tests can short-circuit that.
+  @visibleForTesting
+  void setTtsVerbosityForTest(TtsVerbosity value) => _ttsVerbosity = value;
+
   // ── Form feedback coordinator ─────────────────────────
   void _onFormErrors(List<FormError> errors) {
     // Curl debug session: silent observation. Skip cooldown bookkeeping,
@@ -2360,7 +2390,21 @@ class WorkoutViewModel extends ChangeNotifier {
       }
       _lastFeedbackTime[cooldownKey] = now;
       _formErrorCounts[err] = (_formErrorCounts[err] ?? 0) + 1;
-      _tts.speak(_errorMessage(err));
+      // Per-error voice-cue cap. `high` is unlimited (every fire passes
+      // the time-cooldown is spoken); `medium` and `low` clamp the audio
+      // after [kTtsVerbosityMediumCap] / [kTtsVerbosityLowCap] fires of
+      // the *same* error this session. The visual highlight below still
+      // runs unconditionally, and the bumped `_formErrorCounts[err]` is
+      // what the session-end summary reads — silencing the voice does
+      // NOT silence detection.
+      final cap = switch (_ttsVerbosity) {
+        TtsVerbosity.high => null,
+        TtsVerbosity.medium => kTtsVerbosityMediumCap,
+        TtsVerbosity.low => kTtsVerbosityLowCap,
+      };
+      if (cap == null || _formErrorCounts[err]! <= cap) {
+        _tts.speak(_errorMessage(err));
+      }
       _triggerHighlight(err);
       break; // one cue per update — list order defines priority
     }
@@ -2422,6 +2466,51 @@ class WorkoutViewModel extends ChangeNotifier {
           'ascending_frame_count=$hipLeadFrames '
           'threshold=$kHipLeadVelocityRatio',
     );
+  }
+
+  /// Push-up rep commit callback. Emits the `pushup.rep` telemetry line
+  /// consumed by the offline ROM-derivation script. Always-on (not gated
+  /// on a debug-session toggle) — production data is valuable for
+  /// threshold derivation, mirroring squat's emission policy.
+  ///
+  /// The rep counter passes the analyzer's snapshot extremes (`null` when
+  /// not captured — rare edge cases). The format helper emits the literal
+  /// string `"null"` so the Python parser regex stays anchored.
+  void _handlePushUpRepCommit({
+    required int repIndex,
+    required double? minElbowAngle,
+    required double? maxElbowAngle,
+  }) {
+    _pushUpDebugRepIndex++;
+    TelemetryLog.instance.log(
+      'pushup.rep',
+      formatPushUpRepLine(
+        repIndex: _pushUpDebugRepIndex,
+        minElbowAngle: minElbowAngle,
+        maxElbowAngle: maxElbowAngle,
+      ),
+    );
+    // Push-up reuses `CurlRepRecord` as a generic min/max-angle carrier so
+    // the Form Auditor's push-up path (which only reads `minAngle` /
+    // `maxAngle`) and the Session Complete page's unified summary both see
+    // the rep. `side` / `view` / `source` are not meaningful for push-up;
+    // sentinel values are picked that the audit path never inspects.
+    // Without this append, `auditPushUp` returns "No reps recorded"
+    // on every live push-up session.
+    if (minElbowAngle != null && maxElbowAngle != null) {
+      _curlRepRecords.add(
+        CurlRepRecord(
+          repIndex: _curlRepRecords.length + 1,
+          side: ProfileSide.right,
+          view: CurlCameraView.unknown,
+          minAngle: minElbowAngle,
+          maxAngle: maxElbowAngle,
+          source: ThresholdSource.global,
+          bucketUpdated: false,
+          rejectedOutlier: false,
+        ),
+      );
+    }
   }
 
   /// Feeds the in-session auto-calibrator and the persistent squat

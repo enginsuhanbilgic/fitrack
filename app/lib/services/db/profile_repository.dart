@@ -34,6 +34,27 @@ abstract class ProfileRepository {
   Future<void> saveSquat(SquatRomProfile profile) async {}
   Future<void> resetSquat() async {}
   Future<bool> existsSquat() async => false;
+
+  // ── Demo ROM profiles (separate keyspace per ADR-2) ──
+  //
+  // Demo profiles live under `demo_curl_profile_v1` / `demo_squat_profile_v1`
+  // / `demo_push_up_profile_v1` keys, NOT under an `is_demo` flag column on
+  // the live keys. This prevents the live `saveCurl()` auto-calibration
+  // write path from silently clobbering a demo profile.
+
+  Future<CurlRomProfile?> loadDemoCurl() async => null;
+  Future<void> saveDemoCurl(CurlRomProfile profile) async {}
+
+  Future<SquatRomProfile?> loadDemoSquat() async => null;
+  Future<void> saveDemoSquat(SquatRomProfile profile) async {}
+
+  Future<PushUpRomProfile?> loadDemoPushUp() async => null;
+  Future<void> saveDemoPushUp(PushUpRomProfile profile) async {}
+
+  /// Wipes every row in `profiles` whose key starts with `demo_`. Used by
+  /// `DemoService.enableAndSeed` step 3 and `DemoService.disable` step 2.
+  /// Returns the number of rows deleted.
+  Future<int> deleteDemoProfiles() async => 0;
 }
 
 class SqliteProfileRepository implements ProfileRepository {
@@ -245,6 +266,85 @@ class SqliteProfileRepository implements ProfileRepository {
       whereArgs: <Object?>[squatKey],
     );
   }
+
+  // ── Demo ROM keyspace (per ADR-2) ──
+
+  static const String demoCurlKey = 'demo_curl_profile_v1';
+  static const String demoSquatKey = 'demo_squat_profile_v1';
+  static const String demoPushUpKey = 'demo_push_up_profile_v1';
+
+  @override
+  Future<CurlRomProfile?> loadDemoCurl() async =>
+      _loadJson(demoCurlKey, CurlRomProfile.fromJson);
+
+  @override
+  Future<void> saveDemoCurl(CurlRomProfile profile) =>
+      _saveJson(demoCurlKey, profile.toJson());
+
+  @override
+  Future<SquatRomProfile?> loadDemoSquat() async =>
+      _loadJson(demoSquatKey, SquatRomProfile.fromJson);
+
+  @override
+  Future<void> saveDemoSquat(SquatRomProfile profile) =>
+      _saveJson(demoSquatKey, profile.toJson());
+
+  @override
+  Future<PushUpRomProfile?> loadDemoPushUp() async =>
+      _loadJson(demoPushUpKey, PushUpRomProfile.fromJson);
+
+  @override
+  Future<void> saveDemoPushUp(PushUpRomProfile profile) =>
+      _saveJson(demoPushUpKey, profile.toJson());
+
+  @override
+  Future<int> deleteDemoProfiles() async {
+    return _db.delete('profiles', where: "profile_key LIKE 'demo_%'");
+  }
+
+  Future<T?> _loadJson<T>(
+    String key,
+    T Function(Map<String, dynamic>) parser,
+  ) async {
+    final rows = await _db.query(
+      'profiles',
+      columns: const <String>['profile_json'],
+      where: 'profile_key = ?',
+      whereArgs: <Object?>[key],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final raw = rows.first['profile_json'] as String?;
+    if (raw == null) return null;
+    try {
+      return parser(jsonDecode(raw) as Map<String, dynamic>);
+    } catch (e, st) {
+      TelemetryLog.instance.log(
+        'schema.migration_failed',
+        'Failed to load demo profile $key from sqlite; deleting. error=$e',
+        data: <String, Object?>{'stackTrace': st.toString()},
+      );
+      try {
+        await _db.delete(
+          'profiles',
+          where: 'profile_key = ?',
+          whereArgs: <Object?>[key],
+        );
+      } catch (_) {
+        // best-effort cleanup
+      }
+      return null;
+    }
+  }
+
+  Future<void> _saveJson(String key, Map<String, dynamic> json) async {
+    await _db.insert('profiles', <String, Object?>{
+      'profile_key': key,
+      'profile_json': jsonEncode(json),
+      'schema_version': 1,
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
 }
 
 /// In-memory double for tests and previews. Matches `InMemoryRomProfileStore`'s
@@ -253,6 +353,9 @@ class InMemoryProfileRepository implements ProfileRepository {
   CurlRomProfile? _profile;
   PushUpRomProfile? _pushUpProfile;
   SquatRomProfile? _squatProfile;
+  CurlRomProfile? _demoCurl;
+  SquatRomProfile? _demoSquat;
+  PushUpRomProfile? _demoPushUp;
 
   @override
   Future<bool> existsCurl() async => _profile != null;
@@ -324,5 +427,49 @@ class InMemoryProfileRepository implements ProfileRepository {
   @override
   Future<void> resetSquat() async {
     _squatProfile = null;
+  }
+
+  // ── Demo ROM keyspace (per ADR-2) ──
+
+  @override
+  Future<CurlRomProfile?> loadDemoCurl() async => _demoCurl;
+
+  @override
+  Future<void> saveDemoCurl(CurlRomProfile profile) async {
+    _demoCurl = profile;
+  }
+
+  @override
+  Future<SquatRomProfile?> loadDemoSquat() async => _demoSquat;
+
+  @override
+  Future<void> saveDemoSquat(SquatRomProfile profile) async {
+    _demoSquat = profile;
+  }
+
+  @override
+  Future<PushUpRomProfile?> loadDemoPushUp() async => _demoPushUp;
+
+  @override
+  Future<void> saveDemoPushUp(PushUpRomProfile profile) async {
+    _demoPushUp = profile;
+  }
+
+  @override
+  Future<int> deleteDemoProfiles() async {
+    var n = 0;
+    if (_demoCurl != null) {
+      _demoCurl = null;
+      n++;
+    }
+    if (_demoSquat != null) {
+      _demoSquat = null;
+      n++;
+    }
+    if (_demoPushUp != null) {
+      _demoPushUp = null;
+      n++;
+    }
+    return n;
   }
 }

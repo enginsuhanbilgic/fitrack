@@ -18,6 +18,7 @@ import '../models/user_profile.dart';
 import '../services/app_services.dart';
 import '../services/db/profile_repository.dart';
 import '../services/db/session_dtos.dart';
+import '../services/demo/demo_service.dart';
 import '../utils/dashboard_aggregates.dart';
 import '../view_models/history_view_model.dart';
 import '../view_models/home_view_model.dart';
@@ -43,6 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
 
   late ProfileRepository _profileRepository;
+  late DemoService _demoService;
   HomeViewModel? _homeVm;
   bool _servicesResolved = false;
   Color? _badgeColor;
@@ -76,10 +78,16 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!_servicesResolved) {
       final services = AppServicesScope.of(context);
       _profileRepository = services.profileRepository;
+      _demoService = services.demoService;
       _homeVm = HomeViewModel(
         repository: services.sessionRepository,
         userProfileRepository: services.userProfileRepository,
       )..load();
+      // Listen for Demo Mode state changes so the dashboard refreshes after
+      // first-launch onboarding chose "Use demo data" (VGV I3). The listener
+      // also covers Settings-driven toggles, layered on top of the explicit
+      // reload in `_openSettings`.
+      _demoService.revision.addListener(_onDemoRevisionChanged);
       _servicesResolved = true;
       _refreshBadge();
     }
@@ -89,11 +97,26 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _pageController.removeListener(_onPageScrolled);
     _pageController.dispose();
+    if (_servicesResolved) {
+      _demoService.revision.removeListener(_onDemoRevisionChanged);
+    }
     _homeVm?.dispose();
     super.dispose();
   }
 
+  Future<void> _onDemoRevisionChanged() async {
+    if (!mounted) return;
+    await _refreshBadge();
+    await _homeVm?.load();
+    if (!mounted) return;
+    await _historyTabKey.currentState?.reloadFromSettingsPop();
+  }
+
   Future<void> _refreshBadge() async {
+    // Demo Mode no longer seeds ROM profiles (operator decision, 2026-05-13
+    // followup) — the badge reads only live profiles. A user toggling Demo
+    // Mode on will see the uncalibrated badge stay uncalibrated, matching
+    // the cold-start workout experience demo provides.
     final p = await _profileRepository.loadCurl();
     final sp = await _profileRepository.loadSquat();
     if (!mounted) return;
@@ -170,38 +193,42 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: _tabActions(),
         iconTheme: IconThemeData(color: cs.onSurface),
       ),
-      body: PageView(
-        controller: _pageController,
-        onPageChanged: _onPageChanged,
-        // Clamping prevents elastic over-scroll past first/last tab
-        physics: const ClampingScrollPhysics(),
-        children: [
-          if (_homeVm != null)
-            _DashboardTab(
-              homeVm: _homeVm!,
-              badgeColor: _badgeColor,
-              onNavigateToTrain: () => _onTabTap(1),
-              onNavigateToHistory: () => _onTabTap(2),
-              onStartWorkout: _startWorkout,
-              onOpenSettings: _openSettings,
-            )
-          else
-            const Center(child: CircularProgressIndicator()),
-          _TrainTab(
-            squatBadgeColor: _squatBadgeColor,
-            onStartWorkout: _startWorkout,
-            onLaunchMLKitTest: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const MLKitTestScreen()),
+      body: _homeVm == null
+          ? const Center(child: CircularProgressIndicator())
+          : ChangeNotifierProvider<HomeViewModel>.value(
+              value: _homeVm!,
+              child: PageView(
+                controller: _pageController,
+                onPageChanged: _onPageChanged,
+                // Clamping prevents elastic over-scroll past first/last tab
+                physics: const ClampingScrollPhysics(),
+                children: [
+                  _DashboardTab(
+                    homeVm: _homeVm!,
+                    badgeColor: _badgeColor,
+                    onNavigateToTrain: () => _onTabTap(1),
+                    onNavigateToHistory: () => _onTabTap(2),
+                    onStartWorkout: _startWorkout,
+                    onOpenSettings: _openSettings,
+                  ),
+                  _TrainTab(
+                    squatBadgeColor: _squatBadgeColor,
+                    onStartWorkout: _startWorkout,
+                    onLaunchMLKitTest: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const MLKitTestScreen(),
+                      ),
+                    ),
+                  ),
+                  _HistoryTab(key: _historyTabKey),
+                  _ProfileTab(
+                    badgeColor: _badgeColor,
+                    onOpenSettings: _openSettings,
+                    onOpenEditProfile: _openEditProfile,
+                  ),
+                ],
+              ),
             ),
-          ),
-          _HistoryTab(key: _historyTabKey),
-          _ProfileTab(
-            badgeColor: _badgeColor,
-            onOpenSettings: _openSettings,
-            onOpenEditProfile: _openEditProfile,
-          ),
-        ],
-      ),
       bottomNavigationBar: _FtNavBar(currentIndex: _tab, onTap: _onTabTap),
     );
   }
@@ -230,7 +257,15 @@ class _HomeScreenState extends State<HomeScreen> {
     await Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+    if (!mounted) return;
+    // Gap 4: Settings may have toggled Demo Mode, which adds/removes 14
+    // sessions, the user_profile row, and ROM profiles. A full reload of the
+    // dashboard VM + invalidating the History tab's keep-alive cache is the
+    // single canonical refresh path on return from Settings.
     _refreshBadge();
+    await _homeVm?.load();
+    if (!mounted) return;
+    await _historyTabKey.currentState?.reloadFromSettingsPop();
   }
 
   /// Pushes [EditProfileScreen]; on Save (returns true) refreshes only the
@@ -352,26 +387,23 @@ class _DashboardTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider<HomeViewModel>.value(
-      value: homeVm,
-      child: CustomScrollView(
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                _DashGreeting(),
-                const SizedBox(height: 16),
-                _StrainCard(),
-                const SizedBox(height: 12),
-                _RecentExerciseCard(onTrack: onNavigateToTrain),
-                const SizedBox(height: 12),
-                _RecentActivityCard(onViewAll: onNavigateToHistory),
-              ]),
-            ),
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate([
+              _DashGreeting(),
+              const SizedBox(height: 16),
+              _StrainCard(),
+              const SizedBox(height: 12),
+              _RecentExerciseCard(onTrack: onNavigateToTrain),
+              const SizedBox(height: 12),
+              _RecentActivityCard(onViewAll: onNavigateToHistory),
+            ]),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -1221,6 +1253,14 @@ class _HistoryTabState extends State<_HistoryTab>
     await _vm?.setFilter(next);
   }
 
+  /// Public re-entry point used by the shell after Settings pops (Gap 4).
+  /// Invalidates the keep-alive cache by re-running the same load the
+  /// constructor's `didChangeDependencies` kicks off, so demo-toggle changes
+  /// in Settings appear in the History list immediately.
+  Future<void> reloadFromSettingsPop() async {
+    await _vm?.load();
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -1368,7 +1408,7 @@ class _WeeklyVolumeCard extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               SizedBox(
-                height: 64,
+                height: 84,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: List.generate(7, (i) {
@@ -1441,24 +1481,32 @@ class _HistorySessionListState extends State<_HistorySessionList> {
             );
           }
           final s = vm.sessions[i];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Dismissible(
-              key: ValueKey<int>(s.id),
-              direction: DismissDirection.endToStart,
-              background: const SizedBox.shrink(),
-              secondaryBackground: _DeleteBg(),
-              confirmDismiss: (_) => _confirmDelete(context),
-              onDismissed: (_) => vm.deleteSession(s.id),
-              child: _SessionRow(
-                summary: s,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => HistoryDetailLoader(sessionId: s.id),
-                  ),
-                ),
+          final tile = _SessionRow(
+            summary: s,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => HistoryDetailLoader(sessionId: s.id),
               ),
             ),
+          );
+          // Gap 24: demo rows render as plain non-dismissible tiles. The
+          // canonical way to remove demo data is the Settings → Sample Data
+          // toggle. Swipe-to-delete on a demo row would only get restored on
+          // the next `cleanReseedIfStale` cold boot, creating an "I deleted
+          // it but it came back" surprise.
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: s.isDemo
+                ? tile
+                : Dismissible(
+                    key: ValueKey<int>(s.id),
+                    direction: DismissDirection.endToStart,
+                    background: const SizedBox.shrink(),
+                    secondaryBackground: _DeleteBg(),
+                    confirmDismiss: (_) => _confirmDelete(context),
+                    onDismissed: (_) => vm.deleteSession(s.id),
+                    child: tile,
+                  ),
           );
         }, childCount: itemCount),
       ),
@@ -1567,6 +1615,11 @@ class _SessionRow extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (summary.isDemo)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 6),
+                    child: FtChip(label: 'DEMO', tone: FtChipTone.cyan),
+                  ),
                 if (summary.fatigueDetected || summary.asymmetryDetected)
                   const FtChip(label: 'Alert', tone: FtChipTone.accent),
               ],
@@ -1575,13 +1628,12 @@ class _SessionRow extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Sparkline placeholder
-                FtSparkline(
-                  data: const [70, 80, 75, 90, 85, 95, 88, 92, 80, 85, 78, 82],
-                  color: ft.cyan,
-                  width: 120,
-                  height: 28,
-                ),
+                // Per-rep form-quality trajectory for this session. Pinned to
+                // a fixed 0..1 scale so a flat-good session looks flat; an
+                // empty list (pre-WP6 rows or quality-less sessions) draws a
+                // flat baseline rather than an empty gap, keeping the row
+                // layout stable.
+                _RowSparkline(series: summary.qualitySeries, color: ft.cyan),
                 Row(
                   children: [
                     if (hasQuality) ...[
@@ -1641,6 +1693,47 @@ class _SessionRow extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Per-row history sparkline. Renders [series] on a fixed `0..1` scale (the
+/// engine's clamped form-quality range). **2026-05-13:** auto-rescales each
+/// session to its own min/max instead of pinning to a fixed 0..1 axis, so the
+/// line shows the within-session trajectory clearly even when all reps cluster
+/// in a narrow band (e.g. 0.86..0.92). Tradeoff: cross-session comparison by
+/// vertical position is no longer meaningful — each card's line is shape-only.
+/// Empty / single-point series (legacy pre-WP6 sessions, or in-flight rows
+/// mid-write) draw a muted flat baseline so the row layout doesn't jump.
+class _RowSparkline extends StatelessWidget {
+  const _RowSparkline({required this.series, required this.color});
+
+  final List<double> series;
+  final Color color;
+
+  static const double _w = 120;
+  static const double _h = 28;
+
+  @override
+  Widget build(BuildContext context) {
+    // FtSparkline's painter needs >= 2 points to draw a path. For 0/1-point
+    // series fall back to a faint flat baseline at the mid-height so the row
+    // visually balances with the FORM/REPS column on the right.
+    if (series.length < 2) {
+      return SizedBox(
+        width: _w,
+        height: _h,
+        child: Center(
+          child: Container(
+            height: 1.5,
+            width: _w,
+            color: FiTrackColors.of(context).textMuted.withValues(alpha: 0.35),
+          ),
+        ),
+      );
+    }
+    // No min/maxOverride → FtSparkline auto-rescales to this series' own
+    // min/max, maximizing vertical resolution for the shape of THIS session.
+    return FtSparkline(data: series, color: color, width: _w, height: _h);
   }
 }
 
@@ -1793,7 +1886,6 @@ class _ProfileTab extends StatelessWidget {
         final profile = vm.userProfile;
         final m = vm.metrics;
         final hasProfile = profile != null;
-        final goals = profile?.goals ?? const <UserGoal>[];
 
         return CustomScrollView(
           slivers: [
@@ -1900,68 +1992,10 @@ class _ProfileTab extends StatelessWidget {
                     const SizedBox(height: 16),
                   ],
 
-                  // Goals — only render the section header when the user
-                  // has at least one goal (or when they have a profile and
-                  // can therefore add one).
-                  if (hasProfile) ...[
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'ACTIVE GOALS',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.0,
-                            color: ft.textDim,
-                          ),
-                        ),
-                        TextButton.icon(
-                          onPressed: onOpenEditProfile,
-                          icon: Icon(
-                            Icons.edit_outlined,
-                            size: 14,
-                            color: ft.textMuted,
-                          ),
-                          label: Text(
-                            'Edit profile',
-                            style: TextStyle(fontSize: 12, color: ft.textMuted),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    if (goals.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: ftCardDecoration(context),
-                        child: Text(
-                          'No goals yet. Edit your profile to add one — '
-                          'something like "30 push-ups in one set" or '
-                          '"3 sessions per week".',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: ft.textMuted,
-                            height: 1.4,
-                          ),
-                        ),
-                      )
-                    else
-                      for (int i = 0; i < goals.length; i++) ...[
-                        _GoalCard(
-                          title: goals[i].title,
-                          progress: goals[i].completed ? 1.0 : 0.0,
-                          detail:
-                              goals[i].detail ??
-                              (goals[i].completed
-                                  ? 'Completed'
-                                  : 'In progress'),
-                          color: i.isEven ? ft.accent : ft.cyan,
-                        ),
-                        if (i < goals.length - 1) const SizedBox(height: 8),
-                      ],
-                    const SizedBox(height: 16),
-                  ],
+                  // Active Goals section removed 2026-05-13 — surface was
+                  // judged redundant with the Goals editor inside Edit
+                  // Profile. The underlying `UserGoal` model, persistence,
+                  // and editor remain intact.
 
                   // Settings shortcut
                   Text(
@@ -1990,8 +2024,6 @@ class _ProfileTab extends StatelessWidget {
                           label: 'App Settings',
                           onTap: onOpenSettings,
                         ),
-                        Divider(height: 1, color: ft.stroke),
-                        _UnitsSelector(last: true),
                       ],
                     ),
                   ),
@@ -2132,191 +2164,10 @@ class _ProfileStat extends StatelessWidget {
   }
 }
 
-class _GoalCard extends StatelessWidget {
-  const _GoalCard({
-    required this.title,
-    required this.progress,
-    required this.detail,
-    required this.color,
-  });
-
-  final String title;
-  final double progress;
-  final String detail;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: ftCardDecoration(context),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-              Text(
-                '${(progress * 100).toInt()}%',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.56,
-                  color: color,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 6,
-              color: color,
-              backgroundColor: FiTrackColors.of(context).surface4,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            detail,
-            style: TextStyle(
-              fontSize: 12,
-              color: FiTrackColors.of(context).textMuted,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _UnitsSelector extends StatefulWidget {
-  const _UnitsSelector({this.last = false});
-
-  final bool last;
-
-  @override
-  State<_UnitsSelector> createState() => _UnitsSelectorState();
-}
-
-class _UnitsSelectorState extends State<_UnitsSelector> {
-  Units? _units;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_units == null) _hydrate();
-  }
-
-  Future<void> _hydrate() async {
-    final prefs = AppServicesScope.of(context).preferencesRepository;
-    final v = await prefs.getUnits();
-    if (!mounted) return;
-    setState(() => _units = v);
-  }
-
-  Future<void> _setUnits(Units next) async {
-    final prefs = AppServicesScope.read(context).preferencesRepository;
-    await prefs.setUnits(next);
-    if (!mounted) return;
-    setState(() => _units = next);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ft = FiTrackColors.of(context);
-    final label = _units == Units.imperial ? 'lb / in' : 'kg / cm';
-    return InkWell(
-      onTap: () => _showUnitsMenu(context),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        child: Row(
-          children: [
-            Icon(Icons.straighten, size: 18, color: ft.textMuted),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Units',
-                style: TextStyle(fontSize: 14, color: ft.textPrimary),
-              ),
-            ),
-            Text(
-              _units == null ? '…' : label,
-              style: TextStyle(fontSize: 13, color: ft.textMuted),
-            ),
-            const SizedBox(width: 4),
-            Icon(Icons.chevron_right, size: 16, color: ft.textMuted),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showUnitsMenu(BuildContext context) {
-    final ft = FiTrackColors.of(context);
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: ft.surface2,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-              child: Text(
-                'Select Units',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(ctx).colorScheme.onSurface,
-                ),
-              ),
-            ),
-            ListTile(
-              leading: _units == Units.imperial
-                  ? Icon(Icons.check, color: ft.accent)
-                  : null,
-              title: Text(
-                'Imperial (lb / in)',
-                style: TextStyle(color: Theme.of(ctx).colorScheme.onSurface),
-              ),
-              onTap: () {
-                _setUnits(Units.imperial);
-                Navigator.pop(ctx);
-              },
-            ),
-            ListTile(
-              leading: _units == Units.metric
-                  ? Icon(Icons.check, color: ft.accent)
-                  : null,
-              title: Text(
-                'Metric (kg / cm)',
-                style: TextStyle(color: Theme.of(ctx).colorScheme.onSurface),
-              ),
-              onTap: () {
-                _setUnits(Units.metric);
-                Navigator.pop(ctx);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// _UnitsSelector + _UnitsSelectorState removed 2026-05-13 — home-screen
+// units shortcut was redundant with the units control inside Edit Profile.
+// The `Units` enum, `getUnits` / `setUnits` preferences API, and the
+// EditProfileScreen control remain.
 
 class _SettingsRow extends StatelessWidget {
   const _SettingsRow({required this.icon, required this.label, this.onTap});

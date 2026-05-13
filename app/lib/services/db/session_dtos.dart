@@ -22,6 +22,8 @@ class SessionSummary {
     this.averageQuality,
     this.detectedView,
     this.topErrors = const [],
+    this.isDemo = false,
+    this.qualitySeries = const [],
   });
 
   final int id;
@@ -38,6 +40,26 @@ class SessionSummary {
   /// Up to 3 most-frequent form errors in this session, sorted by count desc.
   /// Empty when the session had no form errors or for pre-WP6 rows.
   final List<FormError> topErrors;
+
+  /// True when this session was inserted by `DemoService.enableAndSeed()`
+  /// (schema v10, `sessions.is_demo = 1`). Set by the persistence layer.
+  ///
+  /// **UI consumers ignore this field** — History list, HomeViewModel
+  /// aggregates, Dashboard cards all render demo rows identically to real
+  /// rows by design (the "lived-in app" illusion).
+  ///
+  /// Only [SessionExporter] (filters demo rows out of shared CSVs) and the
+  /// History list's `Dismissible` widget (omits swipe-to-delete on demo
+  /// tiles) consult this field. See `plans_of_claude/demo-mode-toggle.md`
+  /// ADR-9, Gap 23, and Gap 24.
+  final bool isDemo;
+
+  /// Per-rep `quality` values (0..1) in `rep_index` ASC order — drives the
+  /// History list's per-row sparkline so the line reflects the actual form
+  /// trajectory of that session. Rows with NULL `quality` are excluded, so
+  /// `length` may be < [totalReps]. Empty for pre-WP6 sessions that never
+  /// recorded per-rep quality.
+  final List<double> qualitySeries;
 }
 
 /// Full detail view for the reconstructed SummaryScreen (PR3). Wraps the

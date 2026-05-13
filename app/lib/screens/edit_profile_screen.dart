@@ -155,7 +155,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
 
     try {
-      await _userRepo.save(profile);
+      // ADR-8 (Gap 34): user-driven saves promote the row to real.
+      // Once the user types into the form, the data is theirs — `disable()`
+      // will see `is_demo=0` and leave the row alone.
+      await _userRepo.saveAsReal(profile);
       await _prefsRepo.setUnits(_units);
       await _prefsRepo.setTtsEnabled(_ttsEnabled);
       await _prefsRepo.setHapticsEnabled(_hapticsEnabled);

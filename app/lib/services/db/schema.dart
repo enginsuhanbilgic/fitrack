@@ -45,6 +45,14 @@
 ///     pipeline (analogous to the per-rep min/max angles the curl pipeline
 ///     already persists for ROM profile derivation). Part 1 of the squat
 ///     pipeline overhaul (2026-05-13).
+/// v10 (demo mode): adds `is_demo INTEGER NOT NULL DEFAULT 0` to `sessions`
+///     and `user_profile`. Tags rows owned by the Demo Mode seed so they
+///     can be wiped+restored without touching real user data. Demo ROM
+///     profiles use a separate keyspace in the `profiles` table
+///     (`demo_curl_profile_v1`, `demo_squat_profile_v1`,
+///     `demo_push_up_profile_v1`) rather than a flag column — see ADR-2 in
+///     `plans_of_claude/demo-mode-toggle.md`. `reps` + `form_errors` are
+///     NOT tagged — they cascade-delete with their parent `sessions` row.
 ///
 /// Six tables (v1) + one table (v2) + one table (v8):
 ///   - `profiles`         — JSON-blob per-exercise ROM profile (PR1)
@@ -65,7 +73,7 @@ import 'package:sqflite/sqflite.dart';
 /// On-disk schema version. Bump when any CREATE/ALTER landing in `onCreate` or
 /// `onUpgrade` changes. Independent of `CurlRomProfile.schemaVersion` which
 /// tags the JSON blob inside `profiles.profile_json`.
-const int kDbSchemaVersion = 9;
+const int kDbSchemaVersion = 10;
 
 const String ddlProfiles = '''
 CREATE TABLE profiles (
@@ -89,7 +97,8 @@ CREATE TABLE sessions (
   fatigue_detected         INTEGER NOT NULL DEFAULT 0,
   asymmetry_detected       INTEGER NOT NULL DEFAULT 0,
   eccentric_too_fast_count INTEGER NOT NULL DEFAULT 0,
-  schema_version           INTEGER NOT NULL DEFAULT 1
+  schema_version           INTEGER NOT NULL DEFAULT 1,
+  is_demo                  INTEGER NOT NULL DEFAULT 0
 )
 ''';
 
@@ -159,7 +168,8 @@ CREATE TABLE IF NOT EXISTS user_profile (
   primary_goal  TEXT,
   goals_json    TEXT,
   created_at    INTEGER NOT NULL,
-  updated_at    INTEGER NOT NULL
+  updated_at    INTEGER NOT NULL,
+  is_demo       INTEGER NOT NULL DEFAULT 0
 )
 ''';
 
@@ -331,5 +341,44 @@ Future<void> onUpgrade(Database db, int oldVersion, int newVersion) async {
     // here.
     await db.execute('ALTER TABLE reps ADD COLUMN squat_min_knee_angle REAL');
     await db.execute('ALTER TABLE reps ADD COLUMN squat_max_knee_angle REAL');
+  }
+  if (oldVersion < 10) {
+    // v9 → v10: demo mode tagging on `sessions` and `user_profile`.
+    // Pure ALTER TABLE ADD COLUMN with DEFAULT 0 — all existing rows
+    // pick up `is_demo = 0` automatically, so the change is invisible
+    // to all existing reads. The `profiles` table is intentionally
+    // NOT modified — demo ROM profiles use a separate keyspace
+    // (`demo_curl_profile_v1`, etc.) per ADR-2 of the demo-mode plan.
+    // `reps` + `form_errors` are NOT tagged — they cascade-delete with
+    // their parent `sessions` row via the existing FK ON DELETE CASCADE.
+    await _addColumnIfNotExists(
+      db,
+      'sessions',
+      'is_demo',
+      'INTEGER NOT NULL DEFAULT 0',
+    );
+    await _addColumnIfNotExists(
+      db,
+      'user_profile',
+      'is_demo',
+      'INTEGER NOT NULL DEFAULT 0',
+    );
+  }
+}
+
+/// Safely adds a column to a table only if it does not already exist.
+/// Prevents migration crashes when a developer updates a DDL constant and a
+/// migration script in the same PR, causing the column to be created twice
+/// for some users (VGV I3).
+Future<void> _addColumnIfNotExists(
+  Database db,
+  String table,
+  String column,
+  String definition,
+) async {
+  final result = await db.rawQuery('PRAGMA table_info($table)');
+  final exists = result.any((row) => row['name'] == column);
+  if (!exists) {
+    await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
   }
 }

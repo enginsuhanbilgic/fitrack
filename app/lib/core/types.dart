@@ -110,6 +110,35 @@ enum FeedbackSensitivity {
   const FeedbackSensitivity(this.label);
 }
 
+/// How much voice (TTS) coaching a user wants per session.
+///
+/// Independent of [FeedbackSensitivity] (which controls how strict the form
+/// thresholds are). Verbosity controls *how often the voice fires for a form
+/// error that has already been called out earlier in the session*:
+///
+/// * [high] — every fire passes the time-cooldown is spoken. Same as the
+///   pre-2026-05-13 behavior. Use when you want maximum coaching audio.
+/// * [medium] — voice fires at most [kTtsVerbosityMediumCap] times per
+///   error per session. Subsequent occurrences are suppressed at the voice
+///   layer only. The visual highlight, the `errorCounts` map, and the
+///   session-end summary still surface every fire — this control silences
+///   *audio*, not detection. Default.
+/// * [low] — voice fires at most [kTtsVerbosityLowCap] time(s) per error
+///   per session. For users who've internalized the cue and want a quiet
+///   workout.
+///
+/// The cap is **per-error**, not global: hearing "torso swing" three times
+/// does not silence a future "elbow rise" — silencing only tracks the cue
+/// the user has already been told about.
+enum TtsVerbosity {
+  low('Low'),
+  medium('Medium'),
+  high('High');
+
+  final String label;
+  const TtsVerbosity(this.label);
+}
+
 /// Top-level session lifecycle state.
 ///
 /// `calibration` runs only when forced (Settings → Recalibrate) or when no

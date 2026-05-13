@@ -75,6 +75,22 @@ class RepSnapshot {
   });
 }
 
+/// Library-private callback fired once per committed push-up rep with the
+/// rep's measured elbow extremes. Mirrors the squat-side extremes channel
+/// in shape — both carry the per-rep ROM tuple consumed by the host's
+/// telemetry-emitting handler.
+///
+/// Trimmed signature (vs squat's seven-field commit shape): the v1
+/// derivation script consumes only `min_elbow` and `max_elbow`. Adding
+/// `body_line_dev` / `quality` here would plumb four layers of unused
+/// fields before a consumer exists for them — see plan §1.3 rationale.
+typedef _OnPushUpRepCommit =
+    void Function({
+      required int repIndex,
+      required double? minElbowAngle,
+      required double? maxElbowAngle,
+    });
+
 /// Multi-exercise rep counter. Dispatches to an [ExerciseStrategy] per
 /// exercise; owns only the cross-cutting concerns:
 ///   - Angle smoothing (3-frame moving average).
@@ -109,6 +125,12 @@ class RepCounter {
   /// persist `reps.quality` + ratio metrics, mirroring the curl callback.
   final SquatRepCommitCallback? _onSquatRepCommit;
 
+  /// Push-up-only completion callback. Fires once per committed push-up rep
+  /// with the rep's measured elbow extremes — consumed by the host to emit
+  /// the `pushup.rep` telemetry line. Null when the active exercise isn't
+  /// push-up or when the host hasn't wired telemetry (e.g. tests).
+  final _OnPushUpRepCommit? _onPushUpRepCommit;
+
   /// Squat min/max knee angles captured by the strategy's extremes callback
   /// at commit time, consumed by [_onSquatCommit] in the same `update()`
   /// pass before being cleared. Buffer-of-one — never holds across reps.
@@ -138,7 +160,13 @@ class RepCounter {
     SquatLongFemurDetectedCallback? onSquatLongFemurDetected,
     double? squatPersistedFemurTorsoRatio,
     PushUpRomThresholds pushUpThresholds = PushUpRomThresholds.defaults,
-  }) : _onSquatRepCommit = onSquatRepCommit {
+    // Library-private typedef — external callers (WorkoutViewModel) pass a
+    // method tearoff which Dart infers against the private type at the call
+    // site, so the name itself never has to leak across libraries.
+    // ignore: library_private_types_in_public_api
+    _OnPushUpRepCommit? onPushUpRepCommit,
+  }) : _onSquatRepCommit = onSquatRepCommit,
+       _onPushUpRepCommit = onPushUpRepCommit {
     _strategy = _buildStrategy(
       exercise: exercise,
       side: side,
@@ -399,6 +427,15 @@ class RepCounter {
     if (strategy is! PushUpStrategy) return;
     final quality = strategy.lastRepQuality;
     if (quality != null) _pushUpRepQualities.add(quality);
+    // Telemetry callback. Reads the analyzer's snapshot fields directly —
+    // no internal buffer needed because the analyzer captures the extremes
+    // inside `consumeCompletionErrors` (already invoked by the strategy's
+    // commit branch before this method runs).
+    _onPushUpRepCommit?.call(
+      repIndex: _reps,
+      minElbowAngle: strategy.lastRepMinElbowAngle,
+      maxElbowAngle: strategy.lastRepMaxElbowAngle,
+    );
   }
 
   RepSnapshot _snapshot() {

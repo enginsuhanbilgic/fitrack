@@ -32,7 +32,7 @@ Reference plan: `plans_of_claude/we-will-refine-the-eager-fountain.md`
 
 ## Phase 2 — First-launch onboarding flow
 
-**Status:** Not started. **Effort:** ~1 week.
+**Status:** Partial — a minimal first-launch gate shipped early as the **Demo Mode** prompt (`plans_of_claude/demo-mode-toggle.md`, 2026-05-13). It asks the user "Try with sample data?" and persists the choice via `onboarding_choice_made`. A second small extension (`docs/plan/2026-05-13-feat-start-fresh-auto-push-edit-profile-plan.md`) auto-pushes `EditProfileScreen` on the "Start fresh" path so the user lands on the personal-info form instead of an empty Dashboard. The full onboarding walkthrough described below will REPLACE both pieces when it lands. The `onboarding_choice_made` pref will be migrated or re-used as the gate key. **Effort remaining:** ~1 week.
 
 Today the app boots straight to the Dashboard with no profile. New users
 see "Set up your profile" as a CTA, but a guided flow would convert

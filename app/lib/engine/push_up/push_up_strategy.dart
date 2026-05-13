@@ -46,6 +46,17 @@ class PushUpStrategy extends ExerciseStrategy {
 
   double? get lastBodyLineDeviationDeg => _form.lastBodyLineDeviationDeg;
 
+  /// Most recently committed rep's bottom-of-rep elbow extension (degrees).
+  /// Null until the first rep commits. Pass-through to the form analyzer —
+  /// the strategy doesn't accumulate its own ROM state. Consumed by the
+  /// host's `_handlePushUpRepCommit` to emit the `pushup.rep` telemetry line.
+  double? get lastRepMinElbowAngle => _form.lastRepMinElbowAngle;
+
+  /// Most recently committed rep's top-of-rep elbow extension (degrees).
+  /// Null until the first rep commits. Pass-through getter — see
+  /// [lastRepMinElbowAngle] for the lifecycle contract.
+  double? get lastRepMaxElbowAngle => _form.lastRepMaxElbowAngle;
+
   void updateThresholds(PushUpRomThresholds thresholds) {
     _thresholds = thresholds;
     _form.updateThresholds(thresholds);
@@ -60,6 +71,7 @@ class PushUpStrategy extends ExerciseStrategy {
         input.state == RepState.bottom ||
         input.state == RepState.ascending) {
       _form.trackAngle(smoothed);
+      _form.trackMaxElbow(smoothed);
     }
 
     var nextState = input.state;
@@ -72,6 +84,7 @@ class PushUpStrategy extends ExerciseStrategy {
           nextState = RepState.descending;
           _form.onRepStart(pose);
           _form.trackAngle(smoothed);
+          _form.trackMaxElbow(smoothed);
         }
       case RepState.descending:
         errors = _form.evaluate(pose, now: input.now);
