@@ -22,6 +22,10 @@ import '../engine/squat/squat_auto_calibrator.dart';
 import '../engine/squat/squat_rom_profile.dart'
     as squat_profile
     show SquatRomProfile, SquatRomBucket;
+// Re-export SquatRomProfile under its bare name on the public API of this
+// library so SquatSessionContext consumers (summary screen, tests) can
+// reference it without learning about the prefix indirection.
+import '../engine/squat/squat_rom_profile.dart' show SquatRomProfile;
 import '../models/landmark_types.dart';
 import '../models/pose_landmark.dart';
 import '../models/pose_result.dart';
@@ -33,6 +37,51 @@ import '../services/pose/mlkit_pose_service.dart';
 import '../services/pose/pose_service.dart';
 import '../services/telemetry_log.dart';
 import '../services/tts_service.dart';
+
+/// Squat-specific session state bundled for the post-session Form Audit
+/// (Squat Pipeline Overhaul — Part 4).
+///
+/// Bundling rationale: the Form Audit needs four squat-specific inputs
+/// (variant, long-femur lifter, session sensitivity, optional profile,
+/// optional auto-cal snapshot). Adding all of them as flat fields on
+/// [WorkoutCompletedEvent] would tip the event past the maintainability
+/// threshold (already 16+ fields). This value class adds **one**
+/// nullable field instead — null for non-squat sessions, populated by
+/// `_triggerCompleted` for squat sessions.
+///
+/// The flat fields ([WorkoutCompletedEvent.squatVariant],
+/// [WorkoutCompletedEvent.squatLongFemurLifter],
+/// [WorkoutCompletedEvent.squatRepMetrics]) are retained for backward
+/// compatibility with the live summary screen rendering — both surfaces
+/// can read from either path during the migration.
+class SquatSessionContext {
+  const SquatSessionContext({
+    required this.variant,
+    required this.longFemurLifter,
+    required this.feedbackSensitivity,
+    this.profile,
+    this.autoCalSnapshot,
+  });
+
+  /// Squat variant the session ran with — drives the lean threshold.
+  final SquatVariant variant;
+
+  /// True if the "Tall lifter" Settings toggle was on for this session.
+  /// Adds [SquatFormThresholds.longFemurLeanBoost] to the lean gate.
+  final bool longFemurLifter;
+
+  /// Session sensitivity — drives form-error thresholds + cold-start ROM
+  /// fallback in the audit.
+  final FeedbackSensitivity feedbackSensitivity;
+
+  /// Personal squat ROM profile. Drives Tier 1 of the audit's per-rep
+  /// ROM-bar resolver when [SquatRomProfile.isCalibrated] is true.
+  final SquatRomProfile? profile;
+
+  /// Session-end auto-calibrator snapshot. Drives Tier 2 when no
+  /// calibrated profile bucket is available.
+  final SquatRomThresholdSet? autoCalSnapshot;
+}
 
 /// Value emitted on the completion stream when a workout ends.
 ///
@@ -106,6 +155,13 @@ class WorkoutCompletedEvent {
   /// card's DEPTH stat (`avg of non-null × 100`).
   final List<double?> repDepthPercents;
 
+  /// Squat-specific Form Audit context — variant, long-femur state,
+  /// session sensitivity, personal profile (if any), auto-cal snapshot
+  /// (if any). Null for non-squat sessions and for reconstructed history
+  /// sessions where the live state isn't persisted. See
+  /// [SquatSessionContext] doc-block for the bundling rationale.
+  final SquatSessionContext? squatContext;
+
   const WorkoutCompletedEvent({
     required this.exercise,
     required this.totalReps,
@@ -131,6 +187,7 @@ class WorkoutCompletedEvent {
     this.feedbackSensitivity = FeedbackSensitivity.medium,
     this.repConcentricMs = const [],
     this.repDepthPercents = const [],
+    this.squatContext,
   });
 }
 
@@ -2669,6 +2726,21 @@ class WorkoutViewModel extends ChangeNotifier {
       feedbackSensitivity: _feedbackSensitivity,
       repConcentricMs: List<int?>.unmodifiable(repConcentricMs),
       repDepthPercents: List<double?>.unmodifiable(repDepthPercents),
+      // Squat-only bundle for the post-session Form Audit. Null for
+      // non-squat sessions so the curl/push-up branches in
+      // `SummaryScreen._buildFormAuditCard` aren't perturbed. The audit
+      // resolver consumes `profile`, `autoCalSnapshot`, and
+      // `feedbackSensitivity` to grade each rep against the most
+      // personalized ROM bar available (Tier 1 → Tier 2 → Tier 3).
+      squatContext: exercise == ExerciseType.squat
+          ? SquatSessionContext(
+              variant: _squatVariant,
+              longFemurLifter: _squatLongFemurLifter,
+              feedbackSensitivity: _feedbackSensitivity,
+              profile: _squatProfile,
+              autoCalSnapshot: _squatAutoCalibrator.currentThresholds,
+            )
+          : null,
     );
     // Emit first — the UI's SummaryScreen push is latency-critical and must
     // not wait for a SQLite round-trip. Persistence is fire-and-forget; any

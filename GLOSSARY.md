@@ -677,6 +677,17 @@ Concepts and types introduced by Part 2, the engine-layer parity PR. All entries
 
 ---
 
+## 13g. Squat Pipeline Overhaul Part 4 — Audit Upgrade + Telemetry Tooling (2026-05-13)
+
+| Term | Definition |
+|---|---|
+| **`SquatSessionContext`** | Value class in `app/lib/view_models/workout_view_model.dart` that bundles the five squat-specific inputs the post-session Form Audit needs — `{variant, longFemurLifter, feedbackSensitivity, profile?, autoCalSnapshot?}`. Attached as a single nullable field on `WorkoutCompletedEvent` (`squatContext`) instead of growing five new flat fields. Null for non-squat sessions. The flat fields (`squatVariant`, `squatLongFemurLifter`, `squatRepMetrics`) are retained on the event for backward compatibility with the live summary screen rendering. |
+| **Tier-priority squat audit grading** | The Part-4 contract for `FormAuditor.auditSquat`: each rep is graded against the most personalized ROM bar available — Tier 1 (`squatProfile.bucket` if `isCalibrated`) → Tier 2 (`autoCalSnapshot` if non-null) → Tier 3 (`SquatRomThresholdSet.forSensitivity(sensitivity)`). Replaces the pre-Part-4 always-Tier-3-at-High model. Form-error thresholds (lean / knee shift / heel lift) use the session's `FeedbackSensitivity`, not always-high. Mirrors the **Path B-permissive** model documented for curl in `13c. Form Audit`. |
+| **Squat telemetry derivation script** | `tools/dataset_analysis/scripts/derive_squat_thresholds_from_telemetry.py`. Consumes `min_knee` / `max_knee` from the `squat.rep` telemetry stream and emits a paste-ready Dart `SquatRomThresholdSet` block per variant. Per-variant Harrell-Davis P10 (bottomAngle = of min_knee), P90 (startAngle = of max_knee), P50 (endAngle = of max_knee) with MAD outlier rejection, BCa 95% CI (1 000 resamples), and ICC design-effect correction (session as cluster). Imports its statistics helpers (`hd_percentile`, `bca_ci`, `design_effect`) from `derive_thresholds_from_telemetry.py` (the curl script) so a fix to the math lands in one place. Auto-saves to `data/telemetry/derived/<stem>_squat_thresholds.txt` when invoked with a file path; stdin invocations are terminal-only. Enforces the FSM invariant `startAngle > endAngle > bottomAngle` and flags violations with `⚠ INVARIANT VIOLATION`. |
+| **Hip-lead audit criterion** | The Part-4 audit reports a session-aggregate "Hip lead" criterion: `evaluated = repsTotal`, `fired = errorCounts[FormError.hipLead] ?? 0` (clamped to `repsTotal`). Session-aggregate because the `form_errors` SQLite table doesn't carry per-rep linkage. A future schema bump that persists per-rep error linkage would let this criterion become per-rep like the others; until then it's a session-level summary. |
+
+---
+
 ## 14. Retired / Deprecated Terms
 
 When a term is retired, move its entry here with a `→ replacement` line and the retirement date. Do not delete outright — old commits still reference it.

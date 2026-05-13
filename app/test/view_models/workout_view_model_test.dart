@@ -371,6 +371,52 @@ void main() {
         vm.dispose();
       },
     );
+
+    // Pins the Part-4 audit wiring: `_triggerCompleted` must populate the
+    // squat context bundle for squat sessions. Without this, a late-init
+    // bug (e.g. accidentally constructing the bundle for the wrong
+    // exercise, or forgetting to set it) would only be caught by a live
+    // run. We don't assert on the per-rep profile/autoCal contents here
+    // — those have dedicated tests in form_auditor_test.dart — just that
+    // the bundle exists and carries the session's variant + sensitivity.
+    test(
+      'finishWorkout on squat emits a non-null squatContext bundle',
+      () async {
+        final vm = buildVm(exercise: ExerciseType.squat);
+        final completion = vm.completionEvents.first;
+        vm.finishWorkout();
+        final e = await completion;
+
+        expect(
+          e.squatContext,
+          isNotNull,
+          reason: 'squat sessions must always produce a squatContext.',
+        );
+        expect(e.squatContext!.variant, e.squatVariant);
+        expect(
+          e.squatContext!.longFemurLifter,
+          e.squatLongFemurLifter,
+          reason: 'context.longFemurLifter must mirror the flat field.',
+        );
+        expect(e.squatContext!.feedbackSensitivity, e.feedbackSensitivity);
+        vm.dispose();
+      },
+    );
+
+    test(
+      'finishWorkout on non-squat exercises emits a null squatContext',
+      () async {
+        // Symmetric guard: the bundle is squat-only. A future refactor
+        // that accidentally constructs SquatSessionContext for curl
+        // sessions should fail this test.
+        final vm = buildVm(); // defaults to bicepsCurlFront
+        final completion = vm.completionEvents.first;
+        vm.finishWorkout();
+        final e = await completion;
+        expect(e.squatContext, isNull);
+        vm.dispose();
+      },
+    );
   });
 
   group('WorkoutViewModel — completion snapshot immutability', () {

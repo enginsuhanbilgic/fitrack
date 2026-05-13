@@ -46,6 +46,7 @@ import '../core/push_up_rom_defaults.dart';
 import '../core/types.dart';
 import 'curl/curl_rom_profile.dart';
 import 'push_up/push_up_rom_profile.dart';
+import 'squat/squat_rom_profile.dart';
 
 /// Per-criterion tally from a form audit.
 class CriterionResult {
@@ -310,22 +311,59 @@ class FormAuditor {
 
   /// Build a [FormAudit] for a squat session.
   ///
-  /// Inputs come from the completed-session payload:
-  ///   * [squatRepMetrics] — schema v3, populated for every squat rep
-  ///     (lean / knee-shift / heel-lift ratios). Pre-v3 reconstructed
-  ///     sessions have empty list and land on "not applicable".
-  ///   * [variant] — bodyweight vs HBBS; gates which lean threshold applies.
-  ///   * [longFemurLifter] — adds `kSquatLongFemurLeanBoost` to the lean gate.
+  /// **Tier-priority grading (Path B-permissive, 2026-05-13 — squat parity):**
+  /// Mirrors [auditCurl]'s tier resolution. For each rep, the audit grades
+  /// depth against the most personalized ROM bar available:
+  ///   1. **Personal calibration** — [squatProfile]'s bucket if
+  ///      [SquatRomProfile.isCalibrated] is true. Tier 1 in the live FSM.
+  ///   2. **Auto-calibration** — [autoCalSnapshot] if non-null at session end.
+  ///      Tier 2 in the live FSM (one set of thresholds for the whole
+  ///      session; auto-cal isn't per-rep state).
+  ///   3. **Cold-start** — `SquatRomThresholdSet.forSensitivity(sensitivity)`,
+  ///      modified by the user's session sensitivity. Tier 3.
   ///
-  /// Grades against `SquatFormThresholds.forSensitivity(FeedbackSensitivity.high)`
-  /// and `SquatRomDefaults.forVariant(variant).bottomAngle` (the strict bar
-  /// for depth — squat doesn't currently have a sensitivity dial on ROM gates,
-  /// so we use the canonical bottomAngle as the strict criterion).
+  /// Form-error thresholds (lean / knee shift / heel lift) use the user's
+  /// **session sensitivity** via `SquatFormThresholds.forSensitivity(sensitivity)`
+  /// — matches [auditCurl]'s 2026-05-13 update. NOT always-high.
+  ///
+  /// Depth grading: the per-rep `minKneeAngle` (schema v9) is compared to the
+  /// resolved bar's `bottomAngle` — a real angle comparison, replacing the
+  /// pre-Part-4 `quality < 0.85` proxy. Reps with `minKneeAngle == null`
+  /// (pre-v9 reconstructed history sessions, or analyzer-skipped reps) are
+  /// "not graded" on depth — the depth criterion's `evaluated` count omits
+  /// them. Other criteria still grade if their data is present.
+  ///
+  /// Hip-lead criterion: a session-aggregate signal (the `form_errors`
+  /// table doesn't carry a per-rep linkage today). The audit reports
+  /// `evaluated = repsTotal` and `fired = hipLeadFireCount` directly,
+  /// rather than walking each rep. A future schema bump that persists
+  /// per-rep error linkage would let this criterion become per-rep like
+  /// the others; until then the criterion's pass/fail is a session-level
+  /// summary, not a per-rep verdict.
+  ///
+  /// Inputs:
+  ///   * [squatRepMetrics] — schema v3+, populated for every squat rep
+  ///     (lean / knee-shift / heel-lift ratios; plus schema-v9
+  ///     `minKneeAngle` / `maxKneeAngle`). Pre-v3 reconstructed sessions
+  ///     have empty list and land on "not applicable".
+  ///   * [variant] — bodyweight vs HBBS; gates which lean threshold applies.
+  ///   * [longFemurLifter] — adds [SquatFormThresholds.longFemurLeanBoost]
+  ///     to the lean gate.
+  ///   * [squatProfile] — Tier 1 lookup.
+  ///   * [autoCalSnapshot] — Tier 2 fallback.
+  ///   * [sensitivity] — Tier 3 ROM gates AND form-error thresholds.
+  ///   * [hipLeadFireCount] — number of reps that fired [FormError.hipLead]
+  ///     this session, sourced from `WorkoutCompletedEvent.errorCounts`.
+  ///     Defaults to 0 (criterion drops from display when no fires).
   FormAudit auditSquat({
     required List<SquatRepMetrics> squatRepMetrics,
     required SquatVariant variant,
     required bool longFemurLifter,
     required bool fatigueDetected,
+    SquatRomProfile? squatProfile,
+    SquatRomThresholdSet? autoCalSnapshot,
+    FeedbackSensitivity sensitivity = FeedbackSensitivity.medium,
+    int hipLeadFireCount = 0,
   }) {
     final repsTotal = squatRepMetrics.length;
     if (repsTotal == 0) {
@@ -342,15 +380,49 @@ class FormAuditor {
       );
     }
 
-    final strict = SquatFormThresholds.forSensitivity(FeedbackSensitivity.high);
-    final leanGate = strict.leanWarnFor(variant, longFemur: longFemurLifter);
-    final bottomGate = SquatRomDefaults.forVariant(variant).bottomAngle;
+    // Form-error thresholds: session sensitivity, NOT always-high. Mirrors
+    // auditCurl's 2026-05-13 update — the audit re-applies what the FSM
+    // would have done with the session's sensitivity, not an artificially
+    // stricter bar the user never opted into.
+    final strictForm = SquatFormThresholds.forSensitivity(sensitivity);
+    final leanGate = strictForm.leanWarnFor(
+      variant,
+      longFemur: longFemurLifter,
+    );
+    // Cold-start fallback ROM gates — Tier 3 of the resolver below.
+    final coldStartRom = SquatRomThresholdSet.forSensitivity(sensitivity);
+
+    /// Resolve the ROM bar via the tier-priority chain.
+    ///
+    /// Squat has a single bucket per user (no `(side, view)` axis like
+    /// curl), so the result is session-scoped — same answer for every
+    /// rep. Curl's `romForRep(rec)` takes a rep to route by `rec.side`;
+    /// here that parameter would be unused, so the closure is nullary.
+    SquatRomThresholdSet resolveRom() {
+      // Tier 1: calibrated personal-profile bucket.
+      final profile = squatProfile;
+      if (profile != null && profile.isCalibrated) {
+        final b = profile.bucket!;
+        return SquatRomThresholdSet.fromBucket(
+          observedMinKneeAngle: b.observedMinKneeAngle,
+          observedMaxKneeAngle: b.observedMaxKneeAngle,
+        );
+      }
+      // Tier 2: session-end auto-cal snapshot.
+      if (autoCalSnapshot != null) return autoCalSnapshot;
+      // Tier 3: cold-start, sensitivity-modified.
+      return coldStartRom;
+    }
+
+    // Resolved once — squat has no per-rep tier divergence.
+    final resolvedRom = resolveRom();
 
     final criteria = <_CriterionBuilder>[
       _CriterionBuilder('Depth'),
       _CriterionBuilder('Forward lean'),
       _CriterionBuilder('Knee shift'),
       _CriterionBuilder('Heel lift'),
+      _CriterionBuilder('Hip lead'),
     ];
     _CriterionBuilder by(String n) => criteria.firstWhere((c) => c.name == n);
 
@@ -361,12 +433,19 @@ class FormAuditor {
       final m = squatRepMetrics[i];
       var evaluable = false;
 
-      // Depth gate: squat descends, so the rep's recorded minimum knee angle
-      // must drop BELOW bottomGate to count as "deep enough" at strict.
-      // SquatRepMetrics doesn't carry minAngle directly — depth is inferred
-      // from quality presence; pre-v3 rows have all-null fields and bypass.
-      // For squat we use the lean/knee/heel ratios as the per-rep evaluability
-      // anchor and fold depth into the same evaluation pass when available.
+      // ── Depth (replaces the quality < 0.85 proxy) ──────────────────────
+      // Squat descends, so a deeper rep has a LOWER `minKneeAngle`. The
+      // strict criterion fires when the rep didn't drop below bottomAngle.
+      // Pre-v9 reconstructed sessions (or analyzer-skipped reps) have
+      // `minKneeAngle == null` — those reps gracefully drop the depth
+      // criterion to "not graded" (no `evaluated` increment), rather than
+      // crashing or silently passing.
+      if (m.minKneeAngle != null) {
+        final fired = m.minKneeAngle! > resolvedRom.bottomAngle;
+        by('Depth').record(fired: fired);
+        if (fired) perRepFired[i]++;
+        evaluable = true;
+      }
       if (m.leanDeg != null) {
         final fired = m.leanDeg!.abs() > leanGate;
         by('Forward lean').record(fired: fired);
@@ -374,33 +453,31 @@ class FormAuditor {
         evaluable = true;
       }
       if (m.kneeShiftRatio != null) {
-        final fired = m.kneeShiftRatio! > strict.kneeShiftWarnRatio;
+        final fired = m.kneeShiftRatio! > strictForm.kneeShiftWarnRatio;
         by('Knee shift').record(fired: fired);
         if (fired) perRepFired[i]++;
         evaluable = true;
       }
       if (m.heelLiftRatio != null) {
-        final fired = m.heelLiftRatio! > strict.heelLiftWarnRatio;
+        final fired = m.heelLiftRatio! > strictForm.heelLiftWarnRatio;
         by('Heel lift').record(fired: fired);
-        if (fired) perRepFired[i]++;
-        evaluable = true;
-      }
-      // Depth grading is approximate: SquatRepMetrics.quality embeds the
-      // multiplicative depth factor (1.0 = full depth). A quality clearly
-      // below the depth-only factor implies the user didn't reach bottomGate.
-      // We grade depth permissively at quality < 0.85 as a coarse proxy,
-      // since the analyzer's `depthFactor` is no longer retrievable here.
-      if (m.quality != null) {
-        final fired = m.quality! < 0.85;
-        by('Depth').record(fired: fired);
         if (fired) perRepFired[i]++;
         evaluable = true;
       }
       perRepEvaluable[i] = evaluable;
     }
-    // bottomGate is referenced for completeness (documents the intent even
-    // though depth grading uses the quality proxy above).
-    assert(bottomGate > 0);
+
+    // Hip-lead criterion is session-aggregate. Evaluated count = total
+    // reps (every rep had a chance to fire the error). The session-level
+    // `form_errors` table doesn't link to specific reps, so per-rep
+    // `perRepFired[i]` isn't bumped — the criterion reports its own
+    // tally and the "clean rep" calculation below is unaffected by
+    // hipLead. Clamped to repsTotal so a corrupted error count can't
+    // produce a > 100% pass rate. Setting fields directly (vs. looping
+    // `record`) keeps the intent obvious: this isn't a per-rep
+    // accumulation, it's a session-level summary.
+    by('Hip lead').evaluated = repsTotal;
+    by('Hip lead').fired = hipLeadFireCount.clamp(0, repsTotal);
 
     final evaluated = perRepEvaluable.where((e) => e).length;
     final clean = <int>[

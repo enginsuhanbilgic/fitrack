@@ -4,9 +4,11 @@ import '../core/constants.dart';
 import '../core/rom_thresholds.dart';
 import '../core/theme.dart';
 import '../core/types.dart';
+import '../core/squat_rom_defaults.dart';
 import '../engine/curl/curl_rom_profile.dart';
 import '../engine/form_auditor.dart';
 import '../engine/push_up/push_up_rom_profile.dart';
+import '../engine/squat/squat_rom_profile.dart';
 import '../services/db/session_dtos.dart';
 
 class SummaryScreen extends StatefulWidget {
@@ -65,10 +67,22 @@ class SummaryScreen extends StatefulWidget {
   /// Tier-1 personalized push-up depth / start gates. Null when uncalibrated.
   final PushUpRomProfile? pushUpProfile;
 
+  /// Personal squat ROM profile in effect — drives the Form Audit's Tier-1
+  /// per-rep depth gate (real `minKneeAngle` comparison, replacing the
+  /// pre-Part-4 `quality < 0.85` proxy). Null when the user has no squat
+  /// calibration data or this isn't a squat session. Reconstructed history
+  /// sessions also pass null — live bucket state isn't persisted.
+  final SquatRomProfile? squatProfile;
+
   /// Auto-calibrator's session-end thresholds, if it accumulated viable
   /// state. Form Audit's Tier-2 fallback for curl when no calibrated
   /// `(side, view)` bucket exists.
   final RomThresholds? autoCalSnapshot;
+
+  /// Squat auto-calibrator's session-end thresholds — Tier-2 fallback for
+  /// the squat audit. Null when fewer than 2 viable reps were observed
+  /// this session or when this isn't a squat session.
+  final SquatRomThresholdSet? squatAutoCalSnapshot;
 
   /// Session sensitivity — drives form-error thresholds in the audit and
   /// the cold-start fallback ROM gates.
@@ -109,7 +123,9 @@ class SummaryScreen extends StatefulWidget {
     this.bicepsSideRepMetrics = const [],
     this.curlProfile,
     this.pushUpProfile,
+    this.squatProfile,
     this.autoCalSnapshot,
+    this.squatAutoCalSnapshot,
     this.feedbackSensitivity = FeedbackSensitivity.medium,
     this.repConcentricMs = const [],
     this.repDepthPercents = const [],
@@ -661,11 +677,21 @@ class _SummaryScreenState extends State<SummaryScreen> {
         sensitivity: widget.feedbackSensitivity,
       );
     } else if (exercise == ExerciseType.squat) {
+      // Tier-priority grading parity with curl (Squat Pipeline Overhaul —
+      // Part 4). The audit's per-rep ROM resolver uses [squatProfile] first
+      // (Tier 1), [squatAutoCalSnapshot] second (Tier 2), and falls through
+      // to `SquatRomThresholdSet.forSensitivity(sensitivity)` (Tier 3). Form
+      // thresholds use the session's sensitivity, NOT always-high. Hip-lead
+      // fires sourced from the session's persisted error counts.
       audit = auditor.auditSquat(
         squatRepMetrics: widget.squatRepMetrics,
         variant: widget.squatVariant,
         longFemurLifter: widget.squatLongFemurLifter,
         fatigueDetected: fatigueDetected,
+        squatProfile: widget.squatProfile,
+        autoCalSnapshot: widget.squatAutoCalSnapshot,
+        sensitivity: widget.feedbackSensitivity,
+        hipLeadFireCount: widget.errorCounts[FormError.hipLead] ?? 0,
       );
     } else if (exercise == ExerciseType.pushUp) {
       audit = auditor.auditPushUp(
