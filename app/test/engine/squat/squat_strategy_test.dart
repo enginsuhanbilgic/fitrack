@@ -473,4 +473,183 @@ void main() {
       expect(s.effectiveBottomAngle, kSquatBottomAngle);
     });
   });
+
+  group('SquatStrategy — anatomical long-femur classifier (Part 2)', () {
+    /// Build a synthetic pose whose femur/torso ratio is `targetRatio`.
+    ///
+    /// Geometry:
+    ///   - shoulder at y = 0.20, hip at y = 0.50 → torso length = 0.30
+    ///   - knee at y = 0.50 + (targetRatio × 0.30) → femur length = targetRatio × 0.30
+    /// Ratio = femur / torso = targetRatio.
+    ///
+    /// `confidence` is applied to all landmarks. `0.9` clears the
+    /// `kSetupCurlMinConfidence = 0.65` floor; `0.5` doesn't.
+    PoseResult buildPoseWithRatio(
+      double targetRatio, {
+      double confidence = 0.9,
+    }) {
+      const torsoLen = 0.30;
+      const shoulderY = 0.20;
+      const hipY = shoulderY + torsoLen; // 0.50
+      final kneeY = hipY + targetRatio * torsoLen;
+
+      PoseLandmark lm(int t, double x, double y) =>
+          PoseLandmark(type: t, x: x, y: y, confidence: confidence);
+      return PoseResult(
+        inferenceTime: const Duration(milliseconds: 10),
+        landmarks: [
+          lm(LM.leftShoulder, 0.48, shoulderY),
+          lm(LM.rightShoulder, 0.52, shoulderY),
+          lm(LM.leftHip, 0.48, hipY),
+          lm(LM.rightHip, 0.52, hipY),
+          lm(LM.leftKnee, 0.48, kneeY),
+          lm(LM.rightKnee, 0.52, kneeY),
+          lm(LM.leftAnkle, 0.48, kneeY + 0.30),
+          lm(LM.rightAnkle, 0.52, kneeY + 0.30),
+        ],
+      );
+    }
+
+    /// Drive N frames through `updateSetupView` so the classifier
+    /// accumulates samples without entering the FSM.
+    void feedSetupFrames(SquatStrategy s, int count, PoseResult pose) {
+      for (var i = 0; i < count; i++) {
+        s.updateSetupView(pose);
+      }
+    }
+
+    test('5 high-confidence frames @ ratio 0.70 → classifier locks → '
+        'long-femur fires from rep 1', () {
+      double? observedRatio;
+      final s = SquatStrategy(onLongFemurDetected: (r) => observedRatio = r);
+      feedSetupFrames(s, kFemurTorsoMinSamples, buildPoseWithRatio(0.70));
+
+      // Pump one IDLE frame to trigger _maybeApplyAnatomicalLongFemur.
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+
+      expect(s.effectiveBottomAngle, kLongFemurBottomAngle);
+      expect(observedRatio, closeTo(0.70, 1e-9));
+    });
+
+    test('5 high-confidence frames @ ratio 0.55 → classifier locks → '
+        'does NOT fire; default BOTTOM gate preserved', () {
+      var fired = false;
+      final s = SquatStrategy(onLongFemurDetected: (_) => fired = true);
+      feedSetupFrames(s, kFemurTorsoMinSamples, buildPoseWithRatio(0.55));
+
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+
+      expect(s.effectiveBottomAngle, kSquatBottomAngle);
+      expect(fired, isFalse);
+    });
+
+    test('only 3 high-confidence frames → classifier does NOT lock', () {
+      var fired = false;
+      final s = SquatStrategy(onLongFemurDetected: (_) => fired = true);
+      feedSetupFrames(s, 3, buildPoseWithRatio(0.70));
+
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+
+      expect(s.effectiveBottomAngle, kSquatBottomAngle);
+      expect(fired, isFalse);
+    });
+
+    test(
+      'low-confidence frames are NOT accumulated → classifier does NOT lock',
+      () {
+        var fired = false;
+        final s = SquatStrategy(onLongFemurDetected: (_) => fired = true);
+        // 10 frames at confidence 0.5 (below kSetupCurlMinConfidence = 0.65).
+        feedSetupFrames(s, 10, buildPoseWithRatio(0.70, confidence: 0.5));
+
+        tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+
+        expect(s.effectiveBottomAngle, kSquatBottomAngle);
+        expect(fired, isFalse);
+      },
+    );
+
+    test('median over alternating [0.30, 0.70] window is below threshold → '
+        'does NOT fire', () {
+      var fired = false;
+      final s = SquatStrategy(onLongFemurDetected: (_) => fired = true);
+      // 15 alternating samples — sorted median lands at 0.30 (8 of 15 are 0.30).
+      for (var i = 0; i < kFemurTorsoWindowSize; i++) {
+        s.updateSetupView(buildPoseWithRatio(i.isEven ? 0.30 : 0.70));
+      }
+
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+
+      expect(s.effectiveBottomAngle, kSquatBottomAngle);
+      expect(fired, isFalse);
+    });
+
+    test('persistedFemurTorsoRatio = 0.70 → fires on first IDLE frame', () {
+      double? observedRatio;
+      final s = SquatStrategy(
+        persistedFemurTorsoRatio: 0.70,
+        onLongFemurDetected: (r) => observedRatio = r,
+      );
+      // No setup-view feed needed — the persisted seed locks immediately.
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+
+      expect(s.effectiveBottomAngle, kLongFemurBottomAngle);
+      expect(observedRatio, closeTo(0.70, 1e-9));
+    });
+
+    test('persistedFemurTorsoRatio = 0.55 → seeded but does NOT fire', () {
+      var fired = false;
+      final s = SquatStrategy(
+        persistedFemurTorsoRatio: 0.55,
+        onLongFemurDetected: (_) => fired = true,
+      );
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+
+      expect(s.effectiveBottomAngle, kSquatBottomAngle);
+      expect(fired, isFalse);
+    });
+
+    test('onReset clears classifier state — re-classification required', () {
+      final s = SquatStrategy(persistedFemurTorsoRatio: 0.70);
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+      expect(s.effectiveBottomAngle, kLongFemurBottomAngle);
+
+      s.onReset();
+      expect(s.effectiveBottomAngle, kSquatBottomAngle);
+
+      // After reset, the classifier is empty: feeding low-confidence frames
+      // alone won't lock it, so BOTTOM stays at default.
+      feedSetupFrames(
+        s,
+        kFemurTorsoMinSamples,
+        buildPoseWithRatio(0.70, confidence: 0.5),
+      );
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+      expect(s.effectiveBottomAngle, kSquatBottomAngle);
+    });
+
+    test('onNextSet does NOT clear classifier (anatomy is session-scoped)', () {
+      final s = SquatStrategy(persistedFemurTorsoRatio: 0.70);
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+      expect(s.effectiveBottomAngle, kLongFemurBottomAngle);
+
+      s.onNextSet();
+      // After set rollover, classifier still locked + adaptation still applies.
+      expect(s.effectiveBottomAngle, kLongFemurBottomAngle);
+    });
+
+    test('callback fires AT MOST ONCE per session', () {
+      var fireCount = 0;
+      final s = SquatStrategy(
+        persistedFemurTorsoRatio: 0.70,
+        onLongFemurDetected: (_) => fireCount++,
+      );
+      // Multiple IDLE ticks — should still only fire once.
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+      tickAt(strategy: s, state: RepState.idle, angle: 170, hipY: 0.50);
+
+      expect(fireCount, 1);
+    });
+  });
 }

@@ -17,7 +17,9 @@ library;
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:fitrack/core/constants.dart';
 import 'package:fitrack/core/types.dart';
+import 'package:fitrack/engine/squat/squat_rom_profile.dart';
 import 'package:fitrack/models/pose_result.dart';
 import 'package:fitrack/services/camera_service.dart';
 import 'package:fitrack/services/db/preferences_repository.dart';
@@ -581,6 +583,141 @@ void main() {
           reason: '$err must not be silently suppressed from TTS',
         );
       }
+    });
+  });
+
+  group('WorkoutViewModel — _resolveSquatThresholds tier priority', () {
+    test(
+      'Tier 3: no profile, no auto-cal → cold-start sensitivity defaults',
+      () {
+        TelemetryLog.instance.clear();
+        final vm = buildVm(exercise: ExerciseType.squat);
+
+        final t = vm.resolveSquatThresholds(0);
+
+        // Medium-sensitivity defaults (160 / 90 / 160) — the VM defaults to
+        // medium when the preferences repo returns its default sensitivity.
+        expect(t.startAngle, kSquatStartAngle);
+        expect(t.bottomAngle, kSquatBottomAngle);
+        expect(t.endAngle, kSquatEndAngle);
+
+        // Telemetry pin: Tier 3 fired.
+        expect(
+          TelemetryLog.instance.entries.any(
+            (e) =>
+                e.tag == 'squat.thresholds_resolved' &&
+                e.message.contains('tier=3'),
+          ),
+          isTrue,
+        );
+
+        vm.dispose();
+      },
+    );
+
+    test('Tier 2: auto-cal viable → resolver returns auto-cal tuple', () {
+      TelemetryLog.instance.clear();
+      final vm = buildVm(exercise: ExerciseType.squat);
+
+      // Seed the auto-cal with two reps that span a viable ROM:
+      // min=85°, max=175°, ROM excursion = 90° (≥ 40° gate).
+      vm.seedSquatAutoCalForTest(85, 175, 2);
+      final t = vm.resolveSquatThresholds(0);
+
+      // Derived from `SquatRomThresholdSet.fromBucket(85, 175)`:
+      //   start = 175 - 10 = 165
+      //   bottom = 85 + 5 = 90
+      //   end = 175 - 5 = 170
+      expect(t.startAngle, closeTo(165, 1e-9));
+      expect(t.bottomAngle, closeTo(90, 1e-9));
+      expect(t.endAngle, closeTo(170, 1e-9));
+
+      expect(
+        TelemetryLog.instance.entries.any(
+          (e) =>
+              e.tag == 'squat.thresholds_resolved' &&
+              e.message.contains('tier=2'),
+        ),
+        isTrue,
+      );
+
+      vm.dispose();
+    });
+
+    test('Tier 1: calibrated profile beats Tier 2 auto-cal '
+        '(priority order pinned)', () {
+      TelemetryLog.instance.clear();
+      final vm = buildVm(exercise: ExerciseType.squat);
+
+      // Seed BOTH a calibrated profile AND a viable auto-cal.
+      // Profile values are deliberately distinct from auto-cal values so
+      // the assertion discriminates between the two tiers.
+      vm.seedSquatProfileForTest(
+        SquatRomProfile(
+          bucket: SquatRomBucket(
+            observedMinKneeAngle: 80,
+            observedMaxKneeAngle: 180,
+            sampleCount: kSquatCalibrationMinReps,
+          ),
+        ),
+      );
+      vm.seedSquatAutoCalForTest(85, 175, 2);
+
+      final t = vm.resolveSquatThresholds(0);
+
+      // Tier 1 wins: derived from profile bucket (80, 180) with the same
+      // margin policy:  start=170, bottom=85, end=175.
+      expect(t.startAngle, closeTo(170, 1e-9));
+      expect(t.bottomAngle, closeTo(85, 1e-9));
+      expect(t.endAngle, closeTo(175, 1e-9));
+
+      expect(
+        TelemetryLog.instance.entries.any(
+          (e) =>
+              e.tag == 'squat.thresholds_resolved' &&
+              e.message.contains('tier=1'),
+        ),
+        isTrue,
+      );
+
+      vm.dispose();
+    });
+
+    test('Tier 1: uncalibrated profile (sampleCount < min) falls through '
+        'to Tier 2 / Tier 3', () {
+      TelemetryLog.instance.clear();
+      final vm = buildVm(exercise: ExerciseType.squat);
+
+      // Profile exists but is under the calibration sample-count floor —
+      // tier 1 should NOT activate. With no auto-cal seeded, the chain
+      // falls through to tier 3.
+      vm.seedSquatProfileForTest(
+        SquatRomProfile(
+          bucket: SquatRomBucket(
+            observedMinKneeAngle: 80,
+            observedMaxKneeAngle: 180,
+            sampleCount: kSquatCalibrationMinReps - 1,
+          ),
+        ),
+      );
+
+      final t = vm.resolveSquatThresholds(0);
+
+      // Tier 3 defaults — NOT the profile-derived values.
+      expect(t.startAngle, kSquatStartAngle);
+      expect(t.bottomAngle, kSquatBottomAngle);
+      expect(t.endAngle, kSquatEndAngle);
+
+      expect(
+        TelemetryLog.instance.entries.any(
+          (e) =>
+              e.tag == 'squat.thresholds_resolved' &&
+              e.message.contains('tier=3'),
+        ),
+        isTrue,
+      );
+
+      vm.dispose();
     });
   });
 }

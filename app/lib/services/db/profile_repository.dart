@@ -16,6 +16,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../engine/curl/curl_rom_profile.dart';
 import '../../engine/push_up/push_up_rom_profile.dart';
+import '../../engine/squat/squat_rom_profile.dart';
 import '../telemetry_log.dart';
 
 abstract class ProfileRepository {
@@ -28,6 +29,11 @@ abstract class ProfileRepository {
   Future<void> savePushUp(PushUpRomProfile profile) async {}
   Future<void> resetPushUp() async {}
   Future<bool> existsPushUp() async => false;
+
+  Future<SquatRomProfile?> loadSquat() async => null;
+  Future<void> saveSquat(SquatRomProfile profile) async {}
+  Future<void> resetSquat() async {}
+  Future<bool> existsSquat() async => false;
 }
 
 class SqliteProfileRepository implements ProfileRepository {
@@ -40,6 +46,7 @@ class SqliteProfileRepository implements ProfileRepository {
   /// exercise profiles (e.g. `squat_profile_v1`).
   static const String curlKey = 'curl_profile_v1';
   static const String pushUpKey = 'push_up_profile_v1';
+  static const String squatKey = 'squat_profile_v1';
 
   @override
   Future<bool> existsCurl() async {
@@ -172,6 +179,72 @@ class SqliteProfileRepository implements ProfileRepository {
       whereArgs: <Object?>[pushUpKey],
     );
   }
+
+  @override
+  Future<bool> existsSquat() async {
+    final rows = await _db.query(
+      'profiles',
+      columns: <String>['profile_key'],
+      where: 'profile_key = ?',
+      whereArgs: <Object?>[squatKey],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  @override
+  Future<SquatRomProfile?> loadSquat() async {
+    final rows = await _db.query(
+      'profiles',
+      columns: <String>['profile_json'],
+      where: 'profile_key = ?',
+      whereArgs: <Object?>[squatKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final raw = rows.first['profile_json'] as String?;
+    if (raw == null) return null;
+    try {
+      final j = jsonDecode(raw) as Map<String, dynamic>;
+      return SquatRomProfile.fromJson(j);
+    } catch (e, st) {
+      TelemetryLog.instance.log(
+        'schema.migration_failed',
+        'Failed to load squat profile from sqlite; deleting row. error=$e',
+        data: <String, Object?>{'stackTrace': st.toString()},
+      );
+      try {
+        await _db.delete(
+          'profiles',
+          where: 'profile_key = ?',
+          whereArgs: <Object?>[squatKey],
+        );
+      } catch (_) {
+        // best-effort cleanup
+      }
+      return null;
+    }
+  }
+
+  @override
+  Future<void> saveSquat(SquatRomProfile profile) async {
+    final json = jsonEncode(profile.toJson());
+    await _db.insert('profiles', <String, Object?>{
+      'profile_key': squatKey,
+      'profile_json': json,
+      'schema_version': 1,
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<void> resetSquat() async {
+    await _db.delete(
+      'profiles',
+      where: 'profile_key = ?',
+      whereArgs: <Object?>[squatKey],
+    );
+  }
 }
 
 /// In-memory double for tests and previews. Matches `InMemoryRomProfileStore`'s
@@ -179,6 +252,7 @@ class SqliteProfileRepository implements ProfileRepository {
 class InMemoryProfileRepository implements ProfileRepository {
   CurlRomProfile? _profile;
   PushUpRomProfile? _pushUpProfile;
+  SquatRomProfile? _squatProfile;
 
   @override
   Future<bool> existsCurl() async => _profile != null;
@@ -226,5 +300,29 @@ class InMemoryProfileRepository implements ProfileRepository {
   @override
   Future<void> resetPushUp() async {
     _pushUpProfile = null;
+  }
+
+  @override
+  Future<bool> existsSquat() async => _squatProfile != null;
+
+  @override
+  Future<SquatRomProfile?> loadSquat() async {
+    final p = _squatProfile;
+    if (p == null) return null;
+    return SquatRomProfile.fromJson(
+      jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>,
+    );
+  }
+
+  @override
+  Future<void> saveSquat(SquatRomProfile profile) async {
+    _squatProfile = SquatRomProfile.fromJson(
+      jsonDecode(jsonEncode(profile.toJson())) as Map<String, dynamic>,
+    );
+  }
+
+  @override
+  Future<void> resetSquat() async {
+    _squatProfile = null;
   }
 }

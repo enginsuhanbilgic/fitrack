@@ -90,6 +90,25 @@ class SquatRomThresholdSet {
       FeedbackSensitivity.medium => SquatRomDefaults.defaults,
     };
   }
+
+  /// Derive a threshold tuple from a calibrated profile bucket.
+  ///
+  /// `[observedMinKneeAngle, observedMaxKneeAngle]` define the user's
+  /// personal ROM extremes; this factory applies the standard margins
+  /// ([kSquatProfileStartMargin] / [kSquatProfileBottomMargin] /
+  /// [kSquatProfileEndMargin]) to produce the FSM gates. Mirrors curl's
+  /// `RomThresholds.fromBucket` so a future change to the margin policy
+  /// has exactly one place to land.
+  factory SquatRomThresholdSet.fromBucket({
+    required double observedMinKneeAngle,
+    required double observedMaxKneeAngle,
+  }) {
+    return SquatRomThresholdSet(
+      startAngle: observedMaxKneeAngle - kSquatProfileStartMargin,
+      bottomAngle: observedMinKneeAngle + kSquatProfileBottomMargin,
+      endAngle: observedMaxKneeAngle - kSquatProfileEndMargin,
+    );
+  }
 }
 
 /// Per-variant squat ROM defaults (currently variant-agnostic — values

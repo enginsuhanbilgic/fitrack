@@ -611,6 +611,52 @@ shipped** by Part 1; some are consumed by later parts (annotated below).
 
 ---
 
+## 13f. Squat Pipeline Overhaul Part 2 — Engine Calibration Stack (2026-05-13)
+
+Concepts and types introduced by Part 2, the engine-layer parity PR. All entries are pure-Dart; no UI surface is wired in Part 2 (calibration overlay is gated until Part 3).
+
+### Concepts
+
+| Term | Definition |
+|---|---|
+| **Anatomical long-femur classification** | Distinct from the legacy rep-history long-femur heuristic. The classifier examines the user's femur/torso length ratio over a sliding window of high-confidence frames and locks a median once enough samples accumulate. When the locked ratio exceeds `kLongFemurRatioThreshold` (0.60), the squat BOTTOM gate relaxes to `kLongFemurBottomAngle` (100°) **from rep 1**, instead of requiring 3 consecutive shallow reps. Falls back to the rep-history heuristic when the classifier doesn't lock (low-confidence framing) or locks below threshold. Per-session anatomy is not expected to change, so the classifier locks once and is no-op for the rest of the session. |
+| **Tier-priority squat threshold resolution** | Three-tier chain in `WorkoutViewModel._resolveSquatThresholds(repIndexInSet)`, called once per rep at IDLE→DESCENDING and locked into the strategy's `_activeThresholds` for the rest of the rep. **Tier 1** — personal `SquatRomProfile.bucket` if `isCalibrated == true` (≥ `kSquatCalibrationMinReps` samples). **Tier 2** — `SquatAutoCalibrator.currentThresholds` (≥ 2 in-session reps with viable ROM). **Tier 3** — `SquatRomThresholdSet.forSensitivity(activeFeedbackSensitivity)`. Each tier resolution logs `squat.thresholds_resolved tier={1,2,3}` for telemetry. Mirrors `WorkoutViewModel._resolveThresholds` for curl. |
+| **Threshold-lock invariant (squat)** | The resolver runs at IDLE→DESCENDING; the result is stored in `SquatStrategy._activeThresholds` and consumed by every subsequent DESCENDING / BOTTOM / ASCENDING transition for the rest of the rep. Tier 1/2/3 cannot fight over thresholds mid-rep. Mirrors curl's `_activeThresholds` invariant. |
+
+### Constants
+
+| Term | Definition |
+|---|---|
+| **`kLongFemurRatioThreshold`** | Const `0.60`. Femur/torso ratio above which the anatomical classifier classifies the user as long-femur and relaxes the BOTTOM gate to `kLongFemurBottomAngle` (100°). Source: deep-research biomechanical spec (2026-05-13). |
+| **`kFemurTorsoMinSamples`** | Const `5`. Minimum high-confidence frames the `_FemurTorsoClassifier` must observe before it locks a median. Filters ML Kit's first-frame jitter. |
+| **`kFemurTorsoWindowSize`** | Const `15`. Sliding-window cap for the classifier's pre-lock median calculation. Bounds memory and pre-lock reaction time. Once locked, the classifier is no-op so the window size does not apply post-lock. |
+
+### Types & APIs
+
+| Term | Definition |
+|---|---|
+| **`_FemurTorsoClassifier`** | Engine-internal private class inside `engine/squat/squat_strategy.dart`. Collects per-frame `femur / torso` ratios (femur = hip↔knee distance, torso = shoulder↔hip distance) on the higher-confidence side of the body. Once ≥ `kFemurTorsoMinSamples` samples accumulate, takes the median over the window, locks the result, and ignores further input. Supports `seedFromPersisted(double)` so a returning user with a stored ratio gets immediate classification without re-warmup. Confidence floor: `kSetupCurlMinConfidence` (0.65) — the same floor curl uses for setup-quality decisions. |
+| **`SquatRomBucket`** | Per-user squat ROM bucket living in `engine/squat/squat_rom_profile.dart`. Owns `observedMinKneeAngle` (deepest flexion), `observedMaxKneeAngle` (most extended), `sampleCount`, optional `femurTorsoRatio`, FIFO sample buffers, and shrink-confirm counters. `applyRep(min, max)` returns a `RepApplyResult` and mirrors `engine/curl/curl_rom_profile.RomBucket.applyRep` 1:1 — same expand-fast α=0.4 / shrink-slow α=0.1 / 3-rep shrink-confirm / MAD outlier rejection. MAD is suppressed while a shrink trend is already pending (mirrors curl's `_consecutiveShrinkCandidatesMin == 0` gate). Single bucket per user — no `(side, view)` axis like curl. |
+| **`SquatRomProfile`** | Top-level squat ROM profile in `engine/squat/squat_rom_profile.dart`. Schema version 1. Owns `userId`, single nullable `SquatRomBucket bucket`, `createdAt`, `lastUsedAt`. `isCalibrated` returns true iff the bucket exists and has accumulated ≥ `kSquatCalibrationMinReps` samples. **The bucket is exposed as a direct field — there is no `bucketFor()` facade**, because squat has no key axis to look up against (per simplicity review). |
+| **`SquatRomBucketLike`** | Abstract structural interface in `core/rom_thresholds.dart`. Parallels `RomBucketLike` for curl but uses squat-specific field names (`observedMinKneeAngle` / `observedMaxKneeAngle`). Implemented by both `SquatRomBucket` (the persistent bucket) and `_SquatAutoBucket` (the auto-calibrator's in-flight bucket). Lives in `core/` so consumers in `view_models/` and `engine/` can both reach it without violating layer-boundary rules. |
+| **`SquatAutoCalibrator`** | Transient in-set ROM estimator in `engine/squat/squat_auto_calibrator.dart`. Documented as a **verbatim mirror** of `CurlAutoCalibrator` with squat-typed return values. `recordRepExtremes(min, max)` filters each dimension independently through MAD outlier rejection and updates the per-dimension running average. `currentThresholds` returns a `SquatRomThresholdSet` once `repCount >= 2` AND `(maxAvg − minAvg) >= kSquatMinViableRomDegrees` (40°), else `null`. Reset on set rollover. **Future refactor opportunity acknowledged but deferred**: a generic `RomAutoCalibrator<T>` could unify curl + squat; for now the two implementations mirror each other and both must be kept in sync. |
+| **`_SquatAutoBucket`** | File-private adapter in `squat_auto_calibrator.dart` that implements `SquatRomBucketLike` over the auto-calibrator's running averages. Used to expose the auto-cal's current averages as a bucket-shaped value via `SquatAutoCalibrator.currentBucket`. Not a persistence shape. |
+| **`SquatRomThresholdsProvider`** | Typedef in `engine/squat/squat_strategy.dart` — `SquatRomThresholdSet Function(int repIndexInSet)`. Synchronous; the FSM hot path cannot await I/O. Implemented by `WorkoutViewModel._resolveSquatThresholds`. Called once per rep at IDLE→DESCENDING. |
+| **`SquatLongFemurDetectedCallback`** | Typedef in `engine/squat/squat_strategy.dart` — `void Function(double medianRatio)`. Fires once per session when the anatomical classifier locks AND the ratio clears `kLongFemurRatioThreshold`. The host (`WorkoutViewModel`) wires telemetry + persistence here so the engine stays I/O-free. |
+| **`SquatRepExtremesCallback`** | Typedef in `engine/squat/squat_strategy.dart` — `void Function({required int repIndex, required double minKneeAngle, required double maxKneeAngle})`. Fires after every committed rep. `RepCounter` buffers the strategy's emissions into private fields and drains them into the unified `SquatRepCommitCallback` so the host receives a single combined callback per rep. |
+| **`SquatRepCommitCallback`** (extended in Part 2) | The existing typedef in `engine/rep_counter.dart` gained two required fields: `minKneeAngle` and `maxKneeAngle` (both `double?`). Production caller is `WorkoutViewModel._handleSquatRepCommit`, which feeds the extremes to `_squatAutoCalibrator.recordRepExtremes` AND applies them to the persistent bucket (lazy-create on first calibrated rep). |
+| **`RepApplyResult`** (squat enum) | Enum in `engine/squat/squat_rom_profile.dart` — same shape and semantics as curl's `RepApplyResult` (`initialized`, `applied`, `shrinkPending`, `rejectedOutlier`). Imported under the `as squat_profile` prefix in `view_models/workout_view_model.dart` to disambiguate from curl's identically-named enum. Two-enum split is documented and intentional; a future unification is acknowledged but deferred. |
+
+### Telemetry events
+
+| Term | Definition |
+|---|---|
+| **`squat.thresholds_resolved`** | Logged once per rep at IDLE→DESCENDING. Body format: `tier={1,2,3} source=<calibrated/autoCalibrated/global> start=<deg> bottom=<deg> end=<deg>` plus tier-specific fields (`samples=N` for Tier 1, `reps=N` for Tier 2, `sensitivity=<name>` for Tier 3). |
+| **`squat.anatomical_long_femur`** | Logged once per session when `_FemurTorsoClassifier` locks above threshold. Body format: `median_ratio=<float> threshold=<float>`. The host stamps the median back into the profile bucket's `femurTorsoRatio` field for cross-session seeding. |
+| **`squat_profile.save_failed`** | Logged on a fire-and-forget persistence failure when `_flushSquatProfileIfDirty` catches an exception from `saveSquat`. Mirrors curl's `profile.save_failed`. |
+
+---
+
 ## 14. Retired / Deprecated Terms
 
 When a term is retired, move its entry here with a `→ replacement` line and the retirement date. Do not delete outright — old commits still reference it.

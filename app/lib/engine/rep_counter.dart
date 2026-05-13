@@ -1,6 +1,7 @@
 import '../core/constants.dart';
 import '../core/form_thresholds.dart';
 import '../core/squat_form_thresholds.dart';
+import '../core/squat_rom_defaults.dart';
 import '../core/types.dart';
 import '../models/pose_result.dart';
 import 'curl/curl_form_analyzer_extras.dart';
@@ -15,6 +16,11 @@ export 'curl/curl_strategy.dart'
     show RomThresholdsProvider, CurlRepCommitCallback;
 export 'push_up/push_up_rom_profile.dart'
     show PushUpRomProfile, PushUpRomThresholds;
+export 'squat/squat_strategy.dart'
+    show
+        SquatRomThresholdsProvider,
+        SquatLongFemurDetectedCallback,
+        SquatRepExtremesCallback;
 
 // ── Per-arm state machine (biceps curl only) ─────────────
 
@@ -103,6 +109,12 @@ class RepCounter {
   /// persist `reps.quality` + ratio metrics, mirroring the curl callback.
   final SquatRepCommitCallback? _onSquatRepCommit;
 
+  /// Squat min/max knee angles captured by the strategy's extremes callback
+  /// at commit time, consumed by [_onSquatCommit] in the same `update()`
+  /// pass before being cleared. Buffer-of-one — never holds across reps.
+  double? _pendingSquatMinKneeAngle;
+  double? _pendingSquatMaxKneeAngle;
+
   DateTime? _lastTransitionTime;
   DateTime? _stateStartTime;
 
@@ -120,7 +132,11 @@ class RepCounter {
     SquatVariant squatVariant = SquatVariant.bodyweight,
     bool squatLongFemurLifter = false,
     SquatFormThresholds squatFormThresholds = SquatFormThresholds.defaults,
+    SquatRomThresholdSet squatRomThresholds = SquatRomDefaults.defaults,
+    SquatRomThresholdsProvider? squatThresholdsProvider,
     SquatRepCommitCallback? onSquatRepCommit,
+    SquatLongFemurDetectedCallback? onSquatLongFemurDetected,
+    double? squatPersistedFemurTorsoRatio,
     PushUpRomThresholds pushUpThresholds = PushUpRomThresholds.defaults,
   }) : _onSquatRepCommit = onSquatRepCommit {
     _strategy = _buildStrategy(
@@ -134,6 +150,11 @@ class RepCounter {
       squatVariant: squatVariant,
       squatLongFemurLifter: squatLongFemurLifter,
       squatFormThresholds: squatFormThresholds,
+      squatRomThresholds: squatRomThresholds,
+      squatThresholdsProvider: squatThresholdsProvider,
+      onSquatRepExtremes: _handleSquatRepExtremes,
+      onSquatLongFemurDetected: onSquatLongFemurDetected,
+      squatPersistedFemurTorsoRatio: squatPersistedFemurTorsoRatio,
       pushUpThresholds: pushUpThresholds,
     );
   }
@@ -149,6 +170,11 @@ class RepCounter {
     SquatVariant squatVariant = SquatVariant.bodyweight,
     bool squatLongFemurLifter = false,
     SquatFormThresholds squatFormThresholds = SquatFormThresholds.defaults,
+    SquatRomThresholdSet squatRomThresholds = SquatRomDefaults.defaults,
+    SquatRomThresholdsProvider? squatThresholdsProvider,
+    SquatRepExtremesCallback? onSquatRepExtremes,
+    SquatLongFemurDetectedCallback? onSquatLongFemurDetected,
+    double? squatPersistedFemurTorsoRatio,
     PushUpRomThresholds pushUpThresholds = PushUpRomThresholds.defaults,
   }) => switch (exercise) {
     ExerciseType.bicepsCurlFront => CurlStrategy(
@@ -187,9 +213,25 @@ class RepCounter {
       variant: squatVariant,
       longFemurLifter: squatLongFemurLifter,
       formThresholds: squatFormThresholds,
+      romThresholds: squatRomThresholds,
+      thresholdsProvider: squatThresholdsProvider,
+      onRepExtremes: onSquatRepExtremes,
+      onLongFemurDetected: onSquatLongFemurDetected,
+      persistedFemurTorsoRatio: squatPersistedFemurTorsoRatio,
     ),
     ExerciseType.pushUp => PushUpStrategy(thresholds: pushUpThresholds),
   };
+
+  /// Strategy's extremes callback — buffers min/max for the unified
+  /// [_onSquatCommit] which fires the host's combined commit callback.
+  void _handleSquatRepExtremes({
+    required int repIndex,
+    required double minKneeAngle,
+    required double maxKneeAngle,
+  }) {
+    _pendingSquatMinKneeAngle = minKneeAngle;
+    _pendingSquatMaxKneeAngle = maxKneeAngle;
+  }
 
   // ── Public API ────────────────────────────────────────
 
@@ -303,7 +345,10 @@ class RepCounter {
 
   /// Called once per committed rep, regardless of exercise. Squat-specific
   /// bookkeeping (quality accumulation + commit callback) lives here so
-  /// the curl path is unchanged.
+  /// the curl path is unchanged. Drains the strategy's pending extremes
+  /// buffer into the unified callback — the buffer is reset after firing
+  /// so a subsequent non-extremes commit can't accidentally reuse stale
+  /// values.
   void _onSquatCommit() {
     final strategy = _strategy;
     if (strategy is! SquatStrategy) return;
@@ -317,8 +362,12 @@ class RepCounter {
         leanDeg: strategy.lastRepLeanDeg,
         kneeShiftRatio: strategy.lastRepKneeShiftRatio,
         heelLiftRatio: strategy.lastRepHeelLiftRatio,
+        minKneeAngle: _pendingSquatMinKneeAngle,
+        maxKneeAngle: _pendingSquatMaxKneeAngle,
       );
     }
+    _pendingSquatMinKneeAngle = null;
+    _pendingSquatMaxKneeAngle = null;
   }
 
   void _onPushUpCommit() {
@@ -379,7 +428,13 @@ class RepCounter {
 }
 
 /// Squat-only rep-commit callback. Fires once per committed rep with the
-/// analyzer's per-rep snapshot (quality + ratio metrics).
+/// analyzer's per-rep snapshot (quality + ratio metrics + ROM extremes).
+///
+/// `minKneeAngle` / `maxKneeAngle` come from the strategy's extremes
+/// channel — they may be null on edge-case commits where one or both
+/// extremes weren't captured (rare). The host must tolerate null for both
+/// fields and skip the auto-calibrator + persistent bucket update when
+/// either is missing.
 typedef SquatRepCommitCallback =
     void Function({
       required int repIndex,
@@ -387,4 +442,6 @@ typedef SquatRepCommitCallback =
       required double? leanDeg,
       required double? kneeShiftRatio,
       required double? heelLiftRatio,
+      required double? minKneeAngle,
+      required double? maxKneeAngle,
     });

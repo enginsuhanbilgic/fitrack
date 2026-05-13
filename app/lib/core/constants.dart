@@ -462,6 +462,27 @@ const double kLongFemurBottomAngle = 100.0;
 /// Number of completed reps used to detect long-femur pattern.
 const int kLongFemurDetectReps = 3;
 
+// ── Anatomical long-femur classification (research, 2026-05-13) ──
+/// Femur/torso ratio above which the user is classified as a long-femur
+/// lifter and the squat BOTTOM gate relaxes to [kLongFemurBottomAngle]
+/// from rep 1. Derived from biomechanical research: lifters with
+/// femur/torso > 0.60 cannot reach 90° knee flexion without losing
+/// balance over the midfoot. Replaces the rep-history heuristic (which
+/// required 3 consecutive shallow reps before relaxing the gate) for
+/// users whose first 5 high-confidence frames already classify them.
+const double kLongFemurRatioThreshold = 0.60;
+
+/// Minimum number of high-confidence frames the `_FemurTorsoClassifier`
+/// must observe before it locks a ratio decision. The window-median
+/// over ≥ this many samples filters ML Kit's first-frame jitter.
+const int kFemurTorsoMinSamples = 5;
+
+/// Maximum number of recent ratio samples retained for the
+/// `_FemurTorsoClassifier`'s window-median calculation. Once locked,
+/// the classifier ignores further samples — so this bound only applies
+/// during the pre-lock accumulation phase.
+const int kFemurTorsoWindowSize = 15;
+
 // ── Countdown & Session ──────────────────────────────────
 /// Starting value for the hands-free countdown (counts down to 1 then fires GO).
 const int kCountdownSeconds = 3;

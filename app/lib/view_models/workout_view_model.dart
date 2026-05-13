@@ -9,11 +9,19 @@ import '../core/platform_config.dart';
 import '../core/rom_thresholds.dart';
 import '../core/types.dart';
 import '../engine/angle_utils.dart';
+import '../core/squat_rom_defaults.dart';
 import '../engine/curl/curl_auto_calibrator.dart';
 import '../engine/curl/curl_rom_profile.dart';
 import '../engine/curl/rep_boundary_detector.dart';
 import '../engine/landmark_smoother.dart';
 import '../engine/rep_counter.dart';
+import '../engine/squat/squat_auto_calibrator.dart';
+// Prefix-import to keep squat profile types distinct at every call site —
+// helps grep across the VM since both exercises have similarly-named
+// bucket/profile classes.
+import '../engine/squat/squat_rom_profile.dart'
+    as squat_profile
+    show SquatRomProfile, SquatRomBucket;
 import '../models/landmark_types.dart';
 import '../models/pose_landmark.dart';
 import '../models/pose_result.dart';
@@ -218,7 +226,19 @@ class WorkoutViewModel extends ChangeNotifier {
   );
   CurlRomProfile? _profile;
   PushUpRomProfile? _pushUpProfile;
+  squat_profile.SquatRomProfile? _squatProfile;
   final CurlAutoCalibrator _autoCalibrator = CurlAutoCalibrator();
+
+  /// In-session squat auto-calibrator. Resets at every set boundary
+  /// (no view-lock concept for squat). Drives Tier 2 of the squat
+  /// threshold resolver until a [SquatRomProfile] bucket reaches the
+  /// calibration sample-count gate.
+  final SquatAutoCalibrator _squatAutoCalibrator = SquatAutoCalibrator();
+
+  /// Set when the squat profile's bucket received an `applyRep` whose
+  /// result actually updated state — drives the lazy save on session
+  /// end. Mirrors `_profileDirty` for curl.
+  bool _squatProfileDirty = false;
   bool _profileDirty = false;
 
   // ── Calibration phase ──────────────────────────────────
@@ -573,6 +593,10 @@ class WorkoutViewModel extends ChangeNotifier {
             .getSquatLongFemurLifter();
         _feedbackSensitivity = await _preferencesRepository
             .getFeedbackSensitivity();
+        // Load the persisted squat profile if one exists. Null on first
+        // launch or after a reset — `_resolveSquatThresholds` handles the
+        // null path via Tier 2 (auto-cal) or Tier 3 (cold-start).
+        _squatProfile = await _profileRepository.loadSquat();
         if (kSquatDebugSessionEnabled) {
           _isSquatDebugSession = await _preferencesRepository
               .getSquatDebugSession();
@@ -615,7 +639,18 @@ class WorkoutViewModel extends ChangeNotifier {
         squatFormThresholds: SquatFormThresholds.forSensitivity(
           _feedbackSensitivity,
         ),
+        // Cold-start fallback for the strategy's `_romThresholds` field —
+        // used when the host's provider returns nothing or isn't wired.
+        // Tier 3 of the resolver lives in `_resolveSquatThresholds`; the
+        // strategy's fallback is what runs in test paths and any future
+        // non-VM call site.
+        squatRomThresholds: SquatRomThresholdSet.forSensitivity(
+          _feedbackSensitivity,
+        ),
+        squatThresholdsProvider: _resolveSquatThresholds,
         onSquatRepCommit: _handleSquatRepCommit,
+        onSquatLongFemurDetected: _handleSquatLongFemurDetected,
+        squatPersistedFemurTorsoRatio: _squatProfile?.bucket?.femurTorsoRatio,
         pushUpThresholds:
             _pushUpProfile?.thresholds ?? PushUpRomThresholds.defaults,
       );
@@ -1107,6 +1142,16 @@ class WorkoutViewModel extends ChangeNotifier {
       _profileDirty = false;
     } catch (e) {
       TelemetryLog.instance.log('profile.save_failed', e.toString());
+    }
+  }
+
+  Future<void> _flushSquatProfileIfDirty() async {
+    if (!_squatProfileDirty || _squatProfile == null) return;
+    try {
+      await _profileRepository.saveSquat(_squatProfile!);
+      _squatProfileDirty = false;
+    } catch (e) {
+      TelemetryLog.instance.log('squat_profile.save_failed', e.toString());
     }
   }
 
@@ -2099,14 +2144,16 @@ class WorkoutViewModel extends ChangeNotifier {
   }
 
   /// Squat-only rep commit callback. Captures per-rep metrics for the
-  /// summary screen. Mirrors `_handleCurlRepCommit` but lighter — squat
-  /// has no profile/bucket bookkeeping.
+  /// summary screen AND feeds the in-session auto-calibrator + persistent
+  /// profile bucket with the rep's ROM extremes.
   void _handleSquatRepCommit({
     required int repIndex,
     required double? quality,
     required double? leanDeg,
     required double? kneeShiftRatio,
     required double? heelLiftRatio,
+    required double? minKneeAngle,
+    required double? maxKneeAngle,
   }) {
     _squatRepMetrics.add(
       SquatRepMetrics(
@@ -2117,6 +2164,34 @@ class WorkoutViewModel extends ChangeNotifier {
         heelLiftRatio: heelLiftRatio,
       ),
     );
+
+    // Feed the in-session auto-calibrator + persist bucket update when
+    // extremes are available. Skip on null extremes (edge-case commits
+    // where one or both extremes weren't captured).
+    if (minKneeAngle != null && maxKneeAngle != null) {
+      _squatAutoCalibrator.recordRepExtremes(minKneeAngle, maxKneeAngle);
+      final profile = _squatProfile;
+      if (profile != null) {
+        final bucket = profile.bucket ?? squat_profile.SquatRomBucket.empty();
+        bucket.applyRep(minKneeAngle, maxKneeAngle);
+        profile.bucket = bucket;
+        // Dirty unconditionally — `applyRep` always mutates the FIFO
+        // recent-samples buffers and the shrink-confirm counters, even
+        // on rejectedOutlier / shrinkPending outcomes. Skipping those
+        // mutations on save means the shrink-counter resets to zero on
+        // next session, weakening the shrink-detection guarantee.
+        _squatProfileDirty = true;
+      } else {
+        // First-time user with no profile yet: seed one in memory so
+        // future reps can accumulate. Save-on-session-end will persist
+        // it.
+        final bucket = squat_profile.SquatRomBucket.empty();
+        bucket.applyRep(minKneeAngle, maxKneeAngle);
+        _squatProfile = squat_profile.SquatRomProfile(bucket: bucket);
+        _squatProfileDirty = true;
+      }
+    }
+
     // Always log — not gated on debug session. Production data is valuable
     // for threshold derivation. The Python script filters by variant.
     _squatDebugRepIndex++;
@@ -2128,8 +2203,103 @@ class WorkoutViewModel extends ChangeNotifier {
           'lean_deg=${leanDeg?.toStringAsFixed(2) ?? "null"} '
           'knee_shift=${kneeShiftRatio?.toStringAsFixed(4) ?? "null"} '
           'heel_lift=${heelLiftRatio?.toStringAsFixed(4) ?? "null"} '
-          'quality=${quality?.toStringAsFixed(3) ?? "null"}',
+          'quality=${quality?.toStringAsFixed(3) ?? "null"} '
+          'min_knee=${minKneeAngle?.toStringAsFixed(2) ?? "null"} '
+          'max_knee=${maxKneeAngle?.toStringAsFixed(2) ?? "null"}',
     );
+  }
+
+  /// Tier-priority squat threshold resolver. Called once per rep at the
+  /// IDLE→DESCENDING edge; the result is locked for the rest of that rep
+  /// (threshold-lock invariant — mirrors curl's `_resolveThresholds`).
+  ///
+  /// Tier 1 — personal profile bucket if calibrated.
+  /// Tier 2 — in-session auto-calibrator after ≥ 2 viable reps.
+  /// Tier 3 — cold-start defaults, modified by the session's
+  ///          `FeedbackSensitivity`.
+  @visibleForTesting
+  SquatRomThresholdSet resolveSquatThresholds(int repIndexInSet) =>
+      _resolveSquatThresholds(repIndexInSet);
+
+  /// Test seam: seed the squat profile so the tier-1 path can be
+  /// exercised under unit tests. Production code paths load the profile
+  /// via `_profileRepository.loadSquat()` during `init()`.
+  @visibleForTesting
+  // ignore: use_setters_to_change_properties
+  void seedSquatProfileForTest(squat_profile.SquatRomProfile profile) {
+    _squatProfile = profile;
+  }
+
+  /// Test seam: feed the in-session auto-cal so tier-2 can be exercised
+  /// without driving the full rep pipeline.
+  @visibleForTesting
+  void seedSquatAutoCalForTest(double minKnee, double maxKnee, int repCount) {
+    _squatAutoCalibrator.reset();
+    for (var i = 0; i < repCount; i++) {
+      _squatAutoCalibrator.recordRepExtremes(minKnee, maxKnee);
+    }
+  }
+
+  SquatRomThresholdSet _resolveSquatThresholds(int repIndexInSet) {
+    // Tier 1 — personal profile.
+    final profile = _squatProfile;
+    if (profile != null && profile.isCalibrated) {
+      final b = profile.bucket!;
+      final t = SquatRomThresholdSet(
+        startAngle: b.observedMaxKneeAngle - kSquatProfileStartMargin,
+        bottomAngle: b.observedMinKneeAngle + kSquatProfileBottomMargin,
+        endAngle: b.observedMaxKneeAngle - kSquatProfileEndMargin,
+      );
+      TelemetryLog.instance.log(
+        'squat.thresholds_resolved',
+        'tier=1 source=calibrated '
+            'start=${t.startAngle.toStringAsFixed(2)} '
+            'bottom=${t.bottomAngle.toStringAsFixed(2)} '
+            'end=${t.endAngle.toStringAsFixed(2)} '
+            'samples=${b.sampleCount}',
+      );
+      return t;
+    }
+    // Tier 2 — in-session auto-cal.
+    final auto = _squatAutoCalibrator.currentThresholds;
+    if (auto != null) {
+      TelemetryLog.instance.log(
+        'squat.thresholds_resolved',
+        'tier=2 source=autoCalibrated '
+            'start=${auto.startAngle.toStringAsFixed(2)} '
+            'bottom=${auto.bottomAngle.toStringAsFixed(2)} '
+            'end=${auto.endAngle.toStringAsFixed(2)} '
+            'reps=${_squatAutoCalibrator.repCount}',
+      );
+      return auto;
+    }
+    // Tier 3 — cold-start, sensitivity-modified.
+    final cold = SquatRomThresholdSet.forSensitivity(_feedbackSensitivity);
+    TelemetryLog.instance.log(
+      'squat.thresholds_resolved',
+      'tier=3 source=global sensitivity=${_feedbackSensitivity.name} '
+          'start=${cold.startAngle.toStringAsFixed(2)} '
+          'bottom=${cold.bottomAngle.toStringAsFixed(2)} '
+          'end=${cold.endAngle.toStringAsFixed(2)}',
+    );
+    return cold;
+  }
+
+  /// Fires once per session when the anatomical classifier locks a ratio
+  /// above [kLongFemurRatioThreshold]. Logged for telemetry-driven
+  /// dataset analysis; also stamped into the user's profile bucket so
+  /// future sessions can seed the classifier via `seedFromPersisted`.
+  void _handleSquatLongFemurDetected(double medianRatio) {
+    TelemetryLog.instance.log(
+      'squat.anatomical_long_femur',
+      'median_ratio=${medianRatio.toStringAsFixed(3)} '
+          'threshold=$kLongFemurRatioThreshold',
+    );
+    final profile = _squatProfile;
+    if (profile?.bucket != null) {
+      profile!.bucket!.femurTorsoRatio = medianRatio;
+      _squatProfileDirty = true;
+    }
   }
 
   static FormError _cooldownKeyFor(FormError err) => switch (err) {
@@ -2197,6 +2367,10 @@ class WorkoutViewModel extends ChangeNotifier {
   // ── Session actions ───────────────────────────────────
   void startNextSet() {
     _repCounter.nextSet();
+    // Reset the squat auto-calibrator on set rollover — squat has no
+    // view-lock concept, so the set boundary is the only reset trigger
+    // (mirrors curl's per-set reset). Tier 1 (profile) survives.
+    _squatAutoCalibrator.reset();
     _snapshot = RepSnapshot(
       reps: 0,
       sets: _snapshot.sets + 1,
@@ -2313,6 +2487,7 @@ class WorkoutViewModel extends ChangeNotifier {
     _disposeCalibrationResources();
     // Best-effort persistence — fire-and-forget.
     _flushProfileIfDirty();
+    _flushSquatProfileIfDirty();
     // Restore the default telemetry ring-buffer cap if this was a debug
     // session. No-op for normal sessions (resetCap is idempotent).
     if (kCurlDebugSessionEnabled && _isCurlDebugSession) {
