@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import '../core/constants.dart';
+import '../core/rom_thresholds.dart';
 import '../core/theme.dart';
 import '../core/types.dart';
+import '../engine/curl/curl_rom_profile.dart';
+import '../engine/form_auditor.dart';
+import '../engine/push_up/push_up_rom_profile.dart';
 import '../services/db/session_dtos.dart';
 
 class SummaryScreen extends StatefulWidget {
@@ -31,8 +35,8 @@ class SummaryScreen extends StatefulWidget {
   /// the caller side — summary just renders what it gets.
   final List<CurlProfileBucketSummary> curlBucketSummaries;
 
-  /// Per-rep DTW similarity scores (0.0–1.0). Empty or all-null = card hidden.
-  final List<double?> dtwSimilarities;
+  /// _Removed 2026-05-13:_ DTW reference rep scoring was replaced by the
+  /// Strict-Mode Recap card. The Form Match Card no longer exists.
 
   /// Squat variant the session ran with. Used in the squat header chip.
   final SquatVariant squatVariant;
@@ -51,6 +55,24 @@ class SummaryScreen extends StatefulWidget {
   /// Empty for front curl, squat, push-up, and reconstructed sessions
   /// predating schema v5.
   final List<BicepsSideRepMetrics> bicepsSideRepMetrics;
+
+  /// Personal curl ROM profile in effect — drives the Form Audit's Tier-1
+  /// (per-bucket personalized) ROM bar. Null when the user has no curl
+  /// calibration data or the session isn't a curl session.
+  final CurlRomProfile? curlProfile;
+
+  /// Personal push-up ROM profile in effect — drives the Form Audit's
+  /// Tier-1 personalized push-up depth / start gates. Null when uncalibrated.
+  final PushUpRomProfile? pushUpProfile;
+
+  /// Auto-calibrator's session-end thresholds, if it accumulated viable
+  /// state. Form Audit's Tier-2 fallback for curl when no calibrated
+  /// `(side, view)` bucket exists.
+  final RomThresholds? autoCalSnapshot;
+
+  /// Session sensitivity — drives form-error thresholds in the audit and
+  /// the cold-start fallback ROM gates.
+  final FeedbackSensitivity feedbackSensitivity;
 
   /// Per-rep concentric duration in milliseconds. NULL elements are reps
   /// with no captured tempo (rare — abandoned reps; or non-curl live
@@ -81,11 +103,14 @@ class SummaryScreen extends StatefulWidget {
     this.errorCounts = const {},
     this.curlRepRecords = const [],
     this.curlBucketSummaries = const [],
-    this.dtwSimilarities = const [],
     this.squatVariant = SquatVariant.bodyweight,
     this.squatLongFemurLifter = false,
     this.squatRepMetrics = const [],
     this.bicepsSideRepMetrics = const [],
+    this.curlProfile,
+    this.pushUpProfile,
+    this.autoCalSnapshot,
+    this.feedbackSensitivity = FeedbackSensitivity.medium,
     this.repConcentricMs = const [],
     this.repDepthPercents = const [],
   });
@@ -160,7 +185,6 @@ class SummaryScreen extends StatefulWidget {
           ),
         )
         .toList(growable: false);
-
     return SummaryScreen(
       key: key,
       exercise: s.exercise,
@@ -176,9 +200,6 @@ class SummaryScreen extends StatefulWidget {
       errorsTriggered: d.formErrors.keys.toSet(),
       errorCounts: d.formErrors,
       curlRepRecords: curlRecords,
-      dtwSimilarities: d.reps
-          .map((r) => r.dtwSimilarity)
-          .toList(growable: false),
       repConcentricMs: concentricMs,
       repDepthPercents: depthPercents,
       bicepsSideRepMetrics: bicepsSideMetrics,
@@ -210,7 +231,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
   List<CurlRepRecord> get curlRepRecords => widget.curlRepRecords;
   List<CurlProfileBucketSummary> get curlBucketSummaries =>
       widget.curlBucketSummaries;
-  List<double?> get dtwSimilarities => widget.dtwSimilarities;
   List<int?> get repConcentricMs => widget.repConcentricMs;
   List<double?> get repDepthPercents => widget.repDepthPercents;
 
@@ -512,9 +532,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: List.generate(repQualities.length, (i) {
                 final v = repQualities[i];
-                final dtw = i < dtwSimilarities.length
-                    ? dtwSimilarities[i]
-                    : null;
                 final Color barColor = v >= 0.95
                     ? ft.accent
                     : v >= 0.80
@@ -524,23 +541,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      // DTW badge above bar — only shown when score exists.
-                      if (dtw != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: Text(
-                            '${(dtw * 100).round()}',
-                            style: TextStyle(
-                              fontSize: 7,
-                              fontWeight: FontWeight.w700,
-                              color: dtw >= 0.80
-                                  ? ft.accent
-                                  : dtw >= 0.60
-                                  ? Colors.orangeAccent
-                                  : FiTrackTheme.red,
-                            ),
-                          ),
-                        ),
                       Flexible(
                         child: FractionallySizedBox(
                           heightFactor: v.clamp(0.0, 1.0),
@@ -634,23 +634,56 @@ class _SummaryScreenState extends State<SummaryScreen> {
     );
   }
 
-  Widget _buildFormMatchCard(BuildContext context) {
+  /// Form Audit card. Replaces the deleted DTW Form Match Card.
+  /// Re-grades the session's reps using **Path B-permissive tier priority**
+  /// (2026-05-13): each rep is graded against the most personalized ROM bar
+  /// available — calibrated profile bucket → auto-cal snapshot → cold-start
+  /// with the user's sensitivity. Form-error thresholds use the user's
+  /// session sensitivity (not always-high). See [FormAuditor.auditCurl]
+  /// doc-block for the full priority chain rationale.
+  ///
+  /// Default-on for all exercises (curl / squat / push-up). Coverage varies
+  /// by exercise — see [FormAuditor] doc-block for what each path grades.
+  Widget _buildFormAuditCard(BuildContext context) {
     final theme = Theme.of(context);
-    final scores = dtwSimilarities.whereType<double>().toList();
-    final avg = scores.reduce((a, b) => a + b) / scores.length;
-    final pct = (avg * 100).round();
-    final color = avg >= 0.80
-        ? const Color(0xFF00E676)
-        : avg >= 0.60
-        ? const Color(0xFFFFB300)
-        : const Color(0xFFFF5252);
-    final subtitle = avg >= 0.85
-        ? 'Your reps closely match the reference technique.'
-        : avg >= 0.70
-        ? 'Good alignment with reference form. A few deviations noted.'
-        : avg >= 0.55
-        ? 'Moderate match. Focus on the full range and tempo.'
-        : 'Low match. Review technique and consider recalibrating.';
+    const auditor = FormAuditor();
+    final FormAudit audit;
+    if (exercise.isCurl) {
+      audit = auditor.auditCurl(
+        curlRepRecords: curlRepRecords,
+        bicepsSideRepMetrics: widget.bicepsSideRepMetrics,
+        view: detectedView,
+        fatigueDetected: fatigueDetected,
+        asymmetryDetected: asymmetryDetected,
+        curlProfile: widget.curlProfile,
+        autoCalSnapshot: widget.autoCalSnapshot,
+        sensitivity: widget.feedbackSensitivity,
+      );
+    } else if (exercise == ExerciseType.squat) {
+      audit = auditor.auditSquat(
+        squatRepMetrics: widget.squatRepMetrics,
+        variant: widget.squatVariant,
+        longFemurLifter: widget.squatLongFemurLifter,
+        fatigueDetected: fatigueDetected,
+      );
+    } else if (exercise == ExerciseType.pushUp) {
+      audit = auditor.auditPushUp(
+        repRecords: curlRepRecords,
+        fatigueDetected: fatigueDetected,
+        pushUpProfile: widget.pushUpProfile,
+      );
+    } else {
+      return const SizedBox.shrink();
+    }
+    final recap = audit;
+
+    final ft = FiTrackColors.of(context);
+    final pct = recap.repsEvaluated == 0 ? 0 : (recap.passRate * 100).round();
+    final color = recap.passRate >= 0.80
+        ? ft.accent
+        : recap.passRate >= 0.50
+        ? ft.cyan
+        : FiTrackTheme.red;
 
     return Container(
       decoration: BoxDecoration(
@@ -664,10 +697,10 @@ class _SummaryScreenState extends State<SummaryScreen> {
         children: [
           Row(
             children: [
-              Icon(Icons.compare_arrows_rounded, color: color, size: 20),
+              Icon(Icons.verified_outlined, color: color, size: 20),
               const SizedBox(width: 8),
               Text(
-                'Form Match (Beta)',
+                'Form audit',
                 style: TextStyle(
                   color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
                   fontSize: 13,
@@ -676,35 +709,103 @@ class _SummaryScreenState extends State<SummaryScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                '$pct',
-                style: TextStyle(
-                  fontSize: 56,
-                  fontWeight: FontWeight.bold,
-                  color: color,
+          if (recap.applicable) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  '$pct',
+                  style: TextStyle(
+                    fontSize: 56,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
                 ),
-              ),
-              Text(
-                '%',
-                style: TextStyle(
-                  fontSize: 24,
-                  color: color.withValues(alpha: 0.7),
+                Text(
+                  '%',
+                  style: TextStyle(
+                    fontSize: 24,
+                    color: color.withValues(alpha: 0.7),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: TextStyle(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
-              fontSize: 14,
+                const SizedBox(width: 12),
+                Text(
+                  '${recap.repsClean} / ${recap.repsEvaluated} reps clean',
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
+                    fontSize: 14,
+                  ),
+                ),
+              ],
             ),
-          ),
+            const SizedBox(height: 12),
+            for (final c in recap.perCriterion)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        c.name,
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.85,
+                          ),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${c.passed} / ${c.evaluated}',
+                      style: TextStyle(
+                        color: c.fired == 0
+                            ? ft.accent
+                            : theme.colorScheme.onSurface.withValues(
+                                alpha: 0.85,
+                              ),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (recap.oneShotFlags.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              for (final f in recap.oneShotFlags)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.flag_outlined,
+                        size: 14,
+                        color: Colors.orangeAccent,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        f,
+                        style: const TextStyle(
+                          color: Colors.orangeAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ] else
+            Text(
+              recap.notApplicableReason ??
+                  'Strict recap not available for this session.',
+              style: TextStyle(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
+                fontSize: 13,
+              ),
+            ),
         ],
       ),
     );
@@ -1884,11 +1985,13 @@ class _SummaryScreenState extends State<SummaryScreen> {
           ),
           const SizedBox(height: 16),
 
-          // [3.5] Form Match Card (DTW scoring — opt-in, hidden when no scores)
-          if (dtwSimilarities.any((s) => s != null)) ...[
-            _buildFormMatchCard(context),
-            const SizedBox(height: 16),
-          ],
+          // [3.5] Form Audit card — default-on for all exercises. The auditor
+          // dispatches by exercise type; the card itself self-renders an empty
+          // SizedBox for any exercise it can't grade (currently none — curl,
+          // squat, push-up are all covered, with coverage varying per the
+          // FormAuditor doc-block).
+          _buildFormAuditCard(context),
+          const SizedBox(height: 16),
 
           // [4] Accuracy by Rep bar chart
           if (repQualities.isNotEmpty) ...[

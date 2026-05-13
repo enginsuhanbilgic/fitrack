@@ -152,30 +152,10 @@ void main() {
       expect(snap.reps, 1);
     });
 
-    test(
-      'commit fires per-side per rep — symmetric front view yields 2',
-      () async {
-        var commitCount = 0;
-        final counter = RepCounter(
-          onCurlRepCommit:
-              ({
-                required ProfileSide side,
-                required CurlCameraView view,
-                required double minAngle,
-                required double maxAngle,
-                required Duration? concentricDuration,
-                double? minAtPeak,
-              }) {
-                commitCount++;
-              },
-        );
-        await _lockViewToFront(counter);
-        await _driveOneRep(counter);
-        // Symmetric front rep → both (left, front) and (right, front)
-        // buckets get the sample.
-        expect(commitCount, 2);
-      },
-    );
+    // Front-view symmetric bilateral commits removed 2026-05 along with
+    // the front analyzer. Side-view sessions always commit to a single
+    // attributed bucket; the per-side coverage test above already
+    // exercises that path.
   });
 
   group('threshold-lock invariant', () {
@@ -231,40 +211,9 @@ void main() {
   });
 
   group('rep commit attribution', () {
-    test(
-      'front-view symmetric rep commits to BOTH left and right buckets',
-      () async {
-        final commits = <_Commit>[];
-        final counter = RepCounter(
-          onCurlRepCommit:
-              ({
-                required ProfileSide side,
-                required CurlCameraView view,
-                required double minAngle,
-                required double maxAngle,
-                required Duration? concentricDuration,
-                double? minAtPeak,
-              }) {
-                commits.add(_Commit(side, view, minAngle, maxAngle));
-              },
-        );
-        await _lockViewToFront(counter);
-        await _driveOneRep(counter);
-
-        expect(
-          commits,
-          hasLength(2),
-          reason: 'symmetric front rep → both buckets',
-        );
-        expect(commits.map((c) => c.side).toSet(), {
-          ProfileSide.left,
-          ProfileSide.right,
-        });
-        for (final c in commits) {
-          expect(c.view, CurlCameraView.front);
-        }
-      },
-    );
+    // Front-view bilateral attribution removed 2026-05; the attribution
+    // path now always commits to a single side bucket. Side-view tests
+    // above already cover that branch.
 
     test('view-unknown reps drop the sample (no commit fires)', () async {
       final commits = <_Commit>[];

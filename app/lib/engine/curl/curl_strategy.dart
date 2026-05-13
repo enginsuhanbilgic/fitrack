@@ -7,11 +7,9 @@ import '../../models/pose_result.dart';
 import '../angle_utils.dart';
 import '../exercise_strategy.dart';
 import '../form_analyzer_base.dart';
-import 'curl_form_analyzer.dart';
 import 'curl_form_analyzer_extras.dart';
 import 'curl_side_form_analyzer.dart';
 import 'curl_view_detector.dart';
-import 'dtw_scorer.dart';
 
 /// Resolves the RomThresholds to apply for the next curl rep.
 ///
@@ -32,11 +30,10 @@ typedef RomThresholdsProvider =
 /// mid-rep (preserves invariant 10), and never on the initial
 /// `unknown → locked` transition (that's a "first lock", not a flip).
 ///
-/// When `to == CurlCameraView.front` and `kCurlFrontViewEnabled == false`,
-/// the callback still fires (so the host can surface a "front view not
-/// supported" advisory) but the strategy does NOT switch the analyzer to
-/// the dormant front code path — `_lockedView` updates, the side analyzer
-/// keeps processing.
+/// When `to == CurlCameraView.front` (the legacy sentinel retained as a
+/// view-detector fallback after 2026-05), the callback still fires so the
+/// host can surface a "turn 90°" advisory, but the side analyzer keeps
+/// processing — front-view analysis was removed.
 typedef CurlViewFlipCallback =
     void Function(CurlCameraView from, CurlCameraView to);
 
@@ -96,10 +93,6 @@ class CurlStrategy extends ExerciseStrategy {
     /// baseline (WP5.4). Empty list → backward-compat pre-WP5.4 behavior.
     List<Duration> historicalConcentricDurations = const [],
 
-    /// Reference angle series for DTW form scoring (T5.3). Null = disabled.
-    List<double>? referenceRepAngleSeries,
-    bool enableDtwScoring = false,
-
     /// Form/ROM coaching sensitivity for biceps curl (cold-start reps only).
     FormThresholds formThresholds = FormThresholds.medium,
 
@@ -119,8 +112,6 @@ class CurlStrategy extends ExerciseStrategy {
        _form = _selectAnalyzer(
          initialView: initialView,
          historicalConcentricDurations: historicalConcentricDurations,
-         referenceRepAngleSeries: referenceRepAngleSeries,
-         enableDtwScoring: enableDtwScoring,
          formThresholds: formThresholds,
        ) {
     if (initialView != CurlCameraView.unknown) {
@@ -136,11 +127,9 @@ class CurlStrategy extends ExerciseStrategy {
   final CurlRepCommitCallback? _onRepCommit;
   final CurlViewFlipCallback? _onViewFlipped;
 
-  /// Form analyzer for the current view. Polymorphic: either
-  /// `CurlFormAnalyzer` (front, frozen battle-tested code path) or
-  /// `CurlSideFormAnalyzer` (side, isolated for independent iteration).
-  /// Typed as the [CurlAnalyzer] umbrella so all strategy call sites
-  /// compile against base + extras without downcasts.
+  /// Form analyzer for the current view. Side-only after the 2026-05
+  /// front-view removal; typed as the [CurlAnalyzer] umbrella so future
+  /// variants can plug in without changing call sites.
   final CurlAnalyzer _form;
   final CurlViewDetector _viewDetector = CurlViewDetector();
 
@@ -356,10 +345,6 @@ class CurlStrategy extends ExerciseStrategy {
     if (_lockedView != CurlCameraView.unknown) _form.setView(_lockedView);
   }
 
-  /// Score a completed rep's angle trace against the reference. Delegates to
-  /// [CurlFormAnalyzer.scoreRep]. Returns null when scoring is disabled.
-  DtwScore? scoreRep(List<double> candidate) => _form.scoreRep(candidate);
-
   // ── Internals ─────────────────────────────────────────────────────
 
   ProfileSide _profileSideForRep() => switch (side) {
@@ -380,19 +365,14 @@ class CurlStrategy extends ExerciseStrategy {
   }
 
   /// Single chokepoint for runtime view flips. Mutates [_lockedView],
-  /// optionally switches the analyzer (gated by [kCurlFrontViewEnabled] when
-  /// `to == front`), then fires [_onViewFlipped]. Never invoked for the
-  /// initial `unknown → locked` transition — that path runs through
-  /// [updateSetupView] / the constructor and intentionally does NOT fire
-  /// the callback (per the [CurlViewFlipCallback] contract).
+  /// pushes the new view into the analyzer (skipped when `to == front`
+  /// since front-view analysis was removed 2026-05), then fires
+  /// [_onViewFlipped]. Never invoked for the initial `unknown → locked`
+  /// transition — that path runs through [updateSetupView] / the
+  /// constructor and intentionally does NOT fire the callback.
   void _applyViewFlip(CurlCameraView from, CurlCameraView to) {
     _lockedView = to;
-    // Front-analyzer dormancy gate: while the front view is hidden in the
-    // UI (kCurlFrontViewEnabled == false), a runtime flip TO front updates
-    // the locked view (so the host can show the "turn 90°" advisory) but
-    // must NOT activate the dormant `CurlFormAnalyzer` front code path.
-    // Side analyzer keeps processing — degraded but no worse than today.
-    if (to != CurlCameraView.front || kCurlFrontViewEnabled) {
+    if (to != CurlCameraView.front) {
       _form.setView(to);
     }
     _onViewFlipped?.call(from, to);
@@ -475,10 +455,9 @@ class CurlStrategy extends ExerciseStrategy {
     );
   }
 
-  /// Front-view attribution rule: commit to *both* `(left, right)` buckets
-  /// only when both arms reached PEAK with bilateral delta below
-  /// [kAsymmetryAngleDelta]. Otherwise commit only the working side.
-  /// View-unknown reps never fire the commit (invariant 9).
+  /// Side-view-only attribution. View-unknown reps never fire the commit
+  /// (invariant 9). After 2026-05, front-view bilateral symmetric commits
+  /// were removed along with the front analyzer.
   void _commitRepSamples(double? leftBilateral, double? rightBilateral) {
     final commit = _onRepCommit;
     if (commit == null) return;
@@ -487,39 +466,10 @@ class CurlStrategy extends ExerciseStrategy {
     final maxAngle = _maxAngleAtStart;
     if (minAngle == null || maxAngle == null) return;
 
-    final isFrontView = _lockedView == CurlCameraView.front;
-    final symmetric =
-        isFrontView &&
-        leftBilateral != null &&
-        rightBilateral != null &&
-        (leftBilateral - rightBilateral).abs() < kAsymmetryAngleDelta;
-
-    // Same duration flows to both commits for symmetric front-view reps —
-    // one physical rep, one measurement, two bucket updates. Pulled once here
-    // so every call site sees the same value (no risk of the analyzer's
-    // internal state shifting between invocations).
     final concentricDuration = _form.lastConcentricDuration;
-
     final minAtPeak = _minAngleAtPeak;
 
-    if (symmetric) {
-      commit(
-        side: ProfileSide.left,
-        view: _lockedView,
-        minAngle: minAngle,
-        maxAngle: maxAngle,
-        concentricDuration: concentricDuration,
-        minAtPeak: minAtPeak,
-      );
-      commit(
-        side: ProfileSide.right,
-        view: _lockedView,
-        minAngle: minAngle,
-        maxAngle: maxAngle,
-        concentricDuration: concentricDuration,
-        minAtPeak: minAtPeak,
-      );
-    } else {
+    {
       // Side-view attribution: prefer the arm ML Kit actually localized
       // this rep, not the user's pre-declared side. ML Kit's anatomical
       // labels don't always match the user's orientation in side
@@ -558,42 +508,23 @@ class CurlStrategy extends ExerciseStrategy {
     }
   }
 
-  /// Pick the right analyzer flavor for the given initial view.
+  /// Always returns the side analyzer.
   ///
-  /// Front (and `unknown`) → [CurlFormAnalyzer]: the battle-tested
-  /// implementation. Frozen — never edited as part of side-view fixes.
-  ///
-  /// Side variants → [CurlSideFormAnalyzer]: independent implementation
-  /// that can be iterated freely without touching the front code path.
-  ///
-  /// `unknown` defaults to the front analyzer because (a) the view
-  /// detector hasn't settled yet, (b) front is the more common starting
-  /// case, and (c) front analyzer's view-conditionals do gracefully
-  /// degrade if the view never resolves to side. The view detector will
-  /// re-set the view on the chosen analyzer once it locks.
+  /// Front-view support was removed 2026-05. The view-detector's
+  /// `CurlCameraView.front` sentinel is retained as a fallback marker
+  /// only — when it surfaces, the side analyzer keeps processing
+  /// (degraded but functional) until the user re-frames to a true side
+  /// view. The umbrella [CurlAnalyzer] return type is preserved so
+  /// future variants (e.g. seated-cable curl) can plug back in here
+  /// without rewiring every call site.
   static CurlAnalyzer _selectAnalyzer({
     required CurlCameraView initialView,
     required List<Duration> historicalConcentricDurations,
-    required List<double>? referenceRepAngleSeries,
-    required bool enableDtwScoring,
     FormThresholds formThresholds = FormThresholds.medium,
   }) {
-    final isSide =
-        initialView == CurlCameraView.sideLeft ||
-        initialView == CurlCameraView.sideRight;
-    if (isSide) {
-      return CurlSideFormAnalyzer(
-        formThresholds: formThresholds,
-        historicalConcentricDurations: historicalConcentricDurations,
-        referenceRepAngleSeries: referenceRepAngleSeries,
-        enableDtwScoring: enableDtwScoring,
-      );
-    }
-    return CurlFormAnalyzer(
+    return CurlSideFormAnalyzer(
       formThresholds: formThresholds,
       historicalConcentricDurations: historicalConcentricDurations,
-      referenceRepAngleSeries: referenceRepAngleSeries,
-      enableDtwScoring: enableDtwScoring,
     );
   }
 }

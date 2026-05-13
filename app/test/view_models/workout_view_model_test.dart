@@ -119,7 +119,6 @@ class _ThrowingSessionRepository implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
-    List<double?> dtwSimilarities = const [],
   }) async {
     throw StateError('simulated persistence failure');
   }

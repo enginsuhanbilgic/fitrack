@@ -68,36 +68,36 @@ const double kCurlPeakExitAngle = 85.0;
 const double kCurlEndAngle = 140.0;
 
 // ── Threshold source toggle (developer) ─────────────────
-/// Developer toggle: when `true`, `RomThresholds.global(view)` returns the
-/// T2.4-derived per-view thresholds from `DefaultRomThresholds.forView()`;
-/// when `false`, it returns the hand-tuned legacy constants above
-/// (`kCurlStartAngle`, `kCurlPeakAngle`, `kCurlPeakExitAngle`, `kCurlEndAngle`).
+/// PROJECT CONVENTION (2026-05-13)
+/// ───────────────────────────────
+/// FiTrack's cold-start ROM thresholds are derived from **live in-app
+/// diagnostic-session telemetry** — the "Curl debug session" toggle in
+/// Settings records per-rep extremes, which are post-processed into the
+/// per-view threshold buckets in `curl_rom_defaults.dart`.
 ///
-/// Default: `false` — preserves the shipping-2026-04 behavior so the T2.4 v2
-/// wiring is a zero-behavior-change landing. Flip to `true` to ship the
-/// data-driven defaults once validated on-device.
+/// The alternative — deriving thresholds from an offline video-clip
+/// analysis pipeline (`tools/dataset_analysis/`) — is SHELVED. The
+/// pipeline output remains in `pipeline_rom_defaults.dart` for a future
+/// re-derivation when the recorded dataset grows, but is not consumed at
+/// runtime today.
 ///
-/// Only affects users without a `CurlRomProfile` or auto-calibration data —
-/// i.e. the cold-start `ThresholdSource.global` fallback. Personal Calibration
-/// and Auto-Calibration paths are unchanged.
-///
-/// See `T2.4_STATE.md §11.4` for the derived threshold values.
-const bool kUseDataDrivenThresholds = false;
+/// Three-tier resolver (see `rom_thresholds.dart`):
+///   1. Telemetry-derived defaults  (this flag, default `true`)        ★ shipping
+///   2. Pipeline-derived defaults   (`kUsePipelineRomDefaults`, false)   shelved
+///   3. Legacy hand-tuned constants (`kCurl*` above)                     fallback
 
-/// When true, `RomThresholds.global(view)` consults
-/// [ManualRomOverrides.forView] before either the data-driven or legacy
-/// path. Views with a null override entry fall through to the next tier.
-///
-/// Three-tier precedence:
-///   1. Manual override (`manual_rom_overrides.dart`) — this flag
-///   2. Data-driven generated defaults (`default_rom_thresholds.dart`) —
-///      gated by [kUseDataDrivenThresholds]
-///   3. Legacy constants (`kCurlStartAngle` etc.) — always available
-///
-/// Default `true` so the diagnostic-derived front-view numbers ship.
-/// Flip to `false` to A/B test against the lower tiers without losing
-/// the manual values.
-const bool kUseManualOverrides = true;
+/// Tier 1 gate. When `true`, `RomThresholds.global(view)` consults
+/// [CurlRomDefaults.forView] first. Views with a null entry fall
+/// through to the next tier. This is the **project convention** — leave on.
+const bool kUseTelemetryRomDefaults = true;
+
+/// Tier 2 gate. When `true`, `RomThresholds.global(view)` consults
+/// `PipelineRomDefaults.forView` after the telemetry tier and before the
+/// legacy constants. Default `false` — the pipeline is shelved pending a
+/// larger dataset (current leave-one-clip-out cross-validation std is ±20–28°,
+/// not yet generalizable). Only affects users without a `CurlRomProfile`
+/// or auto-calibration data — the cold-start `ThresholdSource.global` path.
+const bool kUsePipelineRomDefaults = false;
 
 // ── Form feedback thresholds ────────────────────────────
 /// Torso swing: ΔX_shoulder / L_torso.
@@ -588,15 +588,6 @@ const int kRepBoundaryMinDwellFrames = 8;
 const int kTelemetryRingSize = 500;
 
 // ── Feature flags ────────────────────────────────────────
-/// Front-view biceps curl is temporarily hidden from the user-facing UI
-/// while side-view accuracy is the active focus. Engine code paths
-/// (`CurlFormAnalyzer`, `CurlViewDetector` front branch, front ROM
-/// buckets) remain intact — this flag only gates surfaces the user
-/// sees: the curl view picker, calibration progress matrix, settings
-/// ROM-override rows, calibration overlay live label, and summary view
-/// label. Flip back to `true` to restore.
-const bool kCurlFrontViewEnabled = false;
-
 /// Exposes the "Curl Debug Session" entry on the home screen and the
 /// matching toggle in Settings. When `true`, the user can launch a
 /// silent observation session that:

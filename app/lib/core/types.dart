@@ -3,10 +3,15 @@ library;
 
 /// Exercises the app supports.
 enum ExerciseType {
+  // ignore: deprecated_member_use_from_same_package
+  @Deprecated(
+    'Front-view biceps curl removed 2026-05. Retained for historical '
+    'context and legacy enum compatibility — never produced by new sessions.',
+  )
   bicepsCurlFront('Biceps Curl (Front)'),
   bicepsCurlSide('Biceps Curl (Side)'),
   // ignore: deprecated_member_use_from_same_package
-  @Deprecated('Use bicepsCurlFront or bicepsCurlSide')
+  @Deprecated('Use bicepsCurlSide')
   bicepsCurl('Biceps Curl'),
   squat('Squat'),
   pushUp('Push-up');
@@ -14,8 +19,9 @@ enum ExerciseType {
   final String label;
   const ExerciseType(this.label);
 
-  /// True for any biceps-curl variant (front or side view).
+  /// True for any biceps-curl variant.
   bool get isCurl =>
+      // ignore: deprecated_member_use_from_same_package
       this == ExerciseType.bicepsCurlFront ||
       this == ExerciseType.bicepsCurlSide ||
       // ignore: deprecated_member_use_from_same_package
@@ -90,21 +96,12 @@ enum SquatVariant {
 ///
 /// Affects only [ThresholdSource.global] (cold-start) reps. Calibrated and
 /// auto-calibrated paths are personal and are never modified by sensitivity.
-enum CurlSensitivity {
+enum FeedbackSensitivity {
   high('High'),
   medium('Medium');
 
   final String label;
-  const CurlSensitivity(this.label);
-}
-
-enum SquatSensitivity {
-  high('High'),
-  medium('Medium'),
-  low('Low');
-
-  final String label;
-  const SquatSensitivity(this.label);
+  const FeedbackSensitivity(this.label);
 }
 
 /// Top-level session lifecycle state.
@@ -142,7 +139,13 @@ enum ThresholdSource {
 /// Locked once; never re-detected mid-session.
 enum CurlCameraView {
   unknown, // detection not yet complete
-  front, // user faces camera — both shoulders broadly separated on X axis
+  // ignore: deprecated_member_use_from_same_package
+  @Deprecated(
+    'Front-view biceps curl removed 2026-05. Retained as a view-detector '
+    'fallback sentinel — when produced, callers must treat it as "no '
+    'usable view; behave as side-view default".',
+  )
+  front, // legacy sentinel; user faces camera (not analyzed after 2026-05)
   sideLeft, // user's left side faces camera — left shoulder is near-side
   sideRight, // user's right side faces camera — right shoulder is near-side
 }

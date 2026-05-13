@@ -51,12 +51,28 @@ GENERALIZATION TOLERANCES  (mirrors manual_rom_overrides.dart provenance)
     peakExit:   peak + 15°              (mirrors kCurlPeakExitGap)
 
 OUTPUT
-    Terminal report + ready-to-paste Dart snippet for ManualRomOverrides.
+    Terminal report + ready-to-paste Dart snippet for the relevant
+    per-exercise `*_rom_defaults.dart` file.
+
+    When a file path is passed as the input (not stdin), the full report
+    is ALSO auto-saved to ``data/telemetry/derived/<stem>_thresholds.txt``
+    (configurable via --out-dir). Stdin invocations print to terminal
+    only — the auto-save is reserved for the "named telemetry session"
+    workflow so each derivation has a committed audit artifact.
+
+    Existing derived files are overwritten silently — the input session
+    file is the canonical source, so re-running on the same input is
+    treated as a deterministic refresh.
 
 USAGE
+    # Recommended: named session file → auto-saved derived report.
+    python -m scripts.derive_thresholds_from_telemetry \\
+        data/telemetry/sessions/2026-05-14_front_right-arm_recalibration.txt --view front
+    # → also writes data/telemetry/derived/2026-05-14_front_right-arm_recalibration_thresholds.txt
+
     # Default mode — requires reps to have been counted by the FSM:
     python -m scripts.derive_thresholds_from_telemetry telemetry.txt
-    pbpaste | python -m scripts.derive_thresholds_from_telemetry
+    pbpaste | python -m scripts.derive_thresholds_from_telemetry         # stdin: terminal only
 
     # Frame-signal mode — works even when FSM never counted a rep:
     python -m scripts.derive_thresholds_from_telemetry --from-frames telemetry.txt
@@ -64,16 +80,30 @@ USAGE
 
     # Override view/side labels (useful when session_start header is missing):
     python -m scripts.derive_thresholds_from_telemetry --view sideRight < log.txt
+
+    # Custom output directory (overrides the default data/telemetry/derived/):
+    python -m scripts.derive_thresholds_from_telemetry session.txt --out-dir /tmp/derivations
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import math
+import os
 import re
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
+
+# Default location for tee-captured derived reports. Resolved relative to the
+# repository root so the script can be invoked from anywhere (the repo is
+# determined by walking up from this file's path until 'tools/' is found).
+_DEFAULT_OUT_DIR = (
+    Path(__file__).resolve().parent.parent / "data" / "telemetry" / "derived"
+)
 
 # ---------------------------------------------------------------------------
 # Constants — must mirror app/lib/core/constants.dart
@@ -1109,6 +1139,22 @@ def main(argv: Optional[list[str]] = None) -> int:
         action="store_true",
         help="Show per-session breakdown.",
     )
+    parser.add_argument(
+        "--out-dir",
+        default=str(_DEFAULT_OUT_DIR),
+        metavar="DIR",
+        help=(
+            "Directory to auto-save the derived report into when a file path "
+            "is passed as input. Filename is derived from the input stem: "
+            "<stem>_thresholds.txt. Stdin invocations are NOT auto-saved. "
+            f"Default: {_DEFAULT_OUT_DIR}"
+        ),
+    )
+    parser.add_argument(
+        "--no-save",
+        action="store_true",
+        help="Disable auto-save even when a file path is passed (terminal only).",
+    )
     args = parser.parse_args(argv)
 
     # Read input
@@ -1125,6 +1171,58 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("error: no input — paste telemetry text or provide a file path.",
               file=sys.stderr)
         return 2
+
+    # Compute auto-save destination (only when input is a file path AND --no-save not set).
+    out_path: Optional[Path] = None
+    if args.telemetry_file and not args.no_save:
+        in_stem = Path(args.telemetry_file).stem
+        out_path = Path(args.out_dir) / f"{in_stem}_thresholds.txt"
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            print(f"warning: could not create output dir {out_path.parent}: {e}",
+                  file=sys.stderr)
+            out_path = None
+
+    # Run the analysis. If auto-save is active, tee stdout to both terminal and file.
+    if out_path is not None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(_Tee(sys.stdout, buf)):
+            exit_code = _run_analysis(text, args)
+        try:
+            out_path.write_text(buf.getvalue(), encoding="utf-8")
+            print(f"\n→ saved derived report: {out_path}", file=sys.stderr)
+        except OSError as e:
+            print(f"warning: could not write {out_path}: {e}", file=sys.stderr)
+        return exit_code
+
+    return _run_analysis(text, args)
+
+
+class _Tee:
+    """Minimal write-only file-like object that forwards writes to multiple streams.
+
+    Used by main() to mirror stdout to both the terminal and an in-memory buffer
+    when auto-save is active. Implements only the methods Python's print() needs.
+    """
+
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for s in self._streams:
+            s.write(data)
+
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+
+
+def _run_analysis(text: str, args: argparse.Namespace) -> int:
+    """Body of the original main(), extracted so the auto-save wrapper can call it
+    under contextlib.redirect_stdout. Reads parsed args + already-loaded telemetry
+    text; returns the same exit codes the original main() did.
+    """
 
     # ── Squat analysis ──────────────────────────────────────────────────────
     if args.exercise in ("squat", "all"):

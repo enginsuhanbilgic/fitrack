@@ -23,7 +23,6 @@ import '../engine/curl/curl_rom_profile.dart';
 import '../engine/push_up/push_up_rom_profile.dart';
 import '../services/app_services.dart';
 import '../services/db/profile_repository.dart';
-import '../services/session_exporter.dart';
 import '../services/telemetry_log.dart';
 import 'workout_screen.dart';
 
@@ -41,14 +40,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   PushUpRomProfile? _pushUpProfile;
   bool _loading = true;
   bool _showDetails = false;
-  bool _dtwScoringEnabled = false;
   bool _squatLongFemurLifter = false;
   bool _diagnosticDisableAutoCalibration = false;
-  bool _curlDebugSession = false;
   bool _squatDebugSession = false;
   ThemeMode _themeMode = ThemeMode.system;
-  CurlSensitivity _curlSensitivity = CurlSensitivity.medium;
-  SquatSensitivity _squatSensitivity = SquatSensitivity.medium;
+  FeedbackSensitivity _feedbackSensitivity = FeedbackSensitivity.medium;
 
   @override
   void didChangeDependencies() {
@@ -65,33 +61,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final services = AppServicesScope.of(context);
     final p = await _repository.loadCurl();
     final pushUpProfile = await _repository.loadPushUp();
-    final dtw = await services.preferencesRepository.getEnableDtwScoring();
     final longFemur = await services.preferencesRepository
         .getSquatLongFemurLifter();
     final diagnosticDisableAutoCal = await services.preferencesRepository
         .getDiagnosticDisableAutoCalibration();
-    final curlDebug = await services.preferencesRepository
-        .getCurlDebugSession();
     final squatDebug = kSquatDebugSessionEnabled
         ? await services.preferencesRepository.getSquatDebugSession()
         : false;
     final themeMode = await services.preferencesRepository.getThemeMode();
-    final curlSensitivity = await services.preferencesRepository
-        .getCurlSensitivity();
-    final squatSensitivity = await services.preferencesRepository
-        .getSquatSensitivity();
+    final feedbackSensitivity = await services.preferencesRepository
+        .getFeedbackSensitivity();
     if (!mounted) return;
     setState(() {
       _profile = p;
       _pushUpProfile = pushUpProfile;
-      _dtwScoringEnabled = dtw;
       _squatLongFemurLifter = longFemur;
       _diagnosticDisableAutoCalibration = diagnosticDisableAutoCal;
-      _curlDebugSession = curlDebug;
       _squatDebugSession = squatDebug;
       _themeMode = themeMode;
-      _curlSensitivity = curlSensitivity;
-      _squatSensitivity = squatSensitivity;
+      _feedbackSensitivity = feedbackSensitivity;
       _loading = false;
     });
   }
@@ -105,17 +93,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     TelemetryLog.instance.log('preferences.theme_mode_changed', mode.name);
     if (!mounted) return;
     setState(() => _themeMode = mode);
-  }
-
-  Future<void> _setDtwScoring(bool value) async {
-    final prefs = AppServicesScope.read(context).preferencesRepository;
-    await prefs.setEnableDtwScoring(value);
-    TelemetryLog.instance.log(
-      'preferences.dtw_scoring_toggled',
-      'enabled=$value',
-    );
-    if (!mounted) return;
-    setState(() => _dtwScoringEnabled = value);
   }
 
   Future<void> _setSquatLongFemurLifter(bool value) async {
@@ -140,17 +117,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _diagnosticDisableAutoCalibration = value);
   }
 
-  Future<void> _setCurlDebugSession(bool value) async {
-    final prefs = AppServicesScope.read(context).preferencesRepository;
-    await prefs.setCurlDebugSession(value);
-    TelemetryLog.instance.log(
-      'preferences.curl_debug_session_toggled',
-      'enabled=$value',
-    );
-    if (!mounted) return;
-    setState(() => _curlDebugSession = value);
-  }
-
   Future<void> _setSquatDebugSession(bool value) async {
     final prefs = AppServicesScope.read(context).preferencesRepository;
     await prefs.setSquatDebugSession(value);
@@ -162,26 +128,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _squatDebugSession = value);
   }
 
-  Future<void> _setCurlSensitivity(CurlSensitivity sensitivity) async {
+  Future<void> _setFeedbackSensitivity(FeedbackSensitivity sensitivity) async {
     final prefs = AppServicesScope.read(context).preferencesRepository;
-    await prefs.setCurlSensitivity(sensitivity);
+    await prefs.setFeedbackSensitivity(sensitivity);
     TelemetryLog.instance.log(
-      'preferences.curl_sensitivity_changed',
+      'preferences.feedback_sensitivity_changed',
       sensitivity.name,
     );
     if (!mounted) return;
-    setState(() => _curlSensitivity = sensitivity);
-  }
-
-  Future<void> _setSquatSensitivity(SquatSensitivity sensitivity) async {
-    final prefs = AppServicesScope.read(context).preferencesRepository;
-    await prefs.setSquatSensitivity(sensitivity);
-    TelemetryLog.instance.log(
-      'preferences.squat_sensitivity_changed',
-      sensitivity.name,
-    );
-    if (!mounted) return;
-    setState(() => _squatSensitivity = sensitivity);
+    setState(() => _feedbackSensitivity = sensitivity);
   }
 
   Future<void> _confirmReset() async {
@@ -272,42 +227,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// Build sessions.csv + reps.csv in a temp dir, hand both to the system
-  /// share sheet. Failures land in a SnackBar — no telemetry tag because
-  /// share-sheet cancellation is a normal user flow, not an error.
-  Future<void> _exportSessions() async {
-    final repo = AppServicesScope.read(context).sessionRepository;
-    final messenger = ScaffoldMessenger.of(context);
-    final exporter = SessionExporter(repository: repo);
-    try {
-      final result = await exporter.exportToTempDir();
-      if (result.sessionCount == 0) {
-        if (!mounted) return;
-        messenger.showSnackBar(
-          const SnackBar(content: Text('No sessions to export yet.')),
-        );
-        return;
-      }
-      // share_plus 10.x legacy static API (`SharePlus.instance.share` lands
-      // in 11+). XFile is provided by cross_file, re-exported by share_plus.
-      await Share.shareXFiles(
-        <XFile>[XFile(result.sessionsCsv), XFile(result.repsCsv)],
-        subject: 'FiTrack workout export',
-        text:
-            'Exported ${result.sessionCount} sessions, '
-            '${result.repCount} reps.',
-      );
-    } catch (e, st) {
-      TelemetryLog.instance.log(
-        'export.failed',
-        e.toString(),
-        data: <String, Object?>{'stackTrace': st.toString()},
-      );
-      if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text('Export failed: $e')));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -345,13 +264,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   label: 'Diagnostics',
                   subtitle: '${TelemetryLog.instance.length} telemetry entries',
                   onTap: _openDiagnostics,
-                ),
-                const Divider(),
-                _ActionRow(
-                  icon: Icons.ios_share,
-                  label: 'Export sessions',
-                  subtitle: 'Share sessions.csv + reps.csv',
-                  onTap: _exportSessions,
                 ),
                 const Divider(),
                 Padding(
@@ -393,17 +305,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 const Divider(),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: const Text('Reference Rep Scoring (Beta)'),
-                  subtitle: const Text(
-                    'Compare your form against a textbook-correct rep.',
-                  ),
-                  value: _dtwScoringEnabled,
-                  onChanged: _setDtwScoring,
-                ),
-                const Divider(),
                 Padding(
                   padding: const EdgeInsets.only(top: 8, bottom: 4),
                   child: Text(
@@ -430,7 +331,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8, bottom: 4),
                   child: Text(
-                    'Biceps Curl',
+                    'Feedback sensitivity',
                     style: TextStyle(
                       color: theme.colorScheme.onSurface.withValues(
                         alpha: 0.54,
@@ -444,54 +345,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const ListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
-                  title: Text('Feedback sensitivity'),
+                  title: Text('Coaching strictness'),
                   subtitle: Text(
                     'How strict the form and rep-gate coaching is',
                   ),
                 ),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: SegmentedButton<CurlSensitivity>(
+                  child: SegmentedButton<FeedbackSensitivity>(
                     segments: [
-                      for (final s in CurlSensitivity.values)
+                      for (final s in FeedbackSensitivity.values)
                         ButtonSegment(value: s, label: Text(s.label)),
                     ],
-                    selected: {_curlSensitivity},
-                    onSelectionChanged: (s) => _setCurlSensitivity(s.first),
-                  ),
-                ),
-                const Divider(),
-                Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 4),
-                  child: Text(
-                    'Squat',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.54,
-                      ),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                ),
-                const ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: Text('Feedback sensitivity'),
-                  subtitle: Text(
-                    'How strict the form and rep-gate coaching is',
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: SegmentedButton<SquatSensitivity>(
-                    segments: [
-                      for (final s in SquatSensitivity.values)
-                        ButtonSegment(value: s, label: Text(s.label)),
-                    ],
-                    selected: {_squatSensitivity},
-                    onSelectionChanged: (s) => _setSquatSensitivity(s.first),
+                    selected: {_feedbackSensitivity},
+                    onSelectionChanged: (s) => _setFeedbackSensitivity(s.first),
                   ),
                 ),
                 const Divider(),
@@ -520,20 +387,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   value: _diagnosticDisableAutoCalibration,
                   onChanged: _setDiagnosticDisableAutoCalibration,
                 ),
-                if (kCurlDebugSessionEnabled)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text('Curl debug session'),
-                    subtitle: const Text(
-                      'Silent observation: no TTS / haptics / banners. '
-                      'Logs frame-level pose metrics for threshold tuning. '
-                      'Forces auto-calibration off. Turn on, run a session, '
-                      'paste Diagnostics, turn off.',
-                    ),
-                    value: _curlDebugSession,
-                    onChanged: _setCurlDebugSession,
-                  ),
                 if (kSquatDebugSessionEnabled)
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -665,8 +518,6 @@ class _ProfileSection extends StatelessWidget {
   }
 
   static List<(ProfileSide, CurlCameraView)> _allCombos() => const [
-    if (kCurlFrontViewEnabled) (ProfileSide.left, CurlCameraView.front),
-    if (kCurlFrontViewEnabled) (ProfileSide.right, CurlCameraView.front),
     (ProfileSide.left, CurlCameraView.sideLeft),
     (ProfileSide.right, CurlCameraView.sideRight),
   ];

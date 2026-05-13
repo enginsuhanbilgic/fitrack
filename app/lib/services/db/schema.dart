@@ -24,6 +24,12 @@
 /// v6 (biceps side-view shrug/elbow-rise): adds 2 nullable biceps columns
 ///     (`biceps_shrug_ratio`, `biceps_elbow_rise_ratio`). Completes the
 ///     retune telemetry channel for kShrugThreshold and kElbowRiseThreshold.
+/// v7 (biceps front-view swing/depth-swing): adds 2 nullable biceps
+///     columns (`biceps_front_swing_ratio`, `biceps_front_depth_swing_ratio`).
+///     Populated only for `bicepsCurlFront` rows. NULL on side curl, squat,
+///     push-up, and pre-v7 rows. Closes the per-rep persistence gap for
+///     front-view metrics so the strict-mode recap card can re-grade
+///     swing + depth-swing at High sensitivity.
 ///
 /// Five tables (v1) + one table (v2):
 ///   - `profiles`         — JSON-blob per-exercise ROM profile (PR1)
@@ -43,7 +49,7 @@ import 'package:sqflite/sqflite.dart';
 /// On-disk schema version. Bump when any CREATE/ALTER landing in `onCreate` or
 /// `onUpgrade` changes. Independent of `CurlRomProfile.schemaVersion` which
 /// tags the JSON blob inside `profiles.profile_json`.
-const int kDbSchemaVersion = 6;
+const int kDbSchemaVersion = 7;
 
 const String ddlProfiles = '''
 CREATE TABLE profiles (
@@ -177,6 +183,12 @@ Future<void> onCreate(Database db, int version) async {
   await db.execute(
     'ALTER TABLE reps ADD COLUMN biceps_elbow_rise_ratio     REAL',
   );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN biceps_front_swing_ratio    REAL',
+  );
+  await db.execute(
+    'ALTER TABLE reps ADD COLUMN biceps_front_depth_swing_ratio REAL',
+  );
   for (final idx in ddlIndexes) {
     await db.execute(idx);
   }
@@ -241,6 +253,19 @@ Future<void> onUpgrade(Database db, int oldVersion, int newVersion) async {
     );
     await db.execute(
       'ALTER TABLE reps ADD COLUMN biceps_elbow_rise_ratio     REAL',
+    );
+  }
+  if (oldVersion < 7) {
+    // v6 → v7: peak swing + depth-swing for FRONT-view curl. Nullable; NULL
+    // for all pre-v7 rows AND for non-front-view rows (side curl, squat,
+    // push-up). Enables the strict-mode recap card to re-grade front-view
+    // swing + depth-swing at High sensitivity using stored per-rep values
+    // rather than re-running the analyzer.
+    await db.execute(
+      'ALTER TABLE reps ADD COLUMN biceps_front_swing_ratio    REAL',
+    );
+    await db.execute(
+      'ALTER TABLE reps ADD COLUMN biceps_front_depth_swing_ratio REAL',
     );
   }
 }

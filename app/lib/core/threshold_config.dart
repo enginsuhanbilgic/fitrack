@@ -9,8 +9,8 @@
 ///   • Push-up FSM angle gates (start / bottom / end)
 ///   • Form-error thresholds (swing, shrug, drift, lean, elbow rise)
 ///   • Sensitivity deltas (how much ±High / ±Low shift each gate)
-///   • Per-view manual overrides (front / sideLeft / sideRight)
-///   • Developer flags: kUseManualOverrides, kUseDataDrivenThresholds
+///   • Per-view telemetry-derived defaults (front / sideLeft / sideRight)
+///   • Developer flags: kUseTelemetryRomDefaults, kUsePipelineRomDefaults
 ///
 /// WHAT NOT TO EDIT HERE
 /// ─────────────────────
@@ -21,10 +21,12 @@
 /// HOW THE THREE-TIER RESOLVER WORKS
 /// ──────────────────────────────────
 /// `RomThresholds.global(view, sensitivity)` tries each tier in order:
-///   Tier 1 — ManualRomOverrides (this file re-exports the values;
-///             edit in `manual_rom_overrides.dart` then re-derive with
-///             `tools/dataset_analysis/scripts/derive_thresholds_from_telemetry.py`)
-///   Tier 2 — DefaultRomThresholds (gated by kUseDataDrivenThresholds)
+///   Tier 1 — CurlRomDefaults (PROJECT CONVENTION — values derived from
+///             live in-app diagnostic-session telemetry; edit in
+///             `curl_rom_defaults.dart` after recording a new session)
+///   Tier 2 — PipelineRomDefaults (SHELVED — gated by kUsePipelineRomDefaults;
+///             produced by the offline video-clip pipeline at
+///             `tools/dataset_analysis/`, parked until the dataset grows)
 ///   Tier 3 — Legacy kCurl* constants below (always available)
 library;
 
@@ -50,8 +52,8 @@ export 'constants.dart'
         // Low:   dStart=−5, dPeak=+10, dEnd=−5
         // (deltas are inline in rom_thresholds.dart — edit there to change them)
         // ── Developer flags ──
-        kUseManualOverrides,
-        kUseDataDrivenThresholds,
+        kUseTelemetryRomDefaults,
+        kUsePipelineRomDefaults,
         // ── Form-error globals (curl) ──
         kSwingThreshold,
         kTorsoLeanThresholdDeg,
@@ -75,6 +77,9 @@ export 'constants.dart'
         kMinViableRomDegrees;
 
 export 'form_thresholds.dart' show FormThresholds;
-export 'manual_rom_overrides.dart' show ManualRomOverrides;
+export 'curl_rom_defaults.dart' show CurlRomDefaults;
+export 'squat_rom_defaults.dart' show SquatRomDefaults, SquatRomThresholdSet;
+export 'push_up_rom_defaults.dart'
+    show PushUpRomDefaults, PushUpRomThresholdSet;
 export 'rom_thresholds.dart' show RomThresholds, RomBucketLike;
 export 'squat_form_thresholds.dart' show SquatFormThresholds;

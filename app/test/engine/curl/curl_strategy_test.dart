@@ -77,7 +77,7 @@ CurlCameraView lockView(CurlStrategy strategy, PoseResult pose) {
 /// Fixed legacy threshold provider for FSM-edge tests. These tests use hand-
 /// chosen angles (170/150/60/90/145) that cross the legacy constant gates
 /// (start=160, peak=70, peakExit=85, end=140). Injecting this provider keeps
-/// the tests insulated from `kUseDataDrivenThresholds` and data-set evolution.
+/// the tests insulated from `kUsePipelineRomDefaults` and data-set evolution.
 RomThresholds legacyThresholdsProvider(
   ProfileSide _,
   CurlCameraView _,

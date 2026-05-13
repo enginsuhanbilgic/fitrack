@@ -9,22 +9,7 @@ import '_test_db.dart';
 void main() {
   initSqfliteFfi();
 
-  group('InMemoryPreferencesRepository', () {
-    test('default is false', () async {
-      final repo = InMemoryPreferencesRepository();
-      expect(await repo.getEnableDtwScoring(), isFalse);
-    });
-
-    test('round-trip set true then false', () async {
-      final repo = InMemoryPreferencesRepository();
-      await repo.setEnableDtwScoring(true);
-      expect(await repo.getEnableDtwScoring(), isTrue);
-      await repo.setEnableDtwScoring(false);
-      expect(await repo.getEnableDtwScoring(), isFalse);
-    });
-  });
-
-  group('SqlitePreferencesRepository — current schema (v2)', () {
+  group('SqlitePreferencesRepository — schema shape', () {
     late Database db;
 
     setUp(() async {
@@ -35,36 +20,23 @@ void main() {
       await db.close();
     });
 
-    test('default (no row) returns false', () async {
-      final repo = SqlitePreferencesRepository(db);
-      expect(await repo.getEnableDtwScoring(), isFalse);
-    });
-
-    test('set true, get true', () async {
-      final repo = SqlitePreferencesRepository(db);
-      await repo.setEnableDtwScoring(true);
-      expect(await repo.getEnableDtwScoring(), isTrue);
-    });
-
-    test('idempotent set — second write replaces first', () async {
-      final repo = SqlitePreferencesRepository(db);
-      await repo.setEnableDtwScoring(true);
-      await repo.setEnableDtwScoring(false);
-      expect(await repo.getEnableDtwScoring(), isFalse);
-    });
-
-    test('preferences table exists in v2 schema', () async {
+    test('preferences table exists in current schema', () async {
       final tables = await db.rawQuery(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='preferences'",
       );
       expect(tables, hasLength(1));
     });
 
-    test('reps table has dtw_similarity column in v2 schema', () async {
-      final info = await db.rawQuery('PRAGMA table_info(reps)');
-      final colNames = info.map((r) => r['name'] as String).toList();
-      expect(colNames, contains('dtw_similarity'));
-    });
+    test(
+      'reps table retains dtw_similarity column (always-NULL after DTW removal)',
+      () async {
+        // The column cannot be dropped without a table rewrite (SQLite limitation);
+        // it persists as a nullable field that all post-2026-05-13 writes leave NULL.
+        final info = await db.rawQuery('PRAGMA table_info(reps)');
+        final colNames = info.map((r) => r['name'] as String).toList();
+        expect(colNames, contains('dtw_similarity'));
+      },
+    );
   });
 
   group('Squat preferences — InMemory', () {

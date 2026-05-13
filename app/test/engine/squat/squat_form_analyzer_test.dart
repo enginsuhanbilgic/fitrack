@@ -11,7 +11,6 @@
 library;
 
 import 'package:fitrack/core/constants.dart';
-import 'package:fitrack/core/default_squat_thresholds.dart';
 import 'package:fitrack/core/squat_form_thresholds.dart';
 import 'package:fitrack/core/types.dart';
 import 'package:fitrack/engine/squat/squat_form_analyzer.dart';
@@ -68,7 +67,7 @@ void main() {
         variant: SquatVariant.bodyweight,
         longFemurLifter: false,
       );
-      expect(a.leanWarnDeg, DefaultSquatThresholds.leanWarnDegBodyweight);
+      expect(a.leanWarnDeg, kSquatLeanWarnDegBodyweight);
     });
 
     test('HBBS default lean threshold is 50°', () {
@@ -76,7 +75,7 @@ void main() {
         variant: SquatVariant.highBarBackSquat,
         longFemurLifter: false,
       );
-      expect(a.leanWarnDeg, DefaultSquatThresholds.leanWarnDegHBBS);
+      expect(a.leanWarnDeg, kSquatLeanWarnDegHBBS);
     });
 
     test('Tall-lifter toggle adds +5° to bodyweight threshold', () {
@@ -86,7 +85,7 @@ void main() {
       );
       expect(
         a.leanWarnDeg,
-        DefaultSquatThresholds.leanWarnDegBodyweight + kSquatLongFemurLeanBoost,
+        kSquatLeanWarnDegBodyweight + kSquatLongFemurLeanBoost,
       );
     });
 
@@ -95,10 +94,7 @@ void main() {
         variant: SquatVariant.highBarBackSquat,
         longFemurLifter: true,
       );
-      expect(
-        a.leanWarnDeg,
-        DefaultSquatThresholds.leanWarnDegHBBS + kSquatLongFemurLeanBoost,
-      );
+      expect(a.leanWarnDeg, kSquatLeanWarnDegHBBS + kSquatLongFemurLeanBoost);
     });
   });
 

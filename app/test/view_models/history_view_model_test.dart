@@ -50,7 +50,6 @@ class _ThrowingRepo implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
-    List<double?> dtwSimilarities = const [],
   }) async => 0;
 
   @override

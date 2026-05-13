@@ -36,10 +36,6 @@ abstract class SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
-
-    /// Per-rep DTW similarity scores (0.0–1.0), index-aligned with
-    /// `event.curlRepRecords`. Null entries and missing indices persist as NULL.
-    List<double?> dtwSimilarities = const [],
   });
 
   /// History list source. Newest first (`started_at DESC`). `exercise = null`
@@ -77,7 +73,6 @@ class SqliteSessionRepository implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
-    List<double?> dtwSimilarities = const [],
   }) async {
     return _db.transaction<int>((txn) async {
       final sessionId = await txn.insert('sessions', <String, Object?>{
@@ -111,9 +106,6 @@ class SqliteSessionRepository implements SessionRepository {
             concentricDurations,
             r.repIndex - 1,
           );
-          final dtwSimilarity = r.repIndex - 1 < dtwSimilarities.length
-              ? dtwSimilarities[r.repIndex - 1]
-              : null;
           final bicepsMetric =
               isCurlSide && r.repIndex - 1 < event.bicepsSideRepMetrics.length
               ? event.bicepsSideRepMetrics[r.repIndex - 1]
@@ -130,7 +122,9 @@ class SqliteSessionRepository implements SessionRepository {
             'bucket_updated': r.bucketUpdated ? 1 : 0,
             'rejected_outlier': r.rejectedOutlier ? 1 : 0,
             'concentric_ms': concentricMs,
-            'dtw_similarity': dtwSimilarity,
+            // dtw_similarity column retained as nullable; DTW scoring was
+            // removed 2026-05-13. NULL on all new writes.
+            'dtw_similarity': null,
             'biceps_lean_deg': bicepsMetric?.leanDeg,
             'biceps_shoulder_drift_ratio': bicepsMetric?.shoulderDriftRatio,
             'biceps_elbow_drift_ratio': bicepsMetric?.elbowDriftRatio,
@@ -138,6 +132,11 @@ class SqliteSessionRepository implements SessionRepository {
             'biceps_elbow_drift_signed': bicepsMetric?.elbowDriftSigned,
             'biceps_shrug_ratio': bicepsMetric?.shrugRatio,
             'biceps_elbow_rise_ratio': bicepsMetric?.elbowRiseRatio,
+            // biceps_front_swing_ratio / biceps_front_depth_swing_ratio:
+            // front view removed 2026-05; columns retained for schema
+            // compatibility, always NULL on new writes.
+            'biceps_front_swing_ratio': null,
+            'biceps_front_depth_swing_ratio': null,
           });
         }
       } else {
@@ -371,7 +370,6 @@ LIMIT ?
           ? null
           : (row['rejected_outlier'] as int) == 1,
       concentricMs: row['concentric_ms'] as int?,
-      dtwSimilarity: (row['dtw_similarity'] as num?)?.toDouble(),
       squatLeanDeg: (row['squat_lean_deg'] as num?)?.toDouble(),
       squatKneeShiftRatio: (row['squat_knee_shift_ratio'] as num?)?.toDouble(),
       squatHeelLiftRatio: (row['squat_heel_lift_ratio'] as num?)?.toDouble(),
@@ -392,6 +390,10 @@ LIMIT ?
       bicepsShrugRatio: (row['biceps_shrug_ratio'] as num?)?.toDouble(),
       bicepsElbowRiseRatio: (row['biceps_elbow_rise_ratio'] as num?)
           ?.toDouble(),
+      bicepsFrontSwingRatio: (row['biceps_front_swing_ratio'] as num?)
+          ?.toDouble(),
+      bicepsFrontDepthSwingRatio:
+          (row['biceps_front_depth_swing_ratio'] as num?)?.toDouble(),
     );
   }
 
@@ -426,7 +428,6 @@ class InMemorySessionRepository implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
-    List<double?> dtwSimilarities = const [],
   }) async {
     final id = _nextId++;
     _sessions.add(
@@ -501,6 +502,10 @@ class InMemorySessionRepository implements SessionRepository {
                   bicepsElbowDriftSigned: bicepsMetric?.elbowDriftSigned,
                   bicepsShrugRatio: bicepsMetric?.shrugRatio,
                   bicepsElbowRiseRatio: bicepsMetric?.elbowRiseRatio,
+                  // Front view removed 2026-05; columns retained for schema
+                  // compatibility, always NULL on new writes.
+                  bicepsFrontSwingRatio: null,
+                  bicepsFrontDepthSwingRatio: null,
                 );
               })
               .toList(growable: false)

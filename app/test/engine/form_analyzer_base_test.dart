@@ -1,5 +1,5 @@
 import 'package:fitrack/core/types.dart';
-import 'package:fitrack/engine/curl/curl_form_analyzer.dart';
+import 'package:fitrack/engine/curl/curl_side_form_analyzer.dart';
 import 'package:fitrack/engine/form_analyzer_base.dart';
 import 'package:fitrack/engine/push_up/push_up_form_analyzer.dart';
 import 'package:fitrack/engine/squat/squat_form_analyzer.dart';
@@ -9,8 +9,8 @@ import 'curl/_pose_fixtures.dart';
 
 void main() {
   group('FormAnalyzerBase drain contract', () {
-    test('CurlFormAnalyzer is-a FormAnalyzerBase', () {
-      expect(CurlFormAnalyzer(), isA<FormAnalyzerBase>());
+    test('CurlSideFormAnalyzer is-a FormAnalyzerBase', () {
+      expect(CurlSideFormAnalyzer(), isA<FormAnalyzerBase>());
     });
 
     test('SquatFormAnalyzer is-a FormAnalyzerBase', () {
@@ -28,7 +28,7 @@ void main() {
     });
 
     test('Curl consumeCompletionErrors is drained after first call', () {
-      final analyzer = CurlFormAnalyzer();
+      final analyzer = CurlSideFormAnalyzer();
       analyzer.onRepStart(buildPose());
 
       // First drain may emit errors based on state; second drain without an

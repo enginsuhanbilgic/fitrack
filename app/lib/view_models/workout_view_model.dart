@@ -21,7 +21,6 @@ import '../services/camera_service.dart';
 import '../services/db/preferences_repository.dart';
 import '../services/db/profile_repository.dart';
 import '../services/db/session_repository.dart';
-import '../services/reference_reps/reference_rep_source.dart';
 import '../services/pose/mlkit_pose_service.dart';
 import '../services/pose/pose_service.dart';
 import '../services/telemetry_log.dart';
@@ -48,9 +47,6 @@ class WorkoutCompletedEvent {
   final List<CurlRepRecord> curlRepRecords;
   final List<CurlProfileBucketSummary> curlBucketSummaries;
 
-  /// Per-rep DTW similarity scores (0.0–1.0). Empty or all-null = card hidden.
-  final List<double?> dtwSimilarities;
-
   /// Squat variant the session ran with. `bodyweight` for non-squat sessions.
   final SquatVariant squatVariant;
 
@@ -62,8 +58,31 @@ class WorkoutCompletedEvent {
   final List<SquatRepMetrics> squatRepMetrics;
 
   /// Per-rep biceps-curl side-view metrics, index-aligned with the rep
-  /// order. Empty for non-side-view sessions (front curl, squat, push-up).
+  /// order. Empty for non-curl sessions.
   final List<BicepsSideRepMetrics> bicepsSideRepMetrics;
+
+  /// The curl ROM profile in effect for this session, if any. Drives the
+  /// Form Audit's Tier-1 (personal calibration) bar for the relevant
+  /// `(side, view)` bucket. Null when the user has never calibrated curl
+  /// or when this isn't a curl session.
+  final CurlRomProfile? curlProfile;
+
+  /// The push-up ROM profile in effect for this session, if any. Drives the
+  /// Form Audit's Tier-1 personal-calibration bar for push-up depth/start
+  /// gates. Null when the user has never calibrated push-up or when this
+  /// isn't a push-up session.
+  final PushUpRomProfile? pushUpProfile;
+
+  /// Snapshot of the auto-calibrator's session-end thresholds, if it
+  /// accumulated viable state. Drives the Form Audit's Tier-2 bar when no
+  /// calibrated `(side, view)` bucket exists. Null when auto-cal didn't
+  /// reach the ≥2-rep + viable-ROM gate, or when this isn't a curl session.
+  final RomThresholds? autoCalSnapshot;
+
+  /// Sensitivity the session ran at. Drives the Form Audit's form-error
+  /// thresholds (swing/shrug/lean/etc.) and the cold-start fallback's ROM
+  /// gates when no personalized data is available.
+  final FeedbackSensitivity feedbackSensitivity;
 
   /// Per-rep concentric duration in milliseconds, index-aligned with the
   /// rep order. NULL for reps where the FSM didn't capture a concentric
@@ -94,11 +113,14 @@ class WorkoutCompletedEvent {
     this.errorCounts = const {},
     required this.curlRepRecords,
     required this.curlBucketSummaries,
-    this.dtwSimilarities = const [],
     this.squatVariant = SquatVariant.bodyweight,
     this.squatLongFemurLifter = false,
     this.squatRepMetrics = const [],
     this.bicepsSideRepMetrics = const [],
+    this.curlProfile,
+    this.pushUpProfile,
+    this.autoCalSnapshot,
+    this.feedbackSensitivity = FeedbackSensitivity.medium,
     this.repConcentricMs = const [],
     this.repDepthPercents = const [],
   });
@@ -161,16 +183,12 @@ class WorkoutViewModel extends ChangeNotifier {
   bool _isCurlDebugSession = false;
   bool get isCurlDebugSession => _isCurlDebugSession;
 
-  /// Form/ROM coaching sensitivity for biceps curl. Read from
-  /// [PreferencesRepository.getCurlSensitivity] during [init] and frozen
+  /// Unified form/ROM coaching sensitivity for all exercises. Read from
+  /// [PreferencesRepository.getFeedbackSensitivity] during [init] and frozen
   /// for the session (snapshot-on-construction). Affects only cold-start
   /// (`ThresholdSource.global`) reps — calibrated and auto-calibrated paths
   /// are unaffected.
-  CurlSensitivity _curlSensitivity = CurlSensitivity.medium;
-
-  /// Form sensitivity for squat. Read from [PreferencesRepository.getSquatSensitivity]
-  /// during [init] and frozen for the session (snapshot-on-construction).
-  SquatSensitivity _squatSensitivity = SquatSensitivity.medium;
+  FeedbackSensitivity _feedbackSensitivity = FeedbackSensitivity.medium;
 
   /// Wall-clock timestamp of the most recent `pose.frame_metrics` emit.
   /// Throttles emission to roughly [kDebugFrameMetricsHz] regardless of
@@ -190,7 +208,6 @@ class WorkoutViewModel extends ChangeNotifier {
   final ProfileRepository _profileRepository;
   final SessionRepository _sessionRepository;
   final PreferencesRepository _preferencesRepository;
-  final ReferenceRepSource _referenceRepSource;
   late final RepCounter _repCounter;
 
   // ── Engine ─────────────────────────────────────────────
@@ -310,17 +327,6 @@ class WorkoutViewModel extends ChangeNotifier {
   /// `insertCompletedSession`'s `concentricDurations` arg.
   final List<Duration?> _repConcentricDurations = [];
 
-  /// Per-rep DTW similarity scores (T5.3), index-aligned with _curlRepRecords.
-  final List<double?> _repDtwSimilarities = [];
-
-  /// Angle buffer for the current in-progress rep. Filled per frame while the
-  /// FSM is in CONCENTRIC/PEAK/ECCENTRIC; cleared on IDLE→CONCENTRIC and on
-  /// commit. Scored against the reference in [_handleCurlRepCommit].
-  final List<double> _currentRepAngles = [];
-
-  /// Set in [init] from [PreferencesRepository]. Immutable for the session.
-  bool _dtwScoringEnabled = false;
-
   /// Squat variant snapshot. Read in [init] from [PreferencesRepository]
   /// before the [RepCounter] is constructed; immutable for the session
   /// (snapshot-on-construction — plan flow-decision #2).
@@ -408,15 +414,12 @@ class WorkoutViewModel extends ChangeNotifier {
     CameraService? camera,
     PoseService? pose,
     TtsService? tts,
-    ReferenceRepSource? referenceRepSource,
   }) : _camera = camera ?? CameraService(),
        _pose = pose ?? MlKitPoseService(),
        _tts = tts ?? TtsService(),
        _profileRepository = profileRepository,
        _sessionRepository = sessionRepository,
-       _preferencesRepository = preferencesRepository,
-       _referenceRepSource =
-           referenceRepSource ?? const ConstReferenceRepSource();
+       _preferencesRepository = preferencesRepository;
 
   // ── Public read-only getters (widget-observable state) ──
   bool get isReady => _isReady;
@@ -482,7 +485,6 @@ class WorkoutViewModel extends ChangeNotifier {
       // list (analyzer collapses to in-session-only fatigue detection —
       // pre-WP5.4 behavior).
       var historical = const <Duration>[];
-      List<double>? referenceAngles;
       if (exercise.isCurl) {
         _profile = await _profileRepository.loadCurl() ?? CurlRomProfile();
         try {
@@ -499,7 +501,8 @@ class WorkoutViewModel extends ChangeNotifier {
         }
         // Sensitivity snapshot must come before the debug-session block so the
         // curl_debug.session_start telemetry log includes the real value.
-        _curlSensitivity = await _preferencesRepository.getCurlSensitivity();
+        _feedbackSensitivity = await _preferencesRepository
+            .getFeedbackSensitivity();
         // Diagnostic flag — snapshot once, identical to other curl prefs.
         // A mid-session toggle in Settings has no effect on this run (matches
         // the squat long-femur "snapshot-on-construction" rule).
@@ -544,13 +547,13 @@ class WorkoutViewModel extends ChangeNotifier {
                   'exercise=${exercise.name} '
                   'side=${curlSide.name} '
                   'view=${debugView.name} '
-                  'sensitivity=${_curlSensitivity.name} '
+                  'sensitivity=${_feedbackSensitivity.name} '
                   'thresholds_start=${debugThresholds.startAngle.toStringAsFixed(1)} '
                   'thresholds_peak=${debugThresholds.peakAngle.toStringAsFixed(1)} '
                   'thresholds_peak_exit=${debugThresholds.peakExitAngle.toStringAsFixed(1)} '
                   'thresholds_end=${debugThresholds.endAngle.toStringAsFixed(1)} '
-                  'use_manual_overrides=$kUseManualOverrides '
-                  'use_data_driven=$kUseDataDrivenThresholds',
+                  'use_telemetry_defaults=$kUseTelemetryRomDefaults '
+                  'use_pipeline_defaults=$kUsePipelineRomDefaults',
             );
           }
         }
@@ -560,14 +563,6 @@ class WorkoutViewModel extends ChangeNotifier {
             'auto-calibration disabled — every rep will run on source=global',
           );
         }
-        _dtwScoringEnabled = await _preferencesRepository.getEnableDtwScoring();
-        if (_dtwScoringEnabled) {
-          // View is not yet known at init time; use the detected view once the
-          // first frame arrives. For now seed with front:both as the common
-          // default — WorkoutViewModel updates _referenceAngles on first
-          // view-lock via _onViewLocked (below).
-          referenceAngles = _referenceRepSource.forBucket(CurlCameraView.front);
-        }
       } else if (exercise == ExerciseType.squat) {
         // Snapshot squat preferences before constructing RepCounter so the
         // strategy + analyzer freeze on the values that were active at
@@ -576,7 +571,8 @@ class WorkoutViewModel extends ChangeNotifier {
         _squatVariant = await _preferencesRepository.getSquatVariant();
         _squatLongFemurLifter = await _preferencesRepository
             .getSquatLongFemurLifter();
-        _squatSensitivity = await _preferencesRepository.getSquatSensitivity();
+        _feedbackSensitivity = await _preferencesRepository
+            .getFeedbackSensitivity();
         if (kSquatDebugSessionEnabled) {
           _isSquatDebugSession = await _preferencesRepository
               .getSquatDebugSession();
@@ -613,13 +609,11 @@ class WorkoutViewModel extends ChangeNotifier {
         onCurlRepCommit: _handleCurlRepCommit,
         onCurlViewFlipped: _handleCurlViewFlipped,
         curlHistoricalConcentricDurations: historical,
-        curlReferenceRepAngleSeries: referenceAngles,
-        curlEnableDtwScoring: _dtwScoringEnabled,
-        curlFormThresholds: FormThresholds.forSensitivity(_curlSensitivity),
+        curlFormThresholds: FormThresholds.forSensitivity(_feedbackSensitivity),
         squatVariant: _squatVariant,
         squatLongFemurLifter: _squatLongFemurLifter,
         squatFormThresholds: SquatFormThresholds.forSensitivity(
-          _squatSensitivity,
+          _feedbackSensitivity,
         ),
         onSquatRepCommit: _handleSquatRepCommit,
         pushUpThresholds:
@@ -669,7 +663,7 @@ class WorkoutViewModel extends ChangeNotifier {
     final auto = _autoCalibrator.currentThresholds;
     if (auto != null) return auto;
     // Cold-start path: sensitivity applies here only.
-    return RomThresholds.global(view, _curlSensitivity);
+    return RomThresholds.global(view, _feedbackSensitivity);
   }
 
   /// Engine-callback: a view flip just committed at FSM idle. Surface a
@@ -816,15 +810,6 @@ class WorkoutViewModel extends ChangeNotifier {
     // Index-aligned with `_curlRepRecords`; consumed by
     // `_persistCompletedSession` → `SqliteSessionRepository`.
     _repConcentricDurations.add(concentricDuration);
-
-    // DTW score for this rep (null when scoring disabled or no reference).
-    // scoreRep() lives on the analyzer, but the angle buffer is host-owned
-    // (engine stays Flutter-free). We pass the captured buffer here.
-    final dtwScore = _repCounter.scoreCurlRep(
-      List<double>.unmodifiable(_currentRepAngles),
-    );
-    _repDtwSimilarities.add(dtwScore?.similarity);
-    _currentRepAngles.clear();
 
     // Side-view per-rep telemetry snapshot. Read straight off the umbrella
     // `formExtras` — the side analyzer has populated the four maxes during
@@ -2030,20 +2015,6 @@ class WorkoutViewModel extends ChangeNotifier {
       if (!isDebugSilent && snapshot.reps > _snapshot.reps) {
         _tts.speak('${snapshot.reps}');
       }
-      // Capture angle into the DTW buffer while the rep is in progress.
-      // The buffer is consumed + cleared in _handleCurlRepCommit.
-      if (_dtwScoringEnabled &&
-          exercise.isCurl &&
-          snapshot.jointAngle != null &&
-          (snapshot.state == RepState.concentric ||
-              snapshot.state == RepState.peak ||
-              snapshot.state == RepState.eccentric)) {
-        _currentRepAngles.add(snapshot.jointAngle!);
-      } else if (snapshot.state == RepState.idle &&
-          _snapshot.state != RepState.idle) {
-        // Transition back to idle without a commit (aborted rep) — clear buffer.
-        _currentRepAngles.clear();
-      }
       _landmarks = smoothed;
       _snapshot = snapshot;
       notifyListeners();
@@ -2288,13 +2259,19 @@ class WorkoutViewModel extends ChangeNotifier {
       errorCounts: Map.unmodifiable(_formErrorCounts),
       curlRepRecords: List.unmodifiable(_curlRepRecords),
       curlBucketSummaries: _snapshotBucketsForSummary(),
-      dtwSimilarities: List<double?>.unmodifiable(_repDtwSimilarities),
       squatVariant: _squatVariant,
       squatLongFemurLifter: _squatLongFemurLifter,
       squatRepMetrics: List<SquatRepMetrics>.unmodifiable(_squatRepMetrics),
       bicepsSideRepMetrics: List<BicepsSideRepMetrics>.unmodifiable(
         _bicepsSideRepMetrics,
       ),
+      curlProfile: _profile,
+      pushUpProfile: _pushUpProfile,
+      // Snapshot the auto-calibrator's final state for the Form Audit's
+      // Tier-2 bar. May be null when fewer than 2 reps were observed or
+      // the observed ROM excursion was below kMinViableRomDegrees.
+      autoCalSnapshot: _autoCalibrator.currentThresholds,
+      feedbackSensitivity: _feedbackSensitivity,
       repConcentricMs: List<int?>.unmodifiable(repConcentricMs),
       repDepthPercents: List<double?>.unmodifiable(repDepthPercents),
     );
@@ -2316,7 +2293,6 @@ class WorkoutViewModel extends ChangeNotifier {
         concentricDurations: List<Duration?>.unmodifiable(
           _repConcentricDurations,
         ),
-        dtwSimilarities: List<double?>.unmodifiable(_repDtwSimilarities),
       );
     } catch (e, st) {
       TelemetryLog.instance.log(

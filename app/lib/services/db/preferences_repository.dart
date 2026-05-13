@@ -8,10 +8,6 @@ import 'package:sqflite/sqflite.dart';
 import '../../core/types.dart';
 
 abstract class PreferencesRepository {
-  /// Whether DTW reference-rep scoring is enabled. Defaults to false.
-  Future<bool> getEnableDtwScoring();
-  Future<void> setEnableDtwScoring(bool value);
-
   /// User-selected theme mode. Defaults to [ThemeMode.system].
   Future<ThemeMode> getThemeMode();
   Future<void> setThemeMode(ThemeMode mode);
@@ -56,17 +52,12 @@ abstract class PreferencesRepository {
   Future<bool> getSquatDebugSession();
   Future<void> setSquatDebugSession(bool value);
 
-  /// Form/ROM sensitivity for biceps curl. Defaults to [CurlSensitivity.medium].
-  /// Affects only cold-start (`ThresholdSource.global`) reps — calibrated
-  /// and auto-calibrated paths are personal and are never modified.
-  Future<CurlSensitivity> getCurlSensitivity();
-  Future<void> setCurlSensitivity(CurlSensitivity value);
-
-  /// Form sensitivity for squat. Defaults to [SquatSensitivity.medium].
-  /// Snapshot-on-construction — mid-session Settings changes apply to the
-  /// next workout only.
-  Future<SquatSensitivity> getSquatSensitivity();
-  Future<void> setSquatSensitivity(SquatSensitivity value);
+  /// Unified form/ROM coaching sensitivity for all exercises.
+  /// Defaults to [FeedbackSensitivity.medium]. Affects only cold-start
+  /// (`ThresholdSource.global`) reps — calibrated and auto-calibrated
+  /// paths are personal and are never modified.
+  Future<FeedbackSensitivity> getFeedbackSensitivity();
+  Future<void> setFeedbackSensitivity(FeedbackSensitivity value);
 }
 
 class SqlitePreferencesRepository implements PreferencesRepository {
@@ -74,7 +65,6 @@ class SqlitePreferencesRepository implements PreferencesRepository {
 
   final Database _db;
 
-  static const String _kDtwScoringKey = 'enable_dtw_scoring';
   static const String _kSquatVariantKey = 'squat_variant';
   static const String _kSquatLongFemurKey = 'squat_long_femur_lifter';
   static const String _kDiagnosticDisableAutoCalibrationKey =
@@ -82,29 +72,7 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   static const String _kCurlDebugSessionKey = 'curl_debug_session';
   static const String _kSquatDebugSessionKey = 'squat_debug_session';
   static const String _kThemeModeKey = 'theme_mode';
-  static const String _kCurlSensitivityKey = 'curl_sensitivity';
-  static const String _kSquatSensitivityKey = 'squat_sensitivity';
-
-  @override
-  Future<bool> getEnableDtwScoring() async {
-    final rows = await _db.query(
-      'preferences',
-      columns: ['value'],
-      where: 'key = ?',
-      whereArgs: [_kDtwScoringKey],
-      limit: 1,
-    );
-    if (rows.isEmpty) return false;
-    return rows.first['value'] == 'true';
-  }
-
-  @override
-  Future<void> setEnableDtwScoring(bool value) async {
-    await _db.insert('preferences', {
-      'key': _kDtwScoringKey,
-      'value': value.toString(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-  }
+  static const String _kFeedbackSensitivityKey = 'feedback_sensitivity';
 
   @override
   Future<SquatVariant> getSquatVariant() async {
@@ -219,55 +187,28 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   }
 
   @override
-  Future<CurlSensitivity> getCurlSensitivity() async {
+  Future<FeedbackSensitivity> getFeedbackSensitivity() async {
     final rows = await _db.query(
       'preferences',
       columns: ['value'],
       where: 'key = ?',
-      whereArgs: [_kCurlSensitivityKey],
+      whereArgs: [_kFeedbackSensitivityKey],
       limit: 1,
     );
-    if (rows.isEmpty) return CurlSensitivity.medium;
+    if (rows.isEmpty) return FeedbackSensitivity.medium;
     final raw = rows.first['value'] as String?;
-    if (raw == null) return CurlSensitivity.medium;
+    if (raw == null) return FeedbackSensitivity.medium;
     try {
-      return CurlSensitivity.values.byName(raw);
+      return FeedbackSensitivity.values.byName(raw);
     } catch (_) {
-      return CurlSensitivity.medium;
+      return FeedbackSensitivity.medium;
     }
   }
 
   @override
-  Future<void> setCurlSensitivity(CurlSensitivity value) async {
+  Future<void> setFeedbackSensitivity(FeedbackSensitivity value) async {
     await _db.insert('preferences', {
-      'key': _kCurlSensitivityKey,
-      'value': value.name,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-  }
-
-  @override
-  Future<SquatSensitivity> getSquatSensitivity() async {
-    final rows = await _db.query(
-      'preferences',
-      columns: ['value'],
-      where: 'key = ?',
-      whereArgs: [_kSquatSensitivityKey],
-      limit: 1,
-    );
-    if (rows.isEmpty) return SquatSensitivity.medium;
-    final raw = rows.first['value'] as String?;
-    if (raw == null) return SquatSensitivity.medium;
-    try {
-      return SquatSensitivity.values.byName(raw);
-    } catch (_) {
-      return SquatSensitivity.medium;
-    }
-  }
-
-  @override
-  Future<void> setSquatSensitivity(SquatSensitivity value) async {
-    await _db.insert('preferences', {
-      'key': _kSquatSensitivityKey,
+      'key': _kFeedbackSensitivityKey,
       'value': value.name,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -302,23 +243,13 @@ class SqlitePreferencesRepository implements PreferencesRepository {
 
 /// In-memory test double. No SQLite dependency.
 class InMemoryPreferencesRepository implements PreferencesRepository {
-  bool _enableDtwScoring = false;
   SquatVariant _squatVariant = SquatVariant.bodyweight;
   bool _squatLongFemur = false;
   bool _diagnosticDisableAutoCalibration = false;
   bool _curlDebugSession = false;
   bool _squatDebugSession = false;
-  CurlSensitivity _curlSensitivity = CurlSensitivity.medium;
-  SquatSensitivity _squatSensitivity = SquatSensitivity.medium;
+  FeedbackSensitivity _feedbackSensitivity = FeedbackSensitivity.medium;
   ThemeMode _themeMode = ThemeMode.system;
-
-  @override
-  Future<bool> getEnableDtwScoring() async => _enableDtwScoring;
-
-  @override
-  Future<void> setEnableDtwScoring(bool value) async {
-    _enableDtwScoring = value;
-  }
 
   @override
   Future<SquatVariant> getSquatVariant() async => _squatVariant;
@@ -362,19 +293,12 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   }
 
   @override
-  Future<CurlSensitivity> getCurlSensitivity() async => _curlSensitivity;
+  Future<FeedbackSensitivity> getFeedbackSensitivity() async =>
+      _feedbackSensitivity;
 
   @override
-  Future<void> setCurlSensitivity(CurlSensitivity value) async {
-    _curlSensitivity = value;
-  }
-
-  @override
-  Future<SquatSensitivity> getSquatSensitivity() async => _squatSensitivity;
-
-  @override
-  Future<void> setSquatSensitivity(SquatSensitivity value) async {
-    _squatSensitivity = value;
+  Future<void> setFeedbackSensitivity(FeedbackSensitivity value) async {
+    _feedbackSensitivity = value;
   }
 
   @override

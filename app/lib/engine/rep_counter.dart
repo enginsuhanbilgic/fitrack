@@ -5,7 +5,6 @@ import '../core/types.dart';
 import '../models/pose_result.dart';
 import 'curl/curl_form_analyzer_extras.dart';
 import 'curl/curl_strategy.dart';
-import 'curl/dtw_scorer.dart';
 import 'exercise_strategy.dart';
 import 'push_up/push_up_rom_profile.dart';
 import 'push_up/push_up_strategy.dart';
@@ -14,7 +13,6 @@ import 'squat/squat_strategy.dart';
 // Typedefs and DTW types re-exported so call sites don't need extra imports.
 export 'curl/curl_strategy.dart'
     show RomThresholdsProvider, CurlRepCommitCallback;
-export 'curl/dtw_scorer.dart' show DtwScore;
 export 'push_up/push_up_rom_profile.dart'
     show PushUpRomProfile, PushUpRomThresholds;
 
@@ -118,8 +116,6 @@ class RepCounter {
     CurlRepCommitCallback? onCurlRepCommit,
     CurlViewFlipCallback? onCurlViewFlipped,
     List<Duration> curlHistoricalConcentricDurations = const [],
-    List<double>? curlReferenceRepAngleSeries,
-    bool curlEnableDtwScoring = false,
     FormThresholds curlFormThresholds = FormThresholds.medium,
     SquatVariant squatVariant = SquatVariant.bodyweight,
     bool squatLongFemurLifter = false,
@@ -134,8 +130,6 @@ class RepCounter {
       onCurlRepCommit: onCurlRepCommit,
       onCurlViewFlipped: onCurlViewFlipped,
       curlHistoricalConcentricDurations: curlHistoricalConcentricDurations,
-      curlReferenceRepAngleSeries: curlReferenceRepAngleSeries,
-      curlEnableDtwScoring: curlEnableDtwScoring,
       curlFormThresholds: curlFormThresholds,
       squatVariant: squatVariant,
       squatLongFemurLifter: squatLongFemurLifter,
@@ -151,8 +145,6 @@ class RepCounter {
     CurlRepCommitCallback? onCurlRepCommit,
     CurlViewFlipCallback? onCurlViewFlipped,
     List<Duration> curlHistoricalConcentricDurations = const [],
-    List<double>? curlReferenceRepAngleSeries,
-    bool curlEnableDtwScoring = false,
     FormThresholds curlFormThresholds = FormThresholds.medium,
     SquatVariant squatVariant = SquatVariant.bodyweight,
     bool squatLongFemurLifter = false,
@@ -167,8 +159,6 @@ class RepCounter {
       onRepCommit: onCurlRepCommit,
       onViewFlipped: onCurlViewFlipped,
       historicalConcentricDurations: curlHistoricalConcentricDurations,
-      referenceRepAngleSeries: curlReferenceRepAngleSeries,
-      enableDtwScoring: curlEnableDtwScoring,
       formThresholds: curlFormThresholds,
     ),
     ExerciseType.bicepsCurlSide => CurlStrategy(
@@ -181,8 +171,6 @@ class RepCounter {
       onRepCommit: onCurlRepCommit,
       onViewFlipped: onCurlViewFlipped,
       historicalConcentricDurations: curlHistoricalConcentricDurations,
-      referenceRepAngleSeries: curlReferenceRepAngleSeries,
-      enableDtwScoring: curlEnableDtwScoring,
       formThresholds: curlFormThresholds,
     ),
     // ignore: deprecated_member_use_from_same_package
@@ -193,8 +181,6 @@ class RepCounter {
       onRepCommit: onCurlRepCommit,
       onViewFlipped: onCurlViewFlipped,
       historicalConcentricDurations: curlHistoricalConcentricDurations,
-      referenceRepAngleSeries: curlReferenceRepAngleSeries,
-      enableDtwScoring: curlEnableDtwScoring,
       formThresholds: curlFormThresholds,
     ),
     ExerciseType.squat => SquatStrategy(
@@ -296,14 +282,6 @@ class RepCounter {
     _squatRepQualities.clear();
     _pushUpRepQualities.clear();
     _strategy.onReset();
-  }
-
-  /// Score a candidate angle trace against the curl reference rep.
-  /// Returns null for non-curl exercises or when DTW scoring is disabled.
-  DtwScore? scoreCurlRep(List<double> candidate) {
-    final strategy = _strategy;
-    if (strategy is! CurlStrategy) return null;
-    return strategy.scoreRep(candidate);
   }
 
   /// Per-rep curl form telemetry (lifecycle of the analyzer's max-trackers

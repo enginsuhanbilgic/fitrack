@@ -1,7 +1,7 @@
 /// Injectable bundle of form-error thresholds for biceps curl.
 ///
 /// Replaces direct reads of the 6 `k*` constants in both analyzers so a
-/// single [CurlSensitivity] decision made in `WorkoutViewModel.init()` flows
+/// single [FeedbackSensitivity] decision made in `WorkoutViewModel.init()` flows
 /// down through CurlStrategy → RepCounter without any intermediate layer
 /// needing to know about sensitivity. Pure value class — no Flutter dependency.
 library;
@@ -37,10 +37,10 @@ class FormThresholds {
     elbowRiseThreshold: kElbowRiseThreshold,
   );
 
-  factory FormThresholds.forSensitivity(CurlSensitivity s) {
+  factory FormThresholds.forSensitivity(FeedbackSensitivity s) {
     final m = switch (s) {
-      CurlSensitivity.high => 0.75,
-      CurlSensitivity.medium => 1.0,
+      FeedbackSensitivity.high => 0.75,
+      FeedbackSensitivity.medium => 1.0,
     };
     return FormThresholds(
       swingThreshold: kSwingThreshold * m,

@@ -4,8 +4,32 @@
 // Input: tools/dataset_analysis/data/derived/thresholds_v2.json
 
 /// ═══════════════════════════════════════════════════════════════════
-/// Data-driven default ROM thresholds for the biceps-curl FSM (v2).
+/// SHELVED — Pipeline-derived ROM threshold defaults for the curl FSM.
 /// ═══════════════════════════════════════════════════════════════════
+///
+/// PROJECT CONVENTION (2026-05-13)
+/// ───────────────────────────────
+/// This file represents the **shelved alternative** to FiTrack's canonical
+/// telemetry-derived curl defaults (`curl_rom_defaults.dart`). It is built
+/// by an offline statistical pipeline that consumes recorded video clips
+/// (`tools/dataset_analysis/data/videos/`) and emits per-(view, side)
+/// threshold buckets here.
+///
+/// At runtime this file is NOT consumed unless `kUsePipelineRomDefaults`
+/// is flipped to `true`. It is preserved (a) so the cross-validation
+/// metadata stays visible for future analysis, and (b) so a one-character
+/// flag flip re-enables the pipeline once the recorded dataset is large
+/// and diverse enough to produce stable thresholds.
+///
+/// Why it is shelved: leave-one-clip-out cross-validation on the current
+/// 6-clip / 14-good-rep dataset showed std swings of ±20–28° per gate —
+/// thresholds do not generalize across clips. The shipping path uses
+/// telemetry-derived defaults instead (`CurlRomDefaults`).
+///
+/// Three-tier resolver precedence (see `rom_thresholds.dart`):
+///   1. Telemetry-derived curl defaults (`curl_rom_defaults.dart`)        ★ shipping
+///   2. Pipeline-derived defaults   (this file, gated)                      shelved
+///   3. Legacy hand-tuned constants (`constants.dart`)                      fallback
 ///
 /// METHODOLOGY
 /// ───────────
@@ -32,8 +56,8 @@
 ///   end   P20:  161.67° ± 23.18°
 ///
 ///   High std across folds = thresholds don't generalize across
-///   clips. This is expected for (view, side) heterogeneity and
-///   is the reason thresholds are bucketed rather than pooled.
+///   clips. This is the reason the file is shelved in favor of
+///   telemetry-derived defaults.
 ///
 /// CITATIONS
 /// ─────────
@@ -51,9 +75,8 @@ library;
 
 import 'types.dart';
 
-/// Immutable view-specific threshold tuple returned by
-/// [DefaultRomThresholds.forView]. Shape mirrors the four gates of the
-/// biceps-curl FSM so consumers can destructure without imports.
+/// Immutable view-specific threshold tuple. Shared output type used by both
+/// the telemetry and pipeline tiers so the resolver consumes them identically.
 class CurlRomThresholdSet {
   const CurlRomThresholdSet({
     required this.startAngle,
@@ -68,45 +91,28 @@ class CurlRomThresholdSet {
   final double endAngle;
 }
 
-/// Per-view biceps-curl threshold buckets.
+/// Per-view biceps-curl pipeline-derived threshold buckets.
 ///
-/// Each bucket contains four FSM gates (start, peak, peakExit,
-/// end) plus BCa 95% CIs, effective-n, and ICC for transparency.
-/// Pick the correct bucket at runtime via [DefaultRomThresholds.forView].
-class DefaultRomThresholds {
-  const DefaultRomThresholds._();
+/// Each bucket contains four FSM gates (start, peak, peakExit, end). Not read
+/// at runtime unless [kUsePipelineRomDefaults] is `true`.
+class PipelineRomDefaults {
+  const PipelineRomDefaults._();
 
   /// Hysteresis gap: peakExit = peakAngle + this (mirrors kCurlPeakExitGap).
   static const double peakExitGap = 15.0;
 
-  // ── front (front, both) — n=9 reps, 1 clip(s) ─────────────────
-  /// Data-driven safety margin: 5.00°.
-
-  /// P20 Harrell-Davis – 5.00° safety.
-  /// BCa 95% CI: [172.44, 173.38]  eff_n=9  ICC=0.000  outliers_rejected=0.
-  static const double frontStartAngle = 172.94;
-
-  /// P75 Harrell-Davis + 5.00° safety.
-  /// BCa 95% CI: [19.02, 21.86]  eff_n=8  ICC=0.000  outliers_rejected=1.
-  static const double frontPeakAngle = 19.75;
-
-  /// Derived: peakAngle + peakExitGap.
-  static const double frontPeakExitAngle = 34.75;
-
-  /// FSM-safe: post-rep extension overshoots rep start by a
-  /// sub-degree margin in the raw data, so we set the rep-end
-  /// gate to min(start_p20, end_p20) - margin - 1° to preserve
-  /// the start > end invariant. See derive_thresholds_v2.py.
-  /// BCa 95% CI: [166.44, 167.38]  eff_n=9  ICC=0.000  outliers_rejected=0.
-  static const double frontEndAngle = 171.94;
+  // Front-view constants removed 2026-05 along with front-view analysis.
+  // The `CurlCameraView.front` enum value is retained as a view-detector
+  // fallback sentinel; the `forView` resolver below maps it to side-view
+  // thresholds.
 
   // ── sideLeft (side, left) — bootstrapped from 2026-04-28 --from-frames run ──
   // Derived from frame-signal detection (local-min/max on angle_raw series),
   // n=5 reps after 3.5×MAD rejection. Personal medians: peak=108.4°, start=167.0°.
-  // These are the DEFAULT (medium) sensitivity values from ManualRomOverrides.
-  // ManualRomOverrides.sideLeftDefault takes precedence over these when
-  // kUseManualOverrides=true, so in practice this bucket is only used when
-  // manual overrides are disabled.
+  // These mirror the telemetry-derived defaults (medium) in
+  // `curl_rom_defaults.dart`; the telemetry tier takes precedence when
+  // kUseTelemetryRomDefaults=true, so in practice this bucket is only used
+  // when telemetry defaults are disabled.
   static const double sideLeftStartAngle = 159.0;
   static const double sideLeftPeakAngle = 136.4;
 
@@ -141,11 +147,15 @@ class DefaultRomThresholds {
   static CurlRomThresholdSet forView(CurlCameraView view) {
     switch (view) {
       case CurlCameraView.front:
+        // Front view removed 2026-05. The enum value is retained as a
+        // view-detector fallback sentinel only; if it ever reaches this
+        // resolver, fall back to side-view thresholds (most anatomically
+        // accurate 2D projection).
         return const CurlRomThresholdSet(
-          startAngle: frontStartAngle,
-          peakAngle: frontPeakAngle,
-          peakExitAngle: frontPeakExitAngle,
-          endAngle: frontEndAngle,
+          startAngle: sideRightStartAngle,
+          peakAngle: sideRightPeakAngle,
+          peakExitAngle: sideRightPeakExitAngle,
+          endAngle: sideRightEndAngle,
         );
       case CurlCameraView.sideLeft:
         return const CurlRomThresholdSet(

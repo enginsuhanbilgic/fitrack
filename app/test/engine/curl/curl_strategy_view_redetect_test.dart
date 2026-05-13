@@ -291,26 +291,19 @@ void main() {
     });
   });
 
-  group('CurlStrategy — front-analyzer dormancy gate', () {
-    test('flip to front (legacy path) does NOT swap analyzer when '
-        'kCurlFrontViewEnabled is false', () {
-      // Guards the dormancy gate while front view is hidden.
-      // If kCurlFrontViewEnabled is flipped, this test must be revisited.
-      expect(
-        kCurlFrontViewEnabled,
-        isFalse,
-        reason:
-            'This test guards the dormancy gate while front view is hidden.',
-      );
+  group('CurlStrategy — front-flip behavior (front view removed 2026-05)', () {
+    test('flip to front (legacy sentinel) does NOT swap analyzer', () {
+      // Front view was removed 2026-05; `CurlCameraView.front` is kept
+      // only as a view-detector fallback sentinel. A runtime flip to that
+      // sentinel must NOT touch the side analyzer — it keeps processing
+      // until the user re-frames to a true side view.
       final s = CurlStrategy();
-      // Lock to sideLeft via setup loop, then auto-flip to front.
       for (var i = 0; i < 60; i++) {
         s.updateSetupView(_sideLeftPose());
       }
       final analyzerBeforeFlip = s.formAnalyzer;
       _drive(s, _frontPose(), kViewRedetectHysteresisFrames + 2);
       expect(s.lockedView, CurlCameraView.front);
-      // Same analyzer instance — strategy never swapped it.
       expect(identical(s.formAnalyzer, analyzerBeforeFlip), isTrue);
     });
   });

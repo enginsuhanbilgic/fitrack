@@ -106,16 +106,13 @@ class CalibrationOverlay extends StatelessWidget {
                     detectedView != CurlCameraView.unknown) ...[
                   const SizedBox(height: 8),
                   Text(
-                    !kCurlFrontViewEnabled &&
-                            detectedView == CurlCameraView.front
-                        ? 'Front view isn\'t supported yet — please turn '
+                    detectedView == CurlCameraView.front
+                        ? 'Front view isn\'t supported — please turn '
                               '90° so the camera sees you from the side.'
                         : 'Calibrating ${_viewLabel(detectedView).toLowerCase()} profile. '
                               'Do a ${_otherViewLabel(detectedView)} workout to calibrate that view too.',
                     style: TextStyle(
-                      color:
-                          !kCurlFrontViewEnabled &&
-                              detectedView == CurlCameraView.front
+                      color: detectedView == CurlCameraView.front
                           ? Colors.orangeAccent
                           : Colors.white54,
                       fontSize: 12,
@@ -180,16 +177,13 @@ class CalibrationOverlay extends StatelessWidget {
                       label: !isCurl
                           ? 'Side view'
                           : viewLocked
-                          ? (!kCurlFrontViewEnabled &&
-                                    detectedView == CurlCameraView.front
+                          ? (detectedView == CurlCameraView.front
                                 ? 'Side view needed'
                                 : _viewLabel(detectedView))
                           : 'Detecting view…',
                       colored:
                           !isCurl ||
-                          (viewLocked &&
-                              !(!kCurlFrontViewEnabled &&
-                                  detectedView == CurlCameraView.front)),
+                          (viewLocked && detectedView != CurlCameraView.front),
                     ),
                     if (secondsRemaining != null)
                       _Chip(

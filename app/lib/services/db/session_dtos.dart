@@ -71,7 +71,6 @@ class RepRow {
     this.bucketUpdated,
     this.rejectedOutlier,
     this.concentricMs,
-    this.dtwSimilarity,
     this.squatLeanDeg,
     this.squatKneeShiftRatio,
     this.squatHeelLiftRatio,
@@ -83,6 +82,8 @@ class RepRow {
     this.bicepsElbowDriftSigned,
     this.bicepsShrugRatio,
     this.bicepsElbowRiseRatio,
+    this.bicepsFrontSwingRatio,
+    this.bicepsFrontDepthSwingRatio,
   });
 
   final int repIndex;
@@ -97,10 +98,6 @@ class RepRow {
 
   /// Populated only on WP5.4+. NULL on rows written by WP5.2/WP5.3 builds.
   final int? concentricMs;
-
-  /// DTW similarity score 0.0–1.0 vs reference rep. NULL when scoring was
-  /// disabled or session predates T5.3.
-  final double? dtwSimilarity;
 
   // ── Squat-only per-rep metrics (schema v3) ──
   /// Peak forward-lean angle (degrees, signed positive) for this rep. Computed
@@ -152,6 +149,15 @@ class RepRow {
   /// Peak elbow-rise ratio — schema v6. NULL on non-side-view rows and
   /// pre-v6 rows.
   final double? bicepsElbowRiseRatio;
+
+  // ── Biceps front-view per-rep metrics (schema v7) ──
+  /// Peak torso-swing ratio (`ΔX_shoulder / L_torso`) — front analyzer's
+  /// `_maxSwingRatio`. NULL on non-front-view rows and pre-v7 rows.
+  final double? bicepsFrontSwingRatio;
+
+  /// Peak depth-swing ratio (`|ΔtorsoLen / L_baseline|`) — front analyzer's
+  /// `_maxDepthRatio`. NULL on non-front-view rows and pre-v7 rows.
+  final double? bicepsFrontDepthSwingRatio;
 
   /// Rebuild a [CurlRepRecord] when every curl-specific field is present;
   /// return null for squat/push-up rows (PR3 uses `.whereType<CurlRepRecord>()`
