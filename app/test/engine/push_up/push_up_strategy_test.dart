@@ -219,6 +219,38 @@ void main() {
       out = tickAt(strategy: strategy, state: RepState.descending, angle: 102);
       expect(out.nextState, RepState.bottom);
     });
+
+    test('restricted calibrated ROM still lets a real rep commit', () {
+      final thresholds = PushUpRomProfile.calibrated(
+        topAngle: 150,
+        bottomAngle: 130,
+      ).thresholds;
+      final strategy = PushUpStrategy(thresholds: thresholds);
+
+      tickAt(
+        strategy: strategy,
+        state: RepState.idle,
+        angle: thresholds.startAngle - 1,
+      );
+      tickAt(
+        strategy: strategy,
+        state: RepState.descending,
+        angle: thresholds.bottomAngle - 1,
+      );
+      tickAt(
+        strategy: strategy,
+        state: RepState.bottom,
+        angle: thresholds.bottomAngle + 1,
+      );
+      final out = tickAt(
+        strategy: strategy,
+        state: RepState.ascending,
+        angle: thresholds.endAngle + 1,
+      );
+
+      expect(out.repCommitted, isTrue);
+      expect(out.nextState, RepState.idle);
+    });
   });
 
   group('PushUpStrategy — full rep cycle', () {

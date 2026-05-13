@@ -1382,7 +1382,7 @@ class WorkoutViewModel extends ChangeNotifier {
           isAllowed: (a) =>
               a >= kPushUpCalibrationTopMinAngle &&
               a <= kPushUpCalibrationTopMaxAngle &&
-              bodyDeviation <= kHipSagDeviation,
+              bodyDeviation <= kPushUpCalibrationBodyLineMaxDeviation,
           outOfRangeInstruction:
               'Start at the top with elbows nearly straight and your body in one line.',
           onComplete: (avg) {
@@ -1405,7 +1405,7 @@ class WorkoutViewModel extends ChangeNotifier {
               a >= kPushUpCalibrationBottomMinAngle &&
               a <= kPushUpCalibrationBottomMaxAngle &&
               (top - a) >= kPushUpCalibrationMinExcursion &&
-              bodyDeviation <= kHipSagDeviation,
+              bodyDeviation <= kPushUpCalibrationBodyLineMaxDeviation,
           outOfRangeInstruction:
               'Hold your lowest controlled push-up position with your body straight.',
           onComplete: (avg) {

@@ -65,26 +65,42 @@ class PushUpRomProfile {
   double get romDegrees => topAngle - bottomAngle;
 
   PushUpRomThresholds get thresholds {
+    final rom = romDegrees;
+    final startMargin = _clampDouble(
+      rom * 0.25,
+      kPushUpProfileMinGateGap,
+      kPushUpProfileStartMargin,
+    );
     final start = _clampDouble(
-      topAngle - kPushUpProfileStartMargin,
-      bottomAngle + kPushUpCalibrationMinExcursion,
+      topAngle - startMargin,
+      bottomAngle + (kPushUpProfileMinGateGap * 2),
       kPushUpEndAngle,
     );
-    final bottom = _clampDouble(
-      bottomAngle + kPushUpProfileBottomMargin,
-      kPushUpCalibrationBottomMinAngle,
-      start - kPushUpProfileMinGateGap,
+    final bottomMargin = _clampDouble(
+      rom * 0.20,
+      kPushUpProfileMinGateGap,
+      kPushUpProfileBottomMargin,
     );
+    final bottom = _clampDouble(
+      bottomAngle + bottomMargin,
+      kPushUpCalibrationBottomMinAngle,
+      start - (kPushUpProfileMinGateGap * 2),
+    );
+    final activeRom = start - bottom;
     final shallow = _clampDouble(
-      bottomAngle + kPushUpProfileShallowMargin,
+      bottom + (activeRom * 0.55),
       bottom + kPushUpProfileMinGateGap,
       start - kPushUpProfileMinGateGap,
     );
-    final end = _clampDouble(
-      topAngle - kPushUpProfileEndMargin,
-      start,
-      kPushUpEndAngle,
+    final endMargin = _clampDouble(
+      rom * 0.12,
+      kPushUpProfileMinGateGap,
+      kPushUpProfileEndMargin,
     );
+    final maxEnd = topAngle - kPushUpProfileMinGateGap;
+    final end = maxEnd <= start
+        ? start
+        : _clampDouble(start + endMargin, start, maxEnd);
 
     return PushUpRomThresholds(
       startAngle: start,

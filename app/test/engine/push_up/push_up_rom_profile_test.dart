@@ -10,7 +10,7 @@ void main() {
         throwsStateError,
       );
       expect(
-        () => PushUpRomProfile.calibrated(topAngle: 170, bottomAngle: 145),
+        () => PushUpRomProfile.calibrated(topAngle: 170, bottomAngle: 155),
         throwsStateError,
       );
       expect(
@@ -27,11 +27,29 @@ void main() {
 
       expect(thresholds.startAngle, lessThanOrEqualTo(kPushUpEndAngle));
       expect(thresholds.bottomAngle, closeTo(90, 0.01));
-      expect(thresholds.shallowRepMaxAngle, closeTo(117, 0.01));
+      expect(thresholds.shallowRepMaxAngle, closeTo(127.4, 0.01));
       expect(thresholds.bottomAngle, lessThan(thresholds.shallowRepMaxAngle));
       expect(thresholds.shallowRepMaxAngle, lessThan(thresholds.startAngle));
       expect(thresholds.endAngle, greaterThanOrEqualTo(thresholds.startAngle));
     });
+
+    test(
+      'restricted ROM profile still produces reachable count thresholds',
+      () {
+        final profile = PushUpRomProfile.calibrated(
+          topAngle: 150,
+          bottomAngle: 130,
+        );
+        final thresholds = profile.thresholds;
+
+        expect(thresholds.startAngle, lessThan(150));
+        expect(thresholds.endAngle, lessThan(150));
+        expect(thresholds.bottomAngle, greaterThan(130));
+        expect(thresholds.bottomAngle, lessThan(thresholds.shallowRepMaxAngle));
+        expect(thresholds.shallowRepMaxAngle, lessThan(thresholds.startAngle));
+        expect(thresholds.startAngle, lessThanOrEqualTo(thresholds.endAngle));
+      },
+    );
 
     test('round-trips JSON and rejects schema mismatch', () {
       final profile = PushUpRomProfile.calibrated(

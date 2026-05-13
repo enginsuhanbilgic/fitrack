@@ -309,15 +309,20 @@ const double kPushUpShallowRepMaxAngle = 130.0;
 const double kPushUpEndAngle = 160.0;
 
 /// Push-up calibration accepts only realistic top-lockout elbow angles.
-const double kPushUpCalibrationTopMinAngle = 145.0;
+const double kPushUpCalibrationTopMinAngle = 140.0;
 const double kPushUpCalibrationTopMaxAngle = 180.0;
 
 /// Push-up calibration accepts only realistic bottom-position elbow angles.
 const double kPushUpCalibrationBottomMinAngle = 55.0;
-const double kPushUpCalibrationBottomMaxAngle = 135.0;
+const double kPushUpCalibrationBottomMaxAngle = 145.0;
 
 /// Minimum personal ROM excursion required before saving a push-up profile.
-const double kPushUpCalibrationMinExcursion = 30.0;
+const double kPushUpCalibrationMinExcursion = 20.0;
+
+/// Calibration-time body-line guard. Looser than live hipSag feedback because
+/// ML Kit side-view hip/ankle landmarks are noisy near the floor, but still
+/// rejects collapsed pike/sag positions as a saved ROM baseline.
+const double kPushUpCalibrationBodyLineMaxDeviation = 30.0;
 
 /// Hold duration for each push-up calibration pose.
 const int kPushUpCalibrationHoldSeconds = 3;
