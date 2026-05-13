@@ -9,7 +9,6 @@ import '../../models/pose_result.dart';
 import '../angle_utils.dart';
 import '../form_analyzer_base.dart';
 import 'curl_form_analyzer_extras.dart';
-import 'dtw_scorer.dart';
 
 /// Side-view-only form analyzer for biceps curl.
 ///
@@ -47,16 +46,10 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
   CurlSideFormAnalyzer({
     FormThresholds formThresholds = FormThresholds.medium,
     List<Duration> historicalConcentricDurations = const [],
-    List<double>? referenceRepAngleSeries,
-    bool enableDtwScoring = false,
-    DtwScorer? dtwScorer,
   }) : _formThresholds = formThresholds,
        _historicalConcentricDurations = List<Duration>.unmodifiable(
          historicalConcentricDurations,
-       ),
-       _referenceRepAngleSeries = referenceRepAngleSeries,
-       _enableDtwScoring = enableDtwScoring,
-       _dtwScorer = dtwScorer ?? DtwScorer();
+       );
 
   final FormThresholds _formThresholds;
 
@@ -104,11 +97,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
   // ── Fatigue ──────────────────────────────────────────
   bool _fatigueFired = false;
   final List<Duration> _historicalConcentricDurations;
-
-  // ── DTW ──────────────────────────────────────────────
-  final List<double>? _referenceRepAngleSeries;
-  final bool _enableDtwScoring;
-  final DtwScorer _dtwScorer;
 
   // ── Per-rep extremes for quality scoring ─────────────
   double _maxSwingRatio = 0.0;
@@ -563,12 +551,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     _tempoInconsistentCount = 0;
     _tempoReArmRepsRemaining = 0;
     _lastRepTempoInconsistent = false;
-  }
-
-  @override
-  DtwScore? scoreRep(List<double> candidate) {
-    if (!_enableDtwScoring || _referenceRepAngleSeries == null) return null;
-    return _dtwScorer.score(candidate, _referenceRepAngleSeries);
   }
 
   // ── Public read-only state ───────────────────────────

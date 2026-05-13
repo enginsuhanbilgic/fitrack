@@ -3,10 +3,15 @@ library;
 
 /// Exercises the app supports.
 enum ExerciseType {
+  // ignore: deprecated_member_use_from_same_package
+  @Deprecated(
+    'Front-view biceps curl removed 2026-05. Retained for historical '
+    'context and legacy enum compatibility — never produced by new sessions.',
+  )
   bicepsCurlFront('Biceps Curl (Front)'),
   bicepsCurlSide('Biceps Curl (Side)'),
   // ignore: deprecated_member_use_from_same_package
-  @Deprecated('Use bicepsCurlFront or bicepsCurlSide')
+  @Deprecated('Use bicepsCurlSide')
   bicepsCurl('Biceps Curl'),
   squat('Squat'),
   pushUp('Push-up');
@@ -14,8 +19,9 @@ enum ExerciseType {
   final String label;
   const ExerciseType(this.label);
 
-  /// True for any biceps-curl variant (front or side view).
+  /// True for any biceps-curl variant.
   bool get isCurl =>
+      // ignore: deprecated_member_use_from_same_package
       this == ExerciseType.bicepsCurlFront ||
       this == ExerciseType.bicepsCurlSide ||
       // ignore: deprecated_member_use_from_same_package
@@ -60,6 +66,12 @@ enum FormError {
   excessiveForwardLean, // trunk-from-vertical > kSquatLeanWarnDeg (45° BW / 50° HBBS)
   forwardKneeShift, // (knee_x − ankle_x) / femur_len > kSquatKneeShiftWarnRatio — informational, no TTS
   heelLift, // (foot_index_y − heel_y) / leg_len > kSquatHeelLiftWarnRatio
+  /// Hip-lead — "Stripper Squat" / "Good Morning Squat". During the first
+  /// `kHipLeadAscendingWindowFraction` of ASCENDING, the hip rises faster
+  /// than the shoulder by more than `kHipLeadVelocityRatio`. TTS cue:
+  /// "Lead with your chest". Source: deep-research biomechanical spec
+  /// (2026-05-13); added by Squat Pipeline Overhaul — Part 3.
+  hipLead,
   // Push-up
   hipSag, // shoulder-hip-ankle collinearity deviation > 15°
   pushUpShortRom, // rep completed without elbow reaching bottom threshold
@@ -90,21 +102,41 @@ enum SquatVariant {
 ///
 /// Affects only [ThresholdSource.global] (cold-start) reps. Calibrated and
 /// auto-calibrated paths are personal and are never modified by sensitivity.
-enum CurlSensitivity {
+enum FeedbackSensitivity {
   high('High'),
   medium('Medium');
 
   final String label;
-  const CurlSensitivity(this.label);
+  const FeedbackSensitivity(this.label);
 }
 
-enum SquatSensitivity {
-  high('High'),
+/// How much voice (TTS) coaching a user wants per session.
+///
+/// Independent of [FeedbackSensitivity] (which controls how strict the form
+/// thresholds are). Verbosity controls *how often the voice fires for a form
+/// error that has already been called out earlier in the session*:
+///
+/// * [high] — every fire passes the time-cooldown is spoken. Same as the
+///   pre-2026-05-13 behavior. Use when you want maximum coaching audio.
+/// * [medium] — voice fires at most [kTtsVerbosityMediumCap] times per
+///   error per session. Subsequent occurrences are suppressed at the voice
+///   layer only. The visual highlight, the `errorCounts` map, and the
+///   session-end summary still surface every fire — this control silences
+///   *audio*, not detection. Default.
+/// * [low] — voice fires at most [kTtsVerbosityLowCap] time(s) per error
+///   per session. For users who've internalized the cue and want a quiet
+///   workout.
+///
+/// The cap is **per-error**, not global: hearing "torso swing" three times
+/// does not silence a future "elbow rise" — silencing only tracks the cue
+/// the user has already been told about.
+enum TtsVerbosity {
+  low('Low'),
   medium('Medium'),
-  low('Low');
+  high('High');
 
   final String label;
-  const SquatSensitivity(this.label);
+  const TtsVerbosity(this.label);
 }
 
 /// Top-level session lifecycle state.
@@ -142,7 +174,13 @@ enum ThresholdSource {
 /// Locked once; never re-detected mid-session.
 enum CurlCameraView {
   unknown, // detection not yet complete
-  front, // user faces camera — both shoulders broadly separated on X axis
+  // ignore: deprecated_member_use_from_same_package
+  @Deprecated(
+    'Front-view biceps curl removed 2026-05. Retained as a view-detector '
+    'fallback sentinel — when produced, callers must treat it as "no '
+    'usable view; behave as side-view default".',
+  )
+  front, // legacy sentinel; user faces camera (not analyzed after 2026-05)
   sideLeft, // user's left side faces camera — left shoulder is near-side
   sideRight, // user's right side faces camera — right shoulder is near-side
 }
@@ -230,6 +268,8 @@ class SquatRepMetrics {
     required this.leanDeg,
     required this.kneeShiftRatio,
     required this.heelLiftRatio,
+    this.minKneeAngle,
+    this.maxKneeAngle,
   });
 
   final int repIndex;
@@ -237,6 +277,17 @@ class SquatRepMetrics {
   final double? leanDeg;
   final double? kneeShiftRatio;
   final double? heelLiftRatio;
+
+  /// Minimum knee angle reached during this rep (degrees). Persisted in
+  /// `reps.squat_min_knee_angle` (schema v9). Null for reconstructed
+  /// pre-v9 sessions and for any rep whose analyzer couldn't measure the
+  /// knee throughout the descent.
+  final double? minKneeAngle;
+
+  /// Maximum knee angle observed during this rep (degrees). Typically the
+  /// top-of-rep extension. Persisted in `reps.squat_max_knee_angle`
+  /// (schema v9). Same NULL semantics as [minKneeAngle].
+  final double? maxKneeAngle;
 }
 
 /// Per-rep biceps-curl side-view form metrics. Populated only when the

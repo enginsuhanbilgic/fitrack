@@ -1,45 +1,42 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fitrack/core/constants.dart';
-import 'package:fitrack/core/default_rom_thresholds.dart';
+import 'package:fitrack/core/pipeline_rom_defaults.dart';
 import 'package:fitrack/core/rom_thresholds.dart';
 import 'package:fitrack/core/types.dart';
 
 void main() {
   group('RomThresholds.global with sensitivity', () {
-    // All tests assume kUseManualOverrides = true, kUseDataDrivenThresholds = false
-    // (the shipping flag config). Front and side views hit the manual-override
+    // All tests assume kUseTelemetryRomDefaults = true, kUsePipelineRomDefaults = false
+    // (the shipping flag config). Front and side views hit the telemetry-defaults
     // tier with per-sensitivity constants (strict/default). Unknown view falls
     // to the legacy tier where _applyRomSensitivity applies high deltas.
 
-    test('medium is identical to no-arg call for front view', () {
-      final noArg = RomThresholds.global(CurlCameraView.front);
-      final medium = RomThresholds.global(
-        CurlCameraView.front,
-        CurlSensitivity.medium,
-      );
-      expect(medium.startAngle, noArg.startAngle);
-      expect(medium.peakAngle, noArg.peakAngle);
-      expect(medium.peakExitAngle, noArg.peakExitAngle);
-      expect(medium.endAngle, noArg.endAngle);
-      expect(medium.source, ThresholdSource.global);
-    });
-
-    test('high tightens front view via manual tier: start+5, peak-10', () {
+    // Front-view defaults removed 2026-05; CurlCameraView.front is now a
+    // legacy sentinel that cascades to side-view fallback thresholds via
+    // `PipelineRomDefaults.forView`. RomThresholds.global must still return
+    // a valid (invariant-holding) threshold tuple so the FSM doesn't break
+    // when the view detector's fallback sentinel reaches a curl session.
+    test('front (legacy sentinel) returns invariant-holding thresholds', () {
+      // Front view removed 2026-05. The enum value is retained as a view-
+      // detector fallback sentinel. The resolver cascades:
+      //   CurlRomDefaults.forView(front) → null (sentinel, no telemetry)
+      //   PipelineRomDefaults.forView(front) → side-right pipeline values
+      // Either way, the FSM must still receive a valid threshold tuple.
+      // ignore: deprecated_member_use
       final t = RomThresholds.global(
+        // ignore: deprecated_member_use
         CurlCameraView.front,
-        CurlSensitivity.high,
+        FeedbackSensitivity.medium,
       );
-      // frontStrict constants from manual_rom_overrides.dart
-      expect(t.startAngle, closeTo(153.0, 0.01));
-      expect(t.peakAngle, closeTo(25.0, 0.01));
-      expect(t.peakExitAngle, closeTo(40.0, 0.01)); // peak + 15
-      expect(t.endAngle, closeTo(128.0, 0.01));
+      expect(t.startAngle, greaterThan(t.endAngle));
+      expect(t.endAngle, greaterThan(t.peakExitAngle));
+      expect(t.peakExitAngle, greaterThan(t.peakAngle));
       expect(t.source, ThresholdSource.global);
     });
 
     test('FSM invariant holds for all views x all sensitivities', () {
       for (final view in CurlCameraView.values) {
-        for (final s in CurlSensitivity.values) {
+        for (final s in FeedbackSensitivity.values) {
           final t = RomThresholds.global(view, s);
           expect(
             t.startAngle > t.endAngle,
@@ -63,11 +60,11 @@ void main() {
     test('high on legacy-tier view (unknown): tighter start, lower peak', () {
       final med = RomThresholds.global(
         CurlCameraView.unknown,
-        CurlSensitivity.medium,
+        FeedbackSensitivity.medium,
       );
       final high = RomThresholds.global(
         CurlCameraView.unknown,
-        CurlSensitivity.high,
+        FeedbackSensitivity.high,
       );
 
       expect(high.startAngle, closeTo(med.startAngle + 5.0, 0.01));
@@ -76,7 +73,7 @@ void main() {
 
     test('peakExitAngle always equals peakAngle + kCurlPeakExitGap', () {
       for (final view in CurlCameraView.values) {
-        for (final s in CurlSensitivity.values) {
+        for (final s in FeedbackSensitivity.values) {
           final t = RomThresholds.global(view, s);
           expect(
             t.peakExitAngle,
@@ -88,14 +85,14 @@ void main() {
     });
 
     test(
-      'high uses sideLeft manual override (derived 2026-04-28 Strict bucket)',
+      'high uses sideLeft telemetry default (derived 2026-04-28 Strict bucket)',
       () {
-        // ManualRomOverrides.sideLeftStrict is now populated — the override tier
+        // CurlRomDefaults.sideLeftStrict is now populated — the telemetry tier
         // intercepts before any legacy delta is applied, so values come directly
         // from the derived constants, not from med ± fixed deltas.
         final high = RomThresholds.global(
           CurlCameraView.sideLeft,
-          CurlSensitivity.high,
+          FeedbackSensitivity.high,
         );
         expect(high.startAngle, closeTo(162.0, 0.01));
         expect(high.peakAngle, closeTo(128.4, 0.01));
@@ -106,11 +103,11 @@ void main() {
     );
 
     test(
-      'high uses sideRight manual override (bilateral mirror of sideLeft)',
+      'high uses sideRight telemetry default (bilateral mirror of sideLeft)',
       () {
         final high = RomThresholds.global(
           CurlCameraView.sideRight,
-          CurlSensitivity.high,
+          FeedbackSensitivity.high,
         );
         expect(high.startAngle, closeTo(162.0, 0.01));
         expect(high.peakAngle, closeTo(128.4, 0.01));
@@ -121,7 +118,7 @@ void main() {
       final noArg = RomThresholds.global(CurlCameraView.sideLeft);
       final medium = RomThresholds.global(
         CurlCameraView.sideLeft,
-        CurlSensitivity.medium,
+        FeedbackSensitivity.medium,
       );
       expect(medium.startAngle, noArg.startAngle);
       expect(medium.peakAngle, noArg.peakAngle);
@@ -131,20 +128,20 @@ void main() {
 
     test('sideRight constants are aliases of sideLeft — same value', () {
       expect(
-        DefaultRomThresholds.sideRightStartAngle,
-        DefaultRomThresholds.sideLeftStartAngle,
+        PipelineRomDefaults.sideRightStartAngle,
+        PipelineRomDefaults.sideLeftStartAngle,
       );
       expect(
-        DefaultRomThresholds.sideRightPeakAngle,
-        DefaultRomThresholds.sideLeftPeakAngle,
+        PipelineRomDefaults.sideRightPeakAngle,
+        PipelineRomDefaults.sideLeftPeakAngle,
       );
       expect(
-        DefaultRomThresholds.sideRightPeakExitAngle,
-        DefaultRomThresholds.sideLeftPeakExitAngle,
+        PipelineRomDefaults.sideRightPeakExitAngle,
+        PipelineRomDefaults.sideLeftPeakExitAngle,
       );
       expect(
-        DefaultRomThresholds.sideRightEndAngle,
-        DefaultRomThresholds.sideLeftEndAngle,
+        PipelineRomDefaults.sideRightEndAngle,
+        PipelineRomDefaults.sideLeftEndAngle,
       );
     });
   });

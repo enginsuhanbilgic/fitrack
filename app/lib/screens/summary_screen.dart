@@ -1,9 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import '../core/constants.dart';
+import '../core/rom_thresholds.dart';
 import '../core/theme.dart';
 import '../core/types.dart';
+import '../core/squat_rom_defaults.dart';
+import '../engine/curl/curl_rom_profile.dart';
+import '../engine/form_auditor.dart';
+import '../engine/push_up/push_up_rom_profile.dart';
+import '../engine/squat/squat_rom_profile.dart';
 import '../services/db/session_dtos.dart';
+import '../view_models/session_summary_input.dart';
+import '../view_models/session_summary_view_model.dart';
+import '../widgets/summary/summary_actions.dart';
+import '../widgets/summary/summary_form_issues_card.dart';
+import '../widgets/summary/summary_hero.dart';
+import '../widgets/summary/summary_insights_card.dart';
+import '../widgets/summary/summary_stats_grid.dart';
+import '../widgets/summary/summary_variant_chips.dart';
 
 class SummaryScreen extends StatefulWidget {
   final ExerciseType exercise;
@@ -31,8 +45,8 @@ class SummaryScreen extends StatefulWidget {
   /// the caller side — summary just renders what it gets.
   final List<CurlProfileBucketSummary> curlBucketSummaries;
 
-  /// Per-rep DTW similarity scores (0.0–1.0). Empty or all-null = card hidden.
-  final List<double?> dtwSimilarities;
+  /// _Removed 2026-05-13:_ DTW reference rep scoring was replaced by the
+  /// Strict-Mode Recap card. The Form Match Card no longer exists.
 
   /// Squat variant the session ran with. Used in the squat header chip.
   final SquatVariant squatVariant;
@@ -51,6 +65,36 @@ class SummaryScreen extends StatefulWidget {
   /// Empty for front curl, squat, push-up, and reconstructed sessions
   /// predating schema v5.
   final List<BicepsSideRepMetrics> bicepsSideRepMetrics;
+
+  /// Personal curl ROM profile in effect — drives the Form Audit's Tier-1
+  /// (per-bucket personalized) ROM bar. Null when the user has no curl
+  /// calibration data or the session isn't a curl session.
+  final CurlRomProfile? curlProfile;
+
+  /// Personal push-up ROM profile in effect — drives the Form Audit's
+  /// Tier-1 personalized push-up depth / start gates. Null when uncalibrated.
+  final PushUpRomProfile? pushUpProfile;
+
+  /// Personal squat ROM profile in effect — drives the Form Audit's Tier-1
+  /// per-rep depth gate (real `minKneeAngle` comparison, replacing the
+  /// pre-Part-4 `quality < 0.85` proxy). Null when the user has no squat
+  /// calibration data or this isn't a squat session. Reconstructed history
+  /// sessions also pass null — live bucket state isn't persisted.
+  final SquatRomProfile? squatProfile;
+
+  /// Auto-calibrator's session-end thresholds, if it accumulated viable
+  /// state. Form Audit's Tier-2 fallback for curl when no calibrated
+  /// `(side, view)` bucket exists.
+  final RomThresholds? autoCalSnapshot;
+
+  /// Squat auto-calibrator's session-end thresholds — Tier-2 fallback for
+  /// the squat audit. Null when fewer than 2 viable reps were observed
+  /// this session or when this isn't a squat session.
+  final SquatRomThresholdSet? squatAutoCalSnapshot;
+
+  /// Session sensitivity — drives form-error thresholds in the audit and
+  /// the cold-start fallback ROM gates.
+  final FeedbackSensitivity feedbackSensitivity;
 
   /// Per-rep concentric duration in milliseconds. NULL elements are reps
   /// with no captured tempo (rare — abandoned reps; or non-curl live
@@ -81,11 +125,16 @@ class SummaryScreen extends StatefulWidget {
     this.errorCounts = const {},
     this.curlRepRecords = const [],
     this.curlBucketSummaries = const [],
-    this.dtwSimilarities = const [],
     this.squatVariant = SquatVariant.bodyweight,
     this.squatLongFemurLifter = false,
     this.squatRepMetrics = const [],
     this.bicepsSideRepMetrics = const [],
+    this.curlProfile,
+    this.pushUpProfile,
+    this.squatProfile,
+    this.autoCalSnapshot,
+    this.squatAutoCalSnapshot,
+    this.feedbackSensitivity = FeedbackSensitivity.medium,
     this.repConcentricMs = const [],
     this.repDepthPercents = const [],
   });
@@ -101,16 +150,65 @@ class SummaryScreen extends StatefulWidget {
   /// everything except the per-rep ratio strip.
   factory SummaryScreen.fromSession(SessionDetail d, {Key? key}) {
     final s = d.summary;
-    final curlRecords = d.reps
-        .map((r) => r.toCurlRepRecord())
-        .whereType<CurlRepRecord>()
-        .toList(growable: false);
+    // Curl rep records: only curl rows produce a non-null CurlRepRecord
+    // (their `side`/`view`/`source` are NULL on squat and push-up rows, so
+    // `toCurlRepRecord` returns null and the whereType filters them out).
+    // Push-up reps are reconstructed separately below via a minimal-angle
+    // `CurlRepRecord` so the push-up audit path can read minAngle/maxAngle.
+    final isPushUp = s.exercise == ExerciseType.pushUp;
+    final curlRecords = isPushUp
+        ? _reconstructPushUpRepRecords(d)
+        : d.reps
+              .map((r) => r.toCurlRepRecord())
+              .whereType<CurlRepRecord>()
+              .toList(growable: false);
     final qualities = d.reps
         .map((r) => r.quality ?? 0.0)
         .toList(growable: false);
     final concentricMs = d.reps
         .map((r) => r.concentricMs)
         .toList(growable: false);
+    // Squat per-rep metrics: reconstruct from the persisted squat columns
+    // (schema v3 onward for lean/knee-shift/heel-lift, v9 for the
+    // min/maxKneeAngle pair). Pre-v3 rows produce an empty list, which the
+    // squat audit downgrades to a `notApplicable` recap with a clear reason.
+    final isSquat = s.exercise == ExerciseType.squat;
+    final squatMetrics = isSquat
+        ? d.reps
+              .where(
+                (r) =>
+                    r.squatLeanDeg != null ||
+                    r.squatKneeShiftRatio != null ||
+                    r.squatHeelLiftRatio != null ||
+                    r.squatMinKneeAngle != null ||
+                    r.squatMaxKneeAngle != null,
+              )
+              .map(
+                (r) => SquatRepMetrics(
+                  repIndex: r.repIndex,
+                  quality: r.quality,
+                  leanDeg: r.squatLeanDeg,
+                  kneeShiftRatio: r.squatKneeShiftRatio,
+                  heelLiftRatio: r.squatHeelLiftRatio,
+                  minKneeAngle: r.squatMinKneeAngle,
+                  maxKneeAngle: r.squatMaxKneeAngle,
+                ),
+              )
+              .toList(growable: false)
+        : const <SquatRepMetrics>[];
+    // Squat variant: persisted per rep (`squat_variant` column). All rows
+    // in a session share the same value, so the first non-null one wins.
+    // Pre-v3 rows have null → defaults to bodyweight, which is the same
+    // fallback the constructor uses.
+    final squatVariant = isSquat
+        ? d.reps
+                  .firstWhere(
+                    (r) => r.squatVariant != null,
+                    orElse: () => const RepRow(repIndex: 0),
+                  )
+                  .squatVariant ??
+              SquatVariant.bodyweight
+        : SquatVariant.bodyweight;
     // Reconstructed depth: normalize per-rep ROM to the session's max ROM.
     // The calibrated-bucket path used live isn't available here (bucket
     // state isn't persisted), so session-best is the honest fallback —
@@ -160,7 +258,6 @@ class SummaryScreen extends StatefulWidget {
           ),
         )
         .toList(growable: false);
-
     return SummaryScreen(
       key: key,
       exercise: s.exercise,
@@ -176,16 +273,45 @@ class SummaryScreen extends StatefulWidget {
       errorsTriggered: d.formErrors.keys.toSet(),
       errorCounts: d.formErrors,
       curlRepRecords: curlRecords,
-      dtwSimilarities: d.reps
-          .map((r) => r.dtwSimilarity)
-          .toList(growable: false),
       repConcentricMs: concentricMs,
       repDepthPercents: depthPercents,
       bicepsSideRepMetrics: bicepsSideMetrics,
+      squatRepMetrics: squatMetrics,
+      squatVariant: squatVariant,
       // Bucket summaries are live-only state; no persisted source exists.
-      // Squat per-rep ratios are also live-only; reconstructed sessions
-      // pass an empty list and the per-rep strip collapses gracefully.
+      // `squatLongFemurLifter`, `squatProfile`, `squatAutoCalSnapshot`,
+      // `curlProfile`, `autoCalSnapshot`, `pushUpProfile`, and
+      // `feedbackSensitivity` are also live-only or live-loaded; reconstructed
+      // sessions fall back to the constructor defaults and the audit's Tier 3
+      // cold-start grading path.
     );
+  }
+
+  /// Build minimal-angle [CurlRepRecord]s for a reconstructed push-up
+  /// session. The push-up audit (`FormAuditor.auditPushUp`) only inspects
+  /// `minAngle` / `maxAngle` — `side` / `view` / `source` are not
+  /// meaningful for push-up, so sentinel values are used. Rows without
+  /// both angles are skipped (the audit can't grade them).
+  static List<CurlRepRecord> _reconstructPushUpRepRecords(SessionDetail d) {
+    final out = <CurlRepRecord>[];
+    for (final r in d.reps) {
+      final mn = r.minAngle;
+      final mx = r.maxAngle;
+      if (mn == null || mx == null) continue;
+      out.add(
+        CurlRepRecord(
+          repIndex: r.repIndex,
+          side: ProfileSide.right,
+          view: CurlCameraView.unknown,
+          minAngle: mn,
+          maxAngle: mx,
+          source: ThresholdSource.global,
+          bucketUpdated: false,
+          rejectedOutlier: false,
+        ),
+      );
+    }
+    return List.unmodifiable(out);
   }
 
   @override
@@ -194,6 +320,15 @@ class SummaryScreen extends StatefulWidget {
 
 class _SummaryScreenState extends State<SummaryScreen> {
   bool _detailsExpanded = false;
+
+  /// "Accuracy by rep" header collapse state. Collapsed by default so the
+  /// form-audit card opens lighter; tapping the header expands the list.
+  bool _accuracyByRepExpanded = false;
+
+  /// Index (0-based) of the currently-expanded per-rep row inside the
+  /// accuracy-by-rep list, or null when no row is expanded. Single-expand
+  /// behavior keeps the card compact even on 20-rep sessions.
+  int? _expandedRepIndex;
 
   ExerciseType get exercise => widget.exercise;
   int get totalReps => widget.totalReps;
@@ -210,15 +345,8 @@ class _SummaryScreenState extends State<SummaryScreen> {
   List<CurlRepRecord> get curlRepRecords => widget.curlRepRecords;
   List<CurlProfileBucketSummary> get curlBucketSummaries =>
       widget.curlBucketSummaries;
-  List<double?> get dtwSimilarities => widget.dtwSimilarities;
   List<int?> get repConcentricMs => widget.repConcentricMs;
   List<double?> get repDepthPercents => widget.repDepthPercents;
-
-  String _formatDuration(Duration d) {
-    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
-  }
 
   Color _qualityColor(double? q) {
     if (q == null) return const Color(0xFF9E9E9E);
@@ -227,142 +355,173 @@ class _SummaryScreenState extends State<SummaryScreen> {
     return const Color(0xFFFF5252); // red
   }
 
-  String _gradeLabel(double? q) {
-    if (q == null) return '—';
-    if (q >= 0.90) return 'A';
-    if (q >= 0.80) return 'B';
-    if (q >= 0.70) return 'C';
-    if (q >= 0.60) return 'D';
-    return 'F';
+  /// Tier color for a 0..1 score, matching the form-audit pass-rate ramp:
+  /// ≥0.80 → accent (green), ≥0.50 → cyan, else red. Used by the dual-stat
+  /// header so the Form Accuracy and Clean Reps tiles can independently pick
+  /// their tier instead of inheriting the pass-rate color.
+  Color _tierColor(double v, FiTrackColors ft) {
+    if (v >= 0.80) return ft.accent;
+    if (v >= 0.50) return ft.cyan;
+    return FiTrackTheme.red;
   }
 
-  String _qualitySubtitle(double? q) {
-    if (q == null) {
-      // Distinguish "no reps committed" (the common case — bad framing,
-      // ML Kit lost landmarks, FSM never armed) from "reps committed
-      // but no quality computed" (rare — diagnostic mode short-circuits
-      // before _curlRepRecords populates). The first is actionable for
-      // the user; the second is an internal-state edge case.
-      if (totalReps == 0) {
-        return 'No reps were counted — see the coaching tip below.';
+  /// Per-rep detail panel for the expanded "Accuracy by rep" row. Pulls from
+  /// whichever exercise's per-rep telemetry is present:
+  ///   • [curlRepRecords]      → ROM (min/max angle), side label, rejected flag
+  ///   • [widget.repConcentricMs] → concentric tempo in seconds
+  ///   • [widget.bicepsSideRepMetrics] → curl-side lean / shoulder-drift /
+  ///     elbow-drift / back-lean peaks
+  ///   • [widget.squatRepMetrics] → squat lean / knee-shift / heel-lift
+  ///
+  /// Rows are emitted only when the corresponding field is present, so a
+  /// front-curl rep shows fewer rows than a side-curl rep and a push-up rep
+  /// shows just the basics. Returns null when nothing extra is available.
+  Widget? _buildRepDetails(BuildContext context, int repIndex) {
+    final theme = Theme.of(context);
+    final rows = <Widget>[];
+
+    // ROM — curl + push-up both reuse CurlRepRecord, so this works for both.
+    if (repIndex < curlRepRecords.length) {
+      final r = curlRepRecords[repIndex];
+      rows.add(
+        _RepDetailRow(
+          label: 'ROM',
+          value:
+              '${r.maxAngle.toStringAsFixed(0)}° → '
+              '${r.minAngle.toStringAsFixed(0)}°  '
+              '(Δ ${r.romDegrees.toStringAsFixed(0)}°)',
+        ),
+      );
+      if (exercise.isCurl) {
+        rows.add(
+          _RepDetailRow(
+            label: 'Arm',
+            value: r.side == ProfileSide.left ? 'Left' : 'Right',
+          ),
+        );
       }
-      return 'No quality data captured for this session.';
-    }
-    if (q >= 0.85) return 'Excellent control. Maintain this pace and range.';
-    if (q >= 0.70) return 'Good effort. Minor form deductions noted.';
-    if (q >= 0.60) return 'Room for improvement. Review the insights below.';
-    return 'Several form issues detected. Focus on the coaching tips.';
-  }
-
-  double? _avgSideMetric(double? Function(BicepsSideRepMetrics) pick) {
-    final vals = widget.bicepsSideRepMetrics
-        .map(pick)
-        .whereType<double>()
-        .toList();
-    if (vals.isEmpty) return null;
-    return vals.reduce((a, b) => a + b) / vals.length;
-  }
-
-  List<String> _buildInsights() {
-    final insights = <String>[];
-
-    // No-rep sessions get a single clear message and skip every other
-    // template. Fixes the prior contradiction where a 0-rep session
-    // showed "Form Issues Detected" + "Great session!" simultaneously
-    // because the cheerful template fired on `errorsTriggered.isEmpty`
-    // without checking whether any rep actually counted. Frame-level
-    // errors can fire on partial rep attempts that never committed,
-    // and `errorsTriggered` accumulates them — so a 0-rep session can
-    // still have non-empty errors.
-    if (totalReps == 0) {
-      insights.add(
-        'No reps were counted. Make sure your full arm — shoulder, '
-        'elbow, and wrist — stays in frame throughout the curl. Try '
-        'stepping back from the camera or rotating to landscape.',
-      );
-      return insights;
-    }
-
-    if (eccentricTooFastCount > totalReps * 0.5) {
-      insights.add(
-        'You rushed the lowering phase on most reps. Try a 2-second count on the way down.',
-      );
-    } else if (eccentricTooFastCount > 0) {
-      insights.add(
-        'You rushed the lowering on $eccentricTooFastCount rep(s). Slow, controlled lowering builds more muscle.',
-      );
-    }
-
-    if (fatigueDetected) {
-      insights.add(
-        'Fatigue detected mid-session. Consider shorter sets with full recovery between them.',
-      );
-    }
-
-    if (asymmetryDetected) {
-      insights.add(
-        'Your arms showed uneven range. Focus on matching both sides for balanced development.',
-      );
-    }
-
-    // Side-view specific coaching — only fires when metrics were recorded.
-    // Camera-frame → user-frame flip: sideLeft = camera's left = user's RIGHT
-    // arm (front-camera mirroring). Falls back to generic "arm" when unknown.
-    final armLabel = switch (detectedView) {
-      CurlCameraView.sideLeft => 'right arm',
-      CurlCameraView.sideRight => 'left arm',
-      _ => 'arm',
-    };
-
-    final avgElbowRise = _avgSideMetric((r) => r.elbowRiseRatio);
-    if (avgElbowRise != null && avgElbowRise > kElbowRiseThreshold) {
-      insights.add(
-        'Your elbow rose on your $armLabel during the curl. Keep it pinned '
-        'to your side — lifting it shifts load away from the bicep.',
-      );
-    }
-
-    final avgShoulderArc = _avgSideMetric((r) => r.shoulderDriftRatio);
-    if (avgShoulderArc != null && avgShoulderArc > kSwingThreshold) {
-      insights.add(
-        'You swung your $armLabel shoulder into the lift. Start each rep '
-        'with the elbow still and use only forearm flexion.',
-      );
-    }
-
-    final avgBackLean = _avgSideMetric((r) => r.backLeanDeg);
-    if (avgBackLean != null && avgBackLean > kBackLeanThresholdDeg) {
-      insights.add(
-        'You leaned back to complete the $armLabel curl. Reduce the weight '
-        'and keep your torso upright throughout.',
-      );
-    }
-
-    final avgShrug = _avgSideMetric((r) => r.shrugRatio);
-    if (avgShrug != null && avgShrug > kShrugThreshold) {
-      insights.add(
-        'Your $armLabel shoulder shrugged on most reps. Depress your '
-        'shoulder blade before curling to isolate the bicep.',
-      );
-    }
-
-    if (errorsTriggered.isEmpty ||
-        averageQuality != null && averageQuality! >= 0.85) {
-      insights.add('Great session! Keep this tempo and range of motion.');
-    }
-
-    if (insights.isEmpty) {
-      if (averageQuality != null && averageQuality! >= 0.85) {
-        insights.add('Great session! Keep this tempo and range of motion.');
-      } else {
-        insights.add(
-          'Review the form issues above and focus on one correction at a time.',
+      if (r.rejectedOutlier) {
+        rows.add(
+          _RepDetailRow(
+            label: 'Status',
+            value: 'Rejected outlier',
+            valueColor: const Color(0xFFFFB300),
+          ),
         );
       }
     }
 
-    return insights;
+    // Tempo
+    if (repIndex < widget.repConcentricMs.length) {
+      final ms = widget.repConcentricMs[repIndex];
+      if (ms != null) {
+        rows.add(
+          _RepDetailRow(
+            label: 'Tempo',
+            value: '${(ms / 1000).toStringAsFixed(1)} s concentric',
+          ),
+        );
+      }
+    }
+
+    // Depth (live curl + squat path populates this; reconstructed sessions
+    // pad with nulls).
+    if (repIndex < widget.repDepthPercents.length) {
+      final d = widget.repDepthPercents[repIndex];
+      if (d != null) {
+        rows.add(
+          _RepDetailRow(
+            label: 'Depth',
+            value: '${(d * 100).round()}% of reference',
+          ),
+        );
+      }
+    }
+
+    // Curl-side peaks
+    if (repIndex < widget.bicepsSideRepMetrics.length) {
+      final m = widget.bicepsSideRepMetrics[repIndex];
+      if (m.leanDeg != null) {
+        rows.add(
+          _RepDetailRow(
+            label: 'Trunk lean',
+            value: '${m.leanDeg!.toStringAsFixed(1)}°',
+          ),
+        );
+      }
+      if (m.shoulderDriftRatio != null) {
+        rows.add(
+          _RepDetailRow(
+            label: 'Shoulder arc',
+            value: m.shoulderDriftRatio!.toStringAsFixed(3),
+          ),
+        );
+      }
+      if (m.elbowDriftRatio != null) {
+        rows.add(
+          _RepDetailRow(
+            label: 'Elbow drift',
+            value: m.elbowDriftRatio!.toStringAsFixed(3),
+          ),
+        );
+      }
+      if (m.backLeanDeg != null) {
+        rows.add(
+          _RepDetailRow(
+            label: 'Back lean',
+            value: '${m.backLeanDeg!.toStringAsFixed(1)}°',
+          ),
+        );
+      }
+    }
+
+    // Squat peaks. All three fields are nullable on SquatRepMetrics — emit
+    // a row only when the engine actually captured the value (pre-schema-v3
+    // sessions, or reps with missing landmarks, write null).
+    if (repIndex < widget.squatRepMetrics.length) {
+      final m = widget.squatRepMetrics[repIndex];
+      if (m.leanDeg != null) {
+        rows.add(
+          _RepDetailRow(
+            label: 'Trunk lean',
+            value: '${m.leanDeg!.toStringAsFixed(1)}°',
+          ),
+        );
+      }
+      if (m.kneeShiftRatio != null) {
+        rows.add(
+          _RepDetailRow(
+            label: 'Knee shift',
+            value: m.kneeShiftRatio!.toStringAsFixed(3),
+          ),
+        );
+      }
+      if (m.heelLiftRatio != null) {
+        rows.add(
+          _RepDetailRow(
+            label: 'Heel lift',
+            value: m.heelLiftRatio!.toStringAsFixed(3),
+          ),
+        );
+      }
+    }
+
+    if (rows.isEmpty) {
+      return Text(
+        'No per-rep details captured.',
+        style: TextStyle(
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+          fontSize: 11,
+          fontStyle: FontStyle.italic,
+        ),
+      );
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
   }
+
+  // _buildInsights, _avgSideMetric, _formatDuration removed 2026-05-13 —
+  // insights logic moved to [SessionSummaryViewModel] in `view_models/`,
+  // duration formatting moved to [SummaryStatsGrid] in `widgets/summary/`.
 
   /// Human-readable label for the camera view.
   ///
@@ -379,31 +538,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
     CurlCameraView.sideLeft => 'Side view · Right',
     CurlCameraView.sideRight => 'Side view · Left',
     CurlCameraView.unknown => 'Unknown',
-  };
-
-  IconData _errorIcon(FormError err) => switch (err) {
-    FormError.torsoSwing => Icons.swap_horiz,
-    FormError.depthSwing => Icons.zoom_in_map,
-    FormError.shoulderArc => Icons.sync,
-    FormError.elbowDrift => Icons.open_with,
-    FormError.elbowRise => Icons.arrow_upward_rounded,
-    FormError.shoulderShrug => Icons.upload_rounded,
-    FormError.backLean => Icons.undo,
-    FormError.shortRomStart => Icons.unfold_more,
-    FormError.shortRomPeak => Icons.compress,
-    FormError.eccentricTooFast => Icons.fast_forward_rounded,
-    FormError.concentricTooFast => Icons.rocket_launch,
-    FormError.tempoInconsistent => Icons.shuffle,
-    FormError.asymmetryLeftLag => Icons.balance,
-    FormError.asymmetryRightLag => Icons.balance,
-    FormError.fatigue => Icons.battery_alert,
-    FormError.squatDepth => Icons.unfold_less,
-    FormError.excessiveForwardLean => Icons.architecture,
-    FormError.heelLift => Icons.vertical_align_bottom,
-    FormError.forwardKneeShift => Icons.compare_arrows_rounded,
-    FormError.hipSag => Icons.straighten_rounded,
-    FormError.pushUpShortRom => Icons.unfold_less,
-    _ => Icons.error_outline,
   };
 
   String _errorLabel(FormError err) => switch (err) {
@@ -429,6 +563,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
     FormError.hipSag => 'Body Line Lost',
     FormError.pushUpShortRom => 'Shallow Push-up',
     FormError.trunkTibia => 'Trunk-Tibia (legacy)',
+    FormError.hipLead => 'Hip Lead',
   };
 
   /// 5-tier knee-shift bucket label (plan flow-decision plan-time #1).
@@ -467,156 +602,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
     ThresholdSource.global => const Color(0xFF9E9E9E),
   };
 
-  Widget _buildRepAccuracyCard(BuildContext context) {
-    final theme = Theme.of(context);
-    final ft = FiTrackColors.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'ACCURACY BY REP',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
-                ),
-              ),
-              Text(
-                'Set $totalSets · ${exercise.label}',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: ft.accent,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          // Bar chart
-          SizedBox(
-            height: 80,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: List.generate(repQualities.length, (i) {
-                final v = repQualities[i];
-                final dtw = i < dtwSimilarities.length
-                    ? dtwSimilarities[i]
-                    : null;
-                final Color barColor = v >= 0.95
-                    ? ft.accent
-                    : v >= 0.80
-                    ? ft.cyan
-                    : FiTrackTheme.red;
-                return Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      // DTW badge above bar — only shown when score exists.
-                      if (dtw != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: Text(
-                            '${(dtw * 100).round()}',
-                            style: TextStyle(
-                              fontSize: 7,
-                              fontWeight: FontWeight.w700,
-                              color: dtw >= 0.80
-                                  ? ft.accent
-                                  : dtw >= 0.60
-                                  ? Colors.orangeAccent
-                                  : FiTrackTheme.red,
-                            ),
-                          ),
-                        ),
-                      Flexible(
-                        child: FractionallySizedBox(
-                          heightFactor: v.clamp(0.0, 1.0),
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 2),
-                            decoration: BoxDecoration(
-                              color: barColor,
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${i + 1}',
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          color: theme.colorScheme.onSurface.withValues(
-                            alpha: 0.54,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Footer stats row
-          Divider(color: theme.colorScheme.outlineVariant, height: 1),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _RepStat(
-                label: 'Best',
-                value:
-                    '${(repQualities.reduce((a, b) => a > b ? a : b) * 100).round()}%',
-                color: ft.accent,
-              ),
-              _RepStat(
-                label: 'Avg',
-                value:
-                    '${((repQualities.reduce((a, b) => a + b) / repQualities.length) * 100).round()}%',
-              ),
-              _RepStat(label: 'Tempo', value: _avgTempoLabel()),
-              _RepStat(label: 'Depth', value: _avgDepthLabel(), color: ft.cyan),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Average concentric duration across reps that captured one. Returns
-  /// `'—'` when no rep has a tempo (cold-start non-curl live session, or
-  /// pre-WP5.4 reconstructed sessions where `concentricMs` was NULL).
-  String _avgTempoLabel() {
-    final tempos = repConcentricMs.whereType<int>().where((ms) => ms > 0);
-    if (tempos.isEmpty) return '—';
-    final avgMs = tempos.reduce((a, b) => a + b) / tempos.length;
-    return '${(avgMs / 1000).toStringAsFixed(1)}s';
-  }
-
-  /// Average per-rep depth as a percentage. `'—'` when no rep had usable
-  /// angles to compute depth (e.g. squat live sessions today, or all
-  /// reconstructed reps with NULL min/max).
-  String _avgDepthLabel() {
-    final depths = repDepthPercents.whereType<double>();
-    if (depths.isEmpty) return '—';
-    final avg = depths.reduce((a, b) => a + b) / depths.length;
-    return '${(avg * 100).round()}%';
-  }
-
   void _showShareSheet() {
     final theme = Theme.of(context);
     showModalBottomSheet<void>(
@@ -634,23 +619,32 @@ class _SummaryScreenState extends State<SummaryScreen> {
     );
   }
 
-  Widget _buildFormMatchCard(BuildContext context) {
+  /// Form Audit card. Replaces the deleted DTW Form Match Card.
+  /// Re-grades the session's reps using **Path B-permissive tier priority**
+  /// (2026-05-13): each rep is graded against the most personalized ROM bar
+  /// available — calibrated profile bucket → auto-cal snapshot → cold-start
+  /// with the user's sensitivity. Form-error thresholds use the user's
+  /// session sensitivity (not always-high). See [FormAuditor.auditCurl]
+  /// doc-block for the full priority chain rationale.
+  ///
+  /// Default-on for all exercises (curl / squat / push-up). Coverage varies
+  /// by exercise — see [FormAuditor] doc-block for what each path grades.
+  /// Renders the Form Audit card from a pre-built [FormAudit]. The audit
+  /// is constructed once by [SessionSummaryViewModel] and reused here — do
+  /// NOT re-run `FormAuditor` inside this method.
+  Widget _buildFormAuditCard(BuildContext context, FormAudit audit) {
     final theme = Theme.of(context);
-    final scores = dtwSimilarities.whereType<double>().toList();
-    final avg = scores.reduce((a, b) => a + b) / scores.length;
-    final pct = (avg * 100).round();
-    final color = avg >= 0.80
-        ? const Color(0xFF00E676)
-        : avg >= 0.60
-        ? const Color(0xFFFFB300)
-        : const Color(0xFFFF5252);
-    final subtitle = avg >= 0.85
-        ? 'Your reps closely match the reference technique.'
-        : avg >= 0.70
-        ? 'Good alignment with reference form. A few deviations noted.'
-        : avg >= 0.55
-        ? 'Moderate match. Focus on the full range and tempo.'
-        : 'Low match. Review technique and consider recalibrating.';
+    final recap = audit;
+
+    final ft = FiTrackColors.of(context);
+    final pct = recap.repsEvaluated == 0 ? 0 : (recap.passRate * 100).round();
+    final quality = _meanRepQuality();
+    final qualityPct = quality == null ? 0 : (quality * 100).round();
+    final color = recap.passRate >= 0.80
+        ? ft.accent
+        : recap.passRate >= 0.50
+        ? ft.cyan
+        : FiTrackTheme.red;
 
     return Container(
       decoration: BoxDecoration(
@@ -664,10 +658,10 @@ class _SummaryScreenState extends State<SummaryScreen> {
         children: [
           Row(
             children: [
-              Icon(Icons.compare_arrows_rounded, color: color, size: 20),
+              Icon(Icons.verified_outlined, color: color, size: 20),
               const SizedBox(width: 8),
               Text(
-                'Form Match (Beta)',
+                'Form audit',
                 style: TextStyle(
                   color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
                   fontSize: 13,
@@ -676,35 +670,163 @@ class _SummaryScreenState extends State<SummaryScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                '$pct',
-                style: TextStyle(
-                  fontSize: 56,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-              Text(
-                '%',
-                style: TextStyle(
-                  fontSize: 24,
-                  color: color.withValues(alpha: 0.7),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: TextStyle(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
-              fontSize: 14,
+          if (recap.applicable) ...[
+            // Dual-stat header: Form Accuracy + Clean Reps share the same
+            // typography & color rules so neither reads as the "real" score.
+            // Color rules: each stat picks its own tier color from its own
+            // percentage, so a session that's mechanically clean (high clean%)
+            // but jittery (low accuracy%) is honestly conveyed.
+            _FormAuditDualStat(
+              accuracyPct: qualityPct,
+              accuracyColor: _tierColor(qualityPct / 100.0, ft),
+              cleanPct: pct,
+              cleanColor: color,
             ),
-          ),
+            const SizedBox(height: 8),
+            Text(
+              '${recap.repsClean} / ${recap.repsEvaluated} reps · '
+              '${recap.perCriterion.length} criteria',
+              style: TextStyle(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 16),
+            for (final c in recap.perCriterion)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        c.name,
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.85,
+                          ),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${c.passed} / ${c.evaluated}',
+                      style: TextStyle(
+                        color: c.fired == 0
+                            ? ft.accent
+                            : theme.colorScheme.onSurface.withValues(
+                                alpha: 0.85,
+                              ),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (recap.oneShotFlags.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              for (final f in recap.oneShotFlags)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.flag_outlined,
+                        size: 14,
+                        color: Colors.orangeAccent,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        f,
+                        style: const TextStyle(
+                          color: Colors.orangeAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+            if (repQualities.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              // Collapsible section header. Tapping toggles the rep list.
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => setState(
+                  () => _accuracyByRepExpanded = !_accuracyByRepExpanded,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'ACCURACY BY REP',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.0,
+                            color: theme.colorScheme.onSurface.withValues(
+                              alpha: 0.4,
+                            ),
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${repQualities.length} reps',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        _accuracyByRepExpanded
+                            ? Icons.expand_less_rounded
+                            : Icons.expand_more_rounded,
+                        size: 18,
+                        color: theme.colorScheme.onSurface.withValues(
+                          alpha: 0.54,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_accuracyByRepExpanded) ...[
+                const SizedBox(height: 8),
+                Column(
+                  children: repQualities.asMap().entries.map((entry) {
+                    final i = entry.key;
+                    final repQuality = entry.value;
+                    final isExpanded = _expandedRepIndex == i;
+                    return _RepAccuracyTile(
+                      repIndex: i,
+                      repQuality: repQuality,
+                      barColor: _qualityColor(repQuality),
+                      expanded: isExpanded,
+                      onTap: () => setState(
+                        () => _expandedRepIndex = isExpanded ? null : i,
+                      ),
+                      details: isExpanded ? _buildRepDetails(context, i) : null,
+                    );
+                  }).toList(),
+                ),
+              ],
+            ],
+          ] else
+            Text(
+              recap.notApplicableReason ??
+                  'Strict recap not available for this session.',
+              style: TextStyle(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
+                fontSize: 13,
+              ),
+            ),
         ],
       ),
     );
@@ -782,6 +904,13 @@ class _SummaryScreenState extends State<SummaryScreen> {
                   _buildPerArmRow(context),
                   const SizedBox(height: 20),
                   _buildBucketList(context),
+                  // Merged 2026-05-13: the previously-separate "Side-View
+                  // Form" card now lives as a sub-section here so curl-side
+                  // sessions don't double up surrounding card chrome.
+                  if (widget.bicepsSideRepMetrics.isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    _buildSideViewSection(context),
+                  ],
                 ],
               ),
             ),
@@ -1052,10 +1181,40 @@ class _SummaryScreenState extends State<SummaryScreen> {
     );
   }
 
+  /// Builds a [SessionSummaryInput] from this screen's widget fields. Kept
+  /// as a private helper so the `build()` method reads as pure layout and
+  /// the DTO ↔ widget mapping has a single owner.
+  SessionSummaryInput _buildVmInput() => SessionSummaryInput(
+    exercise: widget.exercise,
+    totalReps: widget.totalReps,
+    totalSets: widget.totalSets,
+    sessionDuration: widget.sessionDuration,
+    averageQuality: widget.averageQuality,
+    detectedView: widget.detectedView,
+    repQualities: widget.repQualities,
+    fatigueDetected: widget.fatigueDetected,
+    asymmetryDetected: widget.asymmetryDetected,
+    eccentricTooFastCount: widget.eccentricTooFastCount,
+    errorsTriggered: widget.errorsTriggered,
+    errorCounts: widget.errorCounts,
+    curlRepRecords: widget.curlRepRecords,
+    squatVariant: widget.squatVariant,
+    squatLongFemurLifter: widget.squatLongFemurLifter,
+    squatRepMetrics: widget.squatRepMetrics,
+    bicepsSideRepMetrics: widget.bicepsSideRepMetrics,
+    curlProfile: widget.curlProfile,
+    pushUpProfile: widget.pushUpProfile,
+    squatProfile: widget.squatProfile,
+    autoCalSnapshot: widget.autoCalSnapshot,
+    squatAutoCalSnapshot: widget.squatAutoCalSnapshot,
+    feedbackSensitivity: widget.feedbackSensitivity,
+  );
+
   @override
   Widget build(BuildContext context) {
     final ft = FiTrackColors.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final vm = SessionSummaryViewModel.fromInput(_buildVmInput());
     return Scaffold(
       backgroundColor: ft.bg,
       // Design top bar: close (left) · SESSION COMPLETE (center) · share (right)
@@ -1090,14 +1249,95 @@ class _SummaryScreenState extends State<SummaryScreen> {
         ],
       ),
       body: SafeArea(
-        child: switch (exercise) {
-          ExerciseType.bicepsCurlFront ||
-          ExerciseType.bicepsCurlSide ||
-          // ignore: deprecated_member_use_from_same_package
-          ExerciseType.bicepsCurl => _buildCurlSummary(context),
-          ExerciseType.squat => _buildSquatSummary(context),
-          ExerciseType.pushUp => _buildSimpleSummary(context),
-        },
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SummaryHero(
+                qualityPct: vm.qualityPct,
+                grade: vm.grade,
+                subtitle: vm.heroSubtitle,
+                exerciseLabel: vm.exerciseLabel,
+              ),
+              const SizedBox(height: 12),
+              SummaryStatsGrid(
+                reps: vm.reps,
+                sets: vm.sets,
+                duration: vm.duration,
+              ),
+              if (vm.variantLabels.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                SummaryVariantChips(labels: vm.variantLabels),
+              ],
+              const SizedBox(height: 16),
+              _buildFormAuditCard(context, vm.formAudit),
+              if (vm.hasFormIssues) ...[
+                const SizedBox(height: 16),
+                SummaryFormIssuesCard(
+                  errors: vm.formIssues,
+                  errorCounts: vm.formIssueCounts,
+                ),
+              ],
+              // Squat-only legacy subhead — pre-rebuild sessions carrying
+              // FormError.trunkTibia. Out-of-band from the unified slot order
+              // because it is intentionally surfaced as legacy/deprecated.
+              if (exercise == ExerciseType.squat &&
+                  errorsTriggered.contains(FormError.trunkTibia)) ...[
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'Form check (legacy)',
+                    style: TextStyle(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withValues(alpha: 0.60),
+                      fontSize: 13,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+                _buildLegacyTrunkTibiaRow(context),
+              ],
+              // Squat-only per-rep ratio strip — live sessions only.
+              if (exercise == ExerciseType.squat &&
+                  widget.squatRepMetrics.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                _buildSquatRatioStrip(context),
+              ],
+              if (vm.hasInsights) ...[
+                const SizedBox(height: 16),
+                SummaryInsightsCard(insights: vm.insights),
+              ],
+              // Curl-only details panel — rep records, bucket summaries, OR
+              // (post-merge 2026-05-13) side-view metrics. Widened guard so
+              // a side-view-only session still renders the card with just
+              // the merged side-view sub-section.
+              if (exercise.isCurl &&
+                  (curlRepRecords.isNotEmpty ||
+                      curlBucketSummaries.isNotEmpty ||
+                      widget.bicepsSideRepMetrics.isNotEmpty)) ...[
+                const SizedBox(height: 16),
+                _buildDetailsCard(context),
+              ],
+              // Side-view per-rep averages now live inside the Details card
+              // (merged 2026-05-13 — see _buildSideViewSection). The previous
+              // standalone _buildBicepsSideRatioStrip block was removed here.
+              // Curl-only camera-view chip.
+              if (exercise.isCurl &&
+                  detectedView != CurlCameraView.unknown) ...[
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _CameraViewChip(label: _viewLabel(detectedView)),
+                ),
+              ],
+              const SizedBox(height: 24),
+              const SummaryActions(),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1107,237 +1347,10 @@ class _SummaryScreenState extends State<SummaryScreen> {
   /// chip, tall-lifter chip, per-rep ratio strip, knee-shift bucket label,
   /// and the conditional "Form check (legacy)" subhead for sessions that
   /// were saved before the rebuild.
-  Widget _buildSquatSummary(BuildContext context) {
-    final theme = Theme.of(context);
-    final quality = _meanRepQuality();
-    final qualityColor = _qualityColor(quality);
-    final insights = _buildInsights();
-    final hasLegacy = errorsTriggered.contains(FormError.trunkTibia);
-    // The new squat error set, in display order. Drives the "Form Issues"
-    // chip wrap. trunkTibia is rendered separately under a legacy subhead.
-    const newSquatErrors = <FormError>{
-      FormError.excessiveForwardLean,
-      FormError.heelLift,
-      FormError.forwardKneeShift,
-      FormError.squatDepth,
-    };
-    final activeNew = errorsTriggered.where(newSquatErrors.contains).toList();
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Hero header
-          Center(
-            child: Column(
-              children: [
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: qualityColor.withValues(alpha: 0.15),
-                  ),
-                  child: Icon(
-                    Icons.check_circle_rounded,
-                    color: qualityColor,
-                    size: 64,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Semantics(
-                  header: true,
-                  child: Text(
-                    exercise.label,
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.onSurface,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _MiniChip(label: widget.squatVariant.label),
-                    if (widget.squatLongFemurLifter)
-                      const _MiniChip(label: 'Tall lifter (+5°)'),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // Stats Row
-          Row(
-            children: [
-              Expanded(
-                child: _StatChip(
-                  icon: Icons.repeat,
-                  label: 'REPS',
-                  value: '$totalReps',
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StatChip(
-                  icon: Icons.layers,
-                  label: 'SETS',
-                  value: '$totalSets',
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StatChip(
-                  icon: Icons.timer,
-                  label: 'TIME',
-                  value: _formatDuration(sessionDuration),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // Quality Card — always displayed (shows quality or "No reps recorded")
-          _buildQualityCard(quality, qualityColor, context),
-          const SizedBox(height: 16),
-
-          // Per-rep quality strip
-          if (repQualities.isNotEmpty) ...[
-            _buildRepQualityStrip(context),
-            const SizedBox(height: 16),
-          ],
-
-          // Form Issues Card (new squat errors)
-          if (activeNew.isNotEmpty) ...[
-            _buildSquatFormIssuesCard(activeNew, context),
-            const SizedBox(height: 16),
-          ],
-
-          // Per-rep ratio strip — squat-only, live sessions only.
-          if (widget.squatRepMetrics.isNotEmpty) ...[
-            _buildSquatRatioStrip(context),
-            const SizedBox(height: 16),
-          ],
-
-          // Legacy Form Check subhead — renders only when ≥1 trunkTibia row
-          // exists (sessions saved before the Squat Master Rebuild).
-          if (hasLegacy) ...[
-            Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 8),
-              child: Text(
-                'Form check (legacy)',
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.60),
-                  fontSize: 13,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ),
-            _buildLegacyTrunkTibiaRow(context),
-            const SizedBox(height: 16),
-          ],
-
-          // Coaching Insights
-          Container(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.lightbulb_outline_rounded,
-                      color: Color(0xFF00E676),
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Coaching Insights',
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.54,
-                        ),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: insights.map((insight) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 4,
-                            height: 4,
-                            margin: const EdgeInsets.only(top: 6),
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Color(0xFF00E676),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              insight,
-                              style: TextStyle(
-                                color: theme.colorScheme.onSurface.withValues(
-                                  alpha: 0.70,
-                                ),
-                                fontSize: 14,
-                                height: 1.5,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          ),
-
-          // Done button
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00E676),
-                foregroundColor: theme.colorScheme.onPrimary,
-                padding: const EdgeInsets.symmetric(vertical: 18),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onPressed: () =>
-                  Navigator.of(context).popUntil((route) => route.isFirst),
-              child: const Text(
-                'Done',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // _buildSquatSummary / _buildCurlSummary / _buildSimpleSummary removed
+  // 2026-05-13 — replaced by the unified `build()` body that consumes
+  // [SessionSummaryViewModel] and renders the shared `widgets/summary/*`
+  // surface for every exercise.
 
   /// Mean of the per-rep qualities. Falls back to `averageQuality` (which
   /// may also be null on early-WP5 sessions).
@@ -1354,271 +1367,9 @@ class _SummaryScreenState extends State<SummaryScreen> {
     return nonZero.reduce((a, b) => a + b) / nonZero.length;
   }
 
-  Widget _buildQualityCard(
-    double? quality,
-    Color qualityColor,
-    BuildContext context,
-  ) {
-    final theme = Theme.of(context);
-    final ft = FiTrackColors.of(context);
-    final hasData = totalReps > 0 && quality != null;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border(
-          left: BorderSide(color: ft.cyan, width: 4),
-          top: BorderSide(color: ft.stroke),
-          right: BorderSide(color: ft.stroke),
-          bottom: BorderSide(color: ft.stroke),
-        ),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.videocam_rounded, color: ft.cyan, size: 18),
-              const SizedBox(width: 8),
-              Text(
-                'AI FORM ACCURACY',
-                style: TextStyle(
-                  color: ft.cyan,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (hasData)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  '${(quality * 100).round()}',
-                  style: TextStyle(
-                    fontSize: 84,
-                    fontWeight: FontWeight.w900,
-                    color: Colors.white,
-                    height: 1,
-                  ),
-                ),
-                Text(
-                  '%',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w700,
-                    color: ft.cyan,
-                    height: 1,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: qualityColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: qualityColor.withValues(alpha: 0.50),
-                    ),
-                  ),
-                  child: Text(
-                    _gradeLabel(quality),
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
-                      color: qualityColor,
-                      height: 1,
-                    ),
-                  ),
-                ),
-              ],
-            )
-          else
-            Text(
-              'No reps recorded',
-              style: TextStyle(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
-                fontSize: 14,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRepQualityStrip(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.bar_chart_rounded,
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Rep Quality',
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Column(
-            children: repQualities.asMap().entries.map((entry) {
-              final repNum = entry.key + 1;
-              final repQuality = entry.value;
-              final barColor = _qualityColor(repQuality);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 28,
-                      child: Text(
-                        'R$repNum',
-                        style: TextStyle(
-                          color: theme.colorScheme.onSurface.withValues(
-                            alpha: 0.54,
-                          ),
-                          fontSize: 12,
-                        ),
-                        textAlign: TextAlign.right,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: LayoutBuilder(
-                        builder: (ctx, constraints) => Stack(
-                          children: [
-                            Container(
-                              width: constraints.maxWidth,
-                              height: 14,
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.onSurface.withValues(
-                                  alpha: 0.07,
-                                ),
-                                borderRadius: BorderRadius.circular(7),
-                              ),
-                            ),
-                            Container(
-                              width: constraints.maxWidth * repQuality,
-                              height: 14,
-                              decoration: BoxDecoration(
-                                color: barColor,
-                                borderRadius: BorderRadius.circular(7),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 36,
-                      child: Text(
-                        '${(repQuality * 100).round()}%',
-                        style: TextStyle(color: barColor, fontSize: 11),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSquatFormIssuesCard(List<FormError> errs, BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.warning_amber_rounded,
-                color: Color(0xFFFFB300),
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Form Issues Detected',
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: errs.map((err) {
-              // forwardKneeShift uses a dimmer color (no TTS, informational
-              // only) — matches the in-workout highlight palette.
-              final chipColor = err == FormError.forwardKneeShift
-                  ? const Color(0xFFFFA726)
-                  : const Color(0xFFFF5252);
-              return Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 7,
-                ),
-                decoration: BoxDecoration(
-                  color: chipColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: chipColor.withValues(alpha: 0.5)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(_errorIcon(err), color: chipColor, size: 14),
-                    const SizedBox(width: 6),
-                    Text(
-                      _errorLabel(err),
-                      style: TextStyle(color: chipColor, fontSize: 13),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
+  // _buildQualityCard and _buildSquatFormIssuesCard removed 2026-05-13 —
+  // replaced by [SummaryHero] and [SummaryFormIssuesCard] in
+  // `widgets/summary/`.
 
   Widget _buildSquatRatioStrip(BuildContext context) {
     final theme = Theme.of(context);
@@ -1687,7 +1438,12 @@ class _SummaryScreenState extends State<SummaryScreen> {
     );
   }
 
-  Widget _buildBicepsSideRatioStrip(BuildContext context) {
+  /// Side-view biceps form averages, rendered as a sub-section inside
+  /// [_buildDetailsCard]. Returns the bare column — no card chrome — because
+  /// the parent already provides the rounded surface + padding. Caller gates
+  /// on `bicepsSideRepMetrics.isNotEmpty` so this only runs on side-view
+  /// curl sessions.
+  Widget _buildSideViewSection(BuildContext context) {
     final theme = Theme.of(context);
     final m = widget.bicepsSideRepMetrics;
 
@@ -1721,79 +1477,60 @@ class _SummaryScreenState extends State<SummaryScreen> {
       _ => 'Side view',
     };
 
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.insights_rounded,
-                color: Color(0xFF64B5F6),
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Side-View Form — $viewLabel',
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Side-view form — $viewLabel',
+          style: TextStyle(
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+            fontSize: 12,
           ),
-          const SizedBox(height: 16),
-          if (avgLean != null)
-            _SideMetricRow(
-              label: 'Trunk lean',
-              value: avgLean,
-              threshold: kTorsoLeanThresholdDeg,
-              unit: '°',
-            ),
-          if (avgShoulderArc != null)
-            _SideMetricRow(
-              label: 'Shoulder arc',
-              value: avgShoulderArc,
-              threshold: kSwingThreshold,
-              unit: '',
-            ),
-          if (avgElbowDrift != null)
-            _SideMetricRow(
-              label: 'Elbow drift',
-              value: avgElbowDrift,
-              threshold: kDriftThreshold,
-              unit: '',
-            ),
-          if (avgBackLean != null)
-            _SideMetricRow(
-              label: 'Back lean',
-              value: avgBackLean,
-              threshold: kBackLeanThresholdDeg,
-              unit: '°',
-            ),
-          if (avgShrug != null)
-            _SideMetricRow(
-              label: 'Shoulder shrug',
-              value: avgShrug,
-              threshold: kShrugThreshold,
-              unit: '',
-            ),
-          if (avgElbowRise != null)
-            _SideMetricRow(
-              label: 'Elbow rise',
-              value: avgElbowRise,
-              threshold: kElbowRiseThreshold,
-              unit: '',
-            ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 8),
+        if (avgLean != null)
+          _SideMetricRow(
+            label: 'Trunk lean',
+            value: avgLean,
+            threshold: kTorsoLeanThresholdDeg,
+            unit: '°',
+          ),
+        if (avgShoulderArc != null)
+          _SideMetricRow(
+            label: 'Shoulder arc',
+            value: avgShoulderArc,
+            threshold: kSwingThreshold,
+            unit: '',
+          ),
+        if (avgElbowDrift != null)
+          _SideMetricRow(
+            label: 'Elbow drift',
+            value: avgElbowDrift,
+            threshold: kDriftThreshold,
+            unit: '',
+          ),
+        if (avgBackLean != null)
+          _SideMetricRow(
+            label: 'Back lean',
+            value: avgBackLean,
+            threshold: kBackLeanThresholdDeg,
+            unit: '°',
+          ),
+        if (avgShrug != null)
+          _SideMetricRow(
+            label: 'Shoulder shrug',
+            value: avgShrug,
+            threshold: kShrugThreshold,
+            unit: '',
+          ),
+        if (avgElbowRise != null)
+          _SideMetricRow(
+            label: 'Elbow rise',
+            value: avgElbowRise,
+            threshold: kElbowRiseThreshold,
+            unit: '',
+          ),
+      ],
     );
   }
 
@@ -1831,477 +1568,269 @@ class _SummaryScreenState extends State<SummaryScreen> {
       ),
     );
   }
+}
 
-  Widget _buildCurlSummary(BuildContext context) {
-    final ft = FiTrackColors.of(context);
+// _StatChip and _StatRow removed 2026-05-13 — replaced by [SummaryStatsGrid]
+// in `widgets/summary/`.
+
+/// Form-audit dual-stat header. Shows Form Accuracy and Clean Reps side-by-
+/// side with matching typography, so neither percentage reads as more
+/// authoritative than the other. Each stat picks its own tier color from its
+/// own value (see `_SummaryScreenState._tierColor`).
+class _FormAuditDualStat extends StatelessWidget {
+  const _FormAuditDualStat({
+    required this.accuracyPct,
+    required this.accuracyColor,
+    required this.cleanPct,
+    required this.cleanColor,
+  });
+
+  final int accuracyPct;
+  final Color accuracyColor;
+  final int cleanPct;
+  final Color cleanColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _FormAuditStat(
+            value: accuracyPct,
+            color: accuracyColor,
+            caption: 'FORM\nACCURACY',
+          ),
+        ),
+        Expanded(
+          child: _FormAuditStat(
+            value: cleanPct,
+            color: cleanColor,
+            caption: 'CLEAN\nREPS',
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FormAuditStat extends StatelessWidget {
+  const _FormAuditStat({
+    required this.value,
+    required this.color,
+    required this.caption,
+  });
+
+  final int value;
+  final Color color;
+  final String caption;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final quality = _meanRepQuality();
-    final insights = _buildInsights();
-    final qualityPct = quality != null ? (quality * 100).round() : null;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // [1] AI Form Accuracy hero — cyan-bordered card with radial glow
-          _AiAccuracyHero(
-            qualityPct: qualityPct,
-            grade: _gradeLabel(quality),
-            subtitle: _qualitySubtitle(quality),
-            ft: ft,
-          ),
-          const SizedBox(height: 12),
-
-          // [2] Time + Reps two-column grid
-          Row(
-            children: [
-              Expanded(
-                child: _SummaryStatCard(
-                  icon: Icons.schedule_outlined,
-                  label: 'Time',
-                  value: _formatDuration(sessionDuration),
-                  ft: ft,
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              '$value',
+              style: TextStyle(
+                fontSize: 48,
+                fontWeight: FontWeight.bold,
+                color: color,
+                height: 1,
+                letterSpacing: -1.5,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _SummaryStatCard(
-                  icon: Icons.repeat_rounded,
-                  label: 'Total Reps',
-                  value: '$totalReps',
-                  ft: ft,
-                ),
+            ),
+            Text(
+              '%',
+              style: TextStyle(
+                fontSize: 22,
+                color: color.withValues(alpha: 0.7),
+                fontWeight: FontWeight.w600,
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // [3] Sets chip (small, below the grid)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _SetsChip(sets: totalSets, ft: ft),
-          ),
-          const SizedBox(height: 16),
-
-          // [3.5] Form Match Card (DTW scoring — opt-in, hidden when no scores)
-          if (dtwSimilarities.any((s) => s != null)) ...[
-            _buildFormMatchCard(context),
-            const SizedBox(height: 16),
+            ),
           ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          caption,
+          style: TextStyle(
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.2,
+            height: 1.2,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
-          // [4] Accuracy by Rep bar chart
-          if (repQualities.isNotEmpty) ...[
-            _buildRepAccuracyCard(context),
-            const SizedBox(height: 16),
-          ],
+/// One row in the Accuracy-by-Rep list. Tap toggles per-rep detail panel.
+class _RepAccuracyTile extends StatelessWidget {
+  const _RepAccuracyTile({
+    required this.repIndex,
+    required this.repQuality,
+    required this.barColor,
+    required this.expanded,
+    required this.onTap,
+    required this.details,
+  });
 
-          // [5] Form Analysis Card — hidden when no reps committed.
-          // Frame-level errors (`elbowRise`, `torsoSwing`, etc.) can fire
-          // during partial rep attempts that abort back to IDLE before
-          // committing, leaving `errorsTriggered` non-empty even when
-          // `totalReps == 0`. Showing those errors with no rep context
-          // is misleading: the user has nothing to compare them against
-          // and no way to act on them. The "no reps" insight from
-          // `_buildInsights()` covers the actual problem (framing).
-          if (errorsTriggered.isNotEmpty && totalReps > 0) ...[
-            Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surface,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.warning_amber_rounded,
-                        color: Color(0xFFFFB300),
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Form Issues Detected',
+  final int repIndex;
+  final double repQuality;
+  final Color barColor;
+  final bool expanded;
+  final VoidCallback onTap;
+  final Widget? details;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final repNum = repIndex + 1;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Material(
+        color: expanded
+            ? theme.colorScheme.onSurface.withValues(alpha: 0.04)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 32,
+                      child: Text(
+                        'R$repNum',
                         style: TextStyle(
                           color: theme.colorScheme.onSurface.withValues(
                             alpha: 0.54,
                           ),
-                          fontSize: 13,
+                          fontSize: 12,
                         ),
+                        textAlign: TextAlign.right,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: errorsTriggered
-                        .where(
-                          (err) => ![
-                            FormError.squatDepth,
-                            FormError.trunkTibia,
-                            FormError.hipSag,
-                            FormError.pushUpShortRom,
-                          ].contains(err),
-                        )
-                        .map((err) {
-                          final chipColor = const Color(0xFFFF5252);
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 7,
-                            ),
-                            decoration: BoxDecoration(
-                              color: chipColor.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: chipColor.withValues(alpha: 0.5),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _errorIcon(err),
-                                  color: chipColor,
-                                  size: 14,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  _errorLabel(err),
-                                  style: TextStyle(
-                                    color: chipColor,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                if ((errorCounts[err] ?? 0) > 1) ...[
-                                  const SizedBox(width: 5),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 5,
-                                      vertical: 1,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: chipColor.withValues(alpha: 0.20),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      '×${errorCounts[err]}',
-                                      style: TextStyle(
-                                        color: chipColor,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          );
-                        })
-                        .toList(),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // [6] Insights Card
-          Container(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.lightbulb_outline_rounded,
-                      color: Color(0xFF00E676),
-                      size: 20,
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      'Coaching Insights',
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.54,
-                        ),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: insights.asMap().entries.map((entry) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 4,
-                            height: 4,
-                            margin: const EdgeInsets.only(top: 6),
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Color(0xFF00E676),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              entry.value,
-                              style: TextStyle(
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (ctx, constraints) => Stack(
+                          children: [
+                            Container(
+                              width: constraints.maxWidth,
+                              height: 10,
+                              decoration: BoxDecoration(
                                 color: theme.colorScheme.onSurface.withValues(
-                                  alpha: 0.70,
+                                  alpha: 0.07,
                                 ),
-                                fontSize: 14,
-                                height: 1.5,
+                                borderRadius: BorderRadius.circular(5),
                               ),
                             ),
-                          ),
-                        ],
+                            Container(
+                              width: constraints.maxWidth * repQuality,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                color: barColor,
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // [6.5] Details panel — per-bucket / per-arm / threshold sources.
-          if (curlRepRecords.isNotEmpty || curlBucketSummaries.isNotEmpty) ...[
-            _buildDetailsCard(context),
-            const SizedBox(height: 16),
-          ],
-
-          // [6.6] Side-view per-rep averages — only for bicepsCurlSide sessions
-          if (widget.bicepsSideRepMetrics.isNotEmpty) ...[
-            _buildBicepsSideRatioStrip(context),
-            const SizedBox(height: 16),
-          ],
-
-          // [7] Camera View Chip
-          if (detectedView != CurlCameraView.unknown)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surface,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.12),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 56,
+                      child: Text(
+                        '${(repQuality * 100).round()}%',
+                        style: TextStyle(
+                          color: barColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        textAlign: TextAlign.right,
+                      ),
+                    ),
                     Icon(
-                      Icons.videocam_outlined,
+                      expanded
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      size: 16,
                       color: theme.colorScheme.onSurface.withValues(
                         alpha: 0.38,
                       ),
-                      size: 14,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _viewLabel(detectedView),
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.38,
-                        ),
-                        fontSize: 12,
-                      ),
                     ),
                   ],
                 ),
-              ),
-            ),
-          const SizedBox(height: 32),
-
-          // Done Button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00E676),
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(vertical: 18),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onPressed: () =>
-                  Navigator.of(context).popUntil((route) => route.isFirst),
-              child: const Text(
-                'Done',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
+                if (expanded && details != null) ...[
+                  const SizedBox(height: 8),
+                  Padding(
+                    // Indent under the bar so the details visually attach to
+                    // the rep row, not the card edge.
+                    padding: const EdgeInsets.fromLTRB(40, 4, 0, 4),
+                    child: details,
+                  ),
+                ],
+              ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSimpleSummary(BuildContext context) {
-    final theme = Theme.of(context);
-    final quality = _meanRepQuality();
-    final pushUpErrors = errorsTriggered
-        .where(
-          (err) => err == FormError.hipSag || err == FormError.pushUpShortRom,
-        )
-        .toList();
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Icon(
-            Icons.check_circle_outline,
-            color: Color(0xFF00E676),
-            size: 96,
-          ),
-          const SizedBox(height: 24),
-          Text(
-            exercise.label,
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: theme.colorScheme.onSurface,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 48),
-          _StatRow(label: 'Reps', value: '$totalReps'),
-          const SizedBox(height: 16),
-          _StatRow(label: 'Sets', value: '$totalSets'),
-          const SizedBox(height: 16),
-          _StatRow(label: 'Duration', value: _formatDuration(sessionDuration)),
-          if (quality != null) ...[
-            const SizedBox(height: 16),
-            _StatRow(label: 'Form', value: '${(quality * 100).round()}%'),
-          ],
-          if (repQualities.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            _buildRepQualityStrip(context),
-          ],
-          if (pushUpErrors.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            _buildSquatFormIssuesCard(pushUpErrors, context),
-          ],
-          const SizedBox(height: 40),
-          ElevatedButton(
-            onPressed: () =>
-                Navigator.of(context).popUntil((route) => route.isFirst),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 18),
-            ),
-            child: const Text(
-              'Done',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _StatChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _StatChip({
-    required this.icon,
+/// Single label/value row inside an expanded rep's detail panel.
+class _RepDetailRow extends StatelessWidget {
+  const _RepDetailRow({
     required this.label,
     required this.value,
+    this.valueColor,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: const Color(0xFF00E676), size: 20),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: theme.colorScheme.onSurface,
-            ),
-          ),
-          Text(
-            label,
-            style: TextStyle(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
-              fontSize: 11,
-              letterSpacing: 1.2,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatRow extends StatelessWidget {
   final String label;
   final String value;
-
-  const _StatRow({required this.label, required this.value});
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
-    // Single Semantics wrapper so the row announces as one coherent unit
-    // ("Reps: 12") instead of "Reps" and "12" as separate, spatially-distant
-    // reads which is how `mainAxisAlignment: spaceBetween` would otherwise
-    // present to a screen reader.
     final theme = Theme.of(context);
-    return Semantics(
-      label: '$label: $value',
-      excludeSemantics: true,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
-              fontSize: 18,
+          SizedBox(
+            width: 96,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+                fontSize: 12,
+              ),
             ),
           ),
-          Text(
-            value,
-            style: TextStyle(
-              color: theme.colorScheme.onSurface,
-              fontSize: 24,
-              fontWeight: FontWeight.w600,
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                color:
+                    valueColor ??
+                    theme.colorScheme.onSurface.withValues(alpha: 0.85),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
           ),
         ],
@@ -2381,33 +1910,8 @@ class _PerArmTile extends StatelessWidget {
   }
 }
 
-/// Small inline pill used in the squat header (variant + tall-lifter chip).
-class _MiniChip extends StatelessWidget {
-  const _MiniChip({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.12),
-        ),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
-          fontSize: 12,
-        ),
-      ),
-    );
-  }
-}
+// _MiniChip removed 2026-05-13 — replaced by [SummaryVariantChips] in
+// `widgets/summary/`.
 
 /// Single row in the squat per-rep ratio strip. Optional tooltip surfaces
 /// the raw ratio when the bucket label hides it.
@@ -2565,41 +2069,7 @@ class _BucketStat extends StatelessWidget {
   }
 }
 
-class _RepStat extends StatelessWidget {
-  const _RepStat({required this.label, required this.value, this.color});
-  final String label;
-  final String value;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final resolvedColor = color ?? theme.colorScheme.onSurface;
-    return Column(
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 9,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.0,
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.64,
-            color: resolvedColor,
-          ),
-        ),
-      ],
-    );
-  }
-}
+// _RepStat removed 2026-05-13 — was dead code prior to the refactor.
 
 class _ShareCard extends StatelessWidget {
   const _ShareCard({
@@ -2794,231 +2264,43 @@ class _ShareStat extends StatelessWidget {
   }
 }
 
-// ── Design "Subtle" summary new widgets ────────────────────────────────────
+// _AiAccuracyHero, _SummaryStatCard, _SetsChip removed 2026-05-13 —
+// replaced by [SummaryHero] and [SummaryStatsGrid] in `widgets/summary/`.
 
-/// AI Form Accuracy hero card — cyan left-border, radial glow, large number.
-class _AiAccuracyHero extends StatelessWidget {
-  const _AiAccuracyHero({
-    required this.qualityPct,
-    required this.grade,
-    required this.subtitle,
-    required this.ft,
-  });
+/// Curl-only camera-view chip rendered at the bottom of the summary on
+/// sessions where the engine identified a side. Kept private to this file
+/// because no other screen surfaces a camera view in the same shape.
+class _CameraViewChip extends StatelessWidget {
+  const _CameraViewChip({required this.label});
 
-  final int? qualityPct;
-  final String grade;
-  final String subtitle;
-  final FiTrackColors ft;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: ft.surface1,
-        borderRadius: BorderRadius.circular(12),
-        border: Border(
-          left: BorderSide(color: ft.cyan, width: 3),
-          top: BorderSide(color: ft.stroke),
-          right: BorderSide(color: ft.stroke),
-          bottom: BorderSide(color: ft.stroke),
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          // Radial glow from top-centre
-          Positioned(
-            top: -40,
-            left: 0,
-            right: 0,
-            child: Container(
-              height: 140,
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: Alignment.topCenter,
-                  radius: 1.0,
-                  colors: [ft.cyan.withAlpha(0x20), ft.cyan.withAlpha(0x00)],
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                // "AI Form Accuracy" label
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.memory_rounded, color: ft.cyan, size: 14),
-                    const SizedBox(width: 6),
-                    Text(
-                      'AI FORM ACCURACY',
-                      style: TextStyle(
-                        color: ft.cyan,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                // Large number
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Text(
-                      qualityPct != null ? '$qualityPct' : '—',
-                      style: TextStyle(
-                        fontSize: 84,
-                        fontWeight: FontWeight.w700,
-                        color: ft.textStrong,
-                        height: 1,
-                        letterSpacing: -4,
-                      ),
-                    ),
-                    if (qualityPct != null)
-                      Text(
-                        '%',
-                        style: TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.w700,
-                          color: ft.cyan,
-                        ),
-                      ),
-                    if (qualityPct != null) ...[
-                      const SizedBox(width: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: ft.cyan.withAlpha(0x26),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: ft.cyan.withAlpha(0x80)),
-                        ),
-                        child: Text(
-                          grade,
-                          style: TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.w900,
-                            color: ft.cyan,
-                            height: 1,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: ft.textDim,
-                    fontSize: 13,
-                    height: 1.4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Two-column stat card for Time / Reps (design grid row).
-class _SummaryStatCard extends StatelessWidget {
-  const _SummaryStatCard({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.ft,
-  });
-
-  final IconData icon;
   final String label;
-  final String value;
-  final FiTrackColors ft;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: ft.surface1,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ft.stroke),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: ft.textDim, size: 14),
-              const SizedBox(width: 6),
-              Text(
-                label.toUpperCase(),
-                style: TextStyle(
-                  color: ft.textDim,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.1,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            value,
-            style: TextStyle(
-              color: ft.textStrong,
-              fontSize: 32,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -1,
-              height: 1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Small inline chip showing set count — sits below the stat grid.
-class _SetsChip extends StatelessWidget {
-  const _SetsChip({required this.sets, required this.ft});
-
-  final int sets;
-  final FiTrackColors ft;
-
-  @override
-  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: ft.surface3,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: ft.stroke),
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.12),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.layers_rounded, color: ft.textDim, size: 12),
+          Icon(
+            Icons.videocam_outlined,
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.38),
+            size: 14,
+          ),
           const SizedBox(width: 6),
           Text(
-            '$sets SET${sets == 1 ? '' : 'S'}',
+            label,
             style: TextStyle(
-              color: ft.textDim,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.1,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.38),
+              fontSize: 12,
             ),
           ),
         ],

@@ -103,7 +103,7 @@ void main() {
 
   group('SquatFormThresholds.forSensitivity', () {
     test('medium == defaults (zero delta)', () {
-      final m = SquatFormThresholds.forSensitivity(SquatSensitivity.medium);
+      final m = SquatFormThresholds.forSensitivity(FeedbackSensitivity.medium);
       expect(m.leanWarnDegBodyweight, kSquatLeanWarnDegBodyweight);
       expect(m.leanWarnDegHBBS, kSquatLeanWarnDegHBBS);
       expect(m.kneeShiftWarnRatio, kSquatKneeShiftWarnRatio);
@@ -112,41 +112,26 @@ void main() {
     });
 
     test('high produces tighter (smaller) thresholds than medium', () {
-      final high = SquatFormThresholds.forSensitivity(SquatSensitivity.high);
-      final med = SquatFormThresholds.forSensitivity(SquatSensitivity.medium);
+      final high = SquatFormThresholds.forSensitivity(FeedbackSensitivity.high);
+      final med = SquatFormThresholds.forSensitivity(
+        FeedbackSensitivity.medium,
+      );
       expect(high.leanWarnDegBodyweight, lessThan(med.leanWarnDegBodyweight));
       expect(high.leanWarnDegHBBS, lessThan(med.leanWarnDegHBBS));
       expect(high.kneeShiftWarnRatio, lessThan(med.kneeShiftWarnRatio));
       expect(high.heelLiftWarnRatio, lessThan(med.heelLiftWarnRatio));
     });
 
-    test('low produces looser (larger) thresholds than medium', () {
-      final low = SquatFormThresholds.forSensitivity(SquatSensitivity.low);
-      final med = SquatFormThresholds.forSensitivity(SquatSensitivity.medium);
-      expect(low.leanWarnDegBodyweight, greaterThan(med.leanWarnDegBodyweight));
-      expect(low.leanWarnDegHBBS, greaterThan(med.leanWarnDegHBBS));
-      expect(low.kneeShiftWarnRatio, greaterThan(med.kneeShiftWarnRatio));
-      expect(low.heelLiftWarnRatio, greaterThan(med.heelLiftWarnRatio));
-    });
-
     test('high lean delta is exactly −3°', () {
-      final high = SquatFormThresholds.forSensitivity(SquatSensitivity.high);
+      final high = SquatFormThresholds.forSensitivity(FeedbackSensitivity.high);
       expect(
         high.leanWarnDegBodyweight,
         closeTo(kSquatLeanWarnDegBodyweight - 3.0, 1e-9),
       );
     });
 
-    test('low lean delta is exactly +8°', () {
-      final low = SquatFormThresholds.forSensitivity(SquatSensitivity.low);
-      expect(
-        low.leanWarnDegBodyweight,
-        closeTo(kSquatLeanWarnDegBodyweight + 8.0, 1e-9),
-      );
-    });
-
     test('longFemurLeanBoost is unchanged across all sensitivity levels', () {
-      for (final s in SquatSensitivity.values) {
+      for (final s in FeedbackSensitivity.values) {
         expect(
           SquatFormThresholds.forSensitivity(s).longFemurLeanBoost,
           kSquatLongFemurLeanBoost,
@@ -155,7 +140,7 @@ void main() {
     });
 
     test('all fields > 0 for all sensitivity levels', () {
-      for (final s in SquatSensitivity.values) {
+      for (final s in FeedbackSensitivity.values) {
         final t = SquatFormThresholds.forSensitivity(s);
         expect(
           t.leanWarnDegBodyweight,

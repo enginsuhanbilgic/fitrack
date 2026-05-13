@@ -152,3 +152,36 @@ differ.
 
 The FSM itself is **not** ported — the Dart replay harness in Phase E imports
 the real `RepCounter` via a `path:` dependency.
+
+---
+
+## Live-telemetry derivation scripts
+
+Independent of the offline-video pipeline above, three companion scripts derive
+per-exercise FSM ROM thresholds from **live-session telemetry pastes**. They
+consume `<exercise>.rep` lines emitted by the running app and produce
+paste-ready Dart `*RomThresholdSet` blocks. Shared statistics helpers live in
+`scripts/derive_thresholds_from_telemetry.py` (curl) — a fix to the math lands
+in one place across all three.
+
+| Exercise | Script | Telemetry source | Consumed fields | Dart output |
+|---|---|---|---|---|
+| Biceps curl | `scripts/derive_thresholds_from_telemetry.py` | `rep.extremes`, `rep.side_metrics` | `min_angle`, `max_angle`, `lean_deg`, etc. | `RomThresholds` updates + form-threshold blocks |
+| Squat | `scripts/derive_squat_thresholds_from_telemetry.py` | `squat.rep` | `min_knee`, `max_knee` | `SquatRomThresholdSet` per variant |
+| **Push-up** | `scripts/derive_pushup_thresholds_from_telemetry.py` *(new, 2026-05-13)* | `pushup.rep` | `min_elbow`, `max_elbow` | `PushUpRomThresholdSet` per sensitivity tier (high/medium/low) |
+
+Each script auto-tees its output to
+`data/telemetry/derived/<input_stem>_<exercise>_thresholds.txt` when invoked
+with a file path; stdin pastes (`pbpaste | python -m ...`) print to terminal
+only — preserves the "quick experiment" workflow.
+
+```bash
+# Push-up: derive sensitivity-tier ROM thresholds from a session paste.
+python -m scripts.derive_pushup_thresholds_from_telemetry \
+    data/telemetry/sessions/2026-05-13_pushup_session.txt
+```
+
+Session boundaries are delimited by the universal `curl_debug.session_start`
+marker (also emitted by squat/push-up debug sessions). Pastes without markers
+degrade gracefully to a single cluster — the ICC design-effect correction
+returns deff=1.0 in that case.

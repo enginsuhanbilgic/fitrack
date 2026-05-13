@@ -271,6 +271,19 @@ class _BodyState extends State<_Body> {
             );
           }
           final s = vm.sessions[i];
+          final card = SessionCard(
+            summary: s,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => HistoryDetailLoader(sessionId: s.id),
+              ),
+            ),
+          );
+          // Gap 24: demo rows are read-only in the UI. The canonical way to
+          // remove demo data is the Settings → Sample Data toggle. Swipe-to-
+          // delete is disabled so the user can't trigger an "I deleted it
+          // but it came back" surprise via `cleanReseedIfStale`.
+          if (s.isDemo) return card;
           // Dismissible wraps the card so swipe-to-delete operates at the
           // list-item level (the session id keys the dismiss animation).
           // Confirmation dialog matches the destructive-button idiom from
@@ -282,14 +295,7 @@ class _BodyState extends State<_Body> {
             secondaryBackground: const _DeleteSwipeBackground(),
             confirmDismiss: (_) => _confirmDelete(context),
             onDismissed: (_) => vm.deleteSession(s.id),
-            child: SessionCard(
-              summary: s,
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => HistoryDetailLoader(sessionId: s.id),
-                ),
-              ),
-            ),
+            child: card,
           );
         },
       ),

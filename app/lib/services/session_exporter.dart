@@ -8,6 +8,13 @@
 ///
 /// CSV escaping follows RFC 4180: fields containing commas, quotes, or
 /// newlines are wrapped in double quotes; embedded quotes are doubled.
+///
+/// **Demo Mode filtering (ADR-9 / Gap 23):** every public entry point accepts
+/// `excludeDemo: true` by default. When true, rows where
+/// `SessionSummary.isDemo == true` are filtered before CSV serialization.
+/// This prevents Demo Mode's 14 seeded sessions from leaking into developer
+/// support shares. Internal developer-mode flows can pass `excludeDemo: false`
+/// to include demo rows.
 library;
 
 import 'dart:io';
@@ -42,13 +49,19 @@ class SessionExporter {
   /// would expect: id, exercise, started_at (ISO8601 UTC), duration_seconds,
   /// total_reps, total_sets, average_quality, detected_view, fatigue_detected,
   /// asymmetry_detected.
-  static String sessionsCsv(List<SessionSummary> sessions) {
+  static String sessionsCsv(
+    List<SessionSummary> sessions, {
+    bool excludeDemo = true,
+  }) {
+    final filtered = excludeDemo
+        ? sessions.where((s) => !s.isDemo).toList(growable: false)
+        : sessions;
     final buf = StringBuffer();
     buf.writeln(
       'id,exercise,started_at,duration_seconds,total_reps,total_sets,'
       'average_quality,detected_view,fatigue_detected,asymmetry_detected',
     );
-    for (final s in sessions) {
+    for (final s in filtered) {
       buf.writeln(
         [
           s.id,
@@ -83,19 +96,23 @@ class SessionExporter {
   /// current export. Reserved shape so consumers don't have to re-parse the
   /// header when per-rep form errors land in a future schema bump.
   static String repsCsv(
-    List<({SessionSummary session, SessionDetail detail})> all,
-  ) {
+    List<({SessionSummary session, SessionDetail detail})> all, {
+    bool excludeDemo = true,
+  }) {
+    final filtered = excludeDemo
+        ? all.where((e) => !e.session.isDemo).toList(growable: false)
+        : all;
     final buf = StringBuffer();
     buf.writeln(
       'session_id,rep_index,quality,min_angle,max_angle,side,view,'
       'threshold_source,bucket_updated,rejected_outlier,concentric_ms,'
       'squat_lean_deg,squat_knee_shift_ratio,squat_heel_lift_ratio,'
-      'squat_variant,'
+      'squat_variant,squat_min_knee_angle,squat_max_knee_angle,'
       'biceps_lean_deg,biceps_shoulder_drift_ratio,biceps_elbow_drift_ratio,'
       'biceps_back_lean_deg,biceps_elbow_drift_signed,'
       'form_errors',
     );
-    for (final entry in all) {
+    for (final entry in filtered) {
       final sessionId = entry.session.id;
       for (final r in entry.detail.reps) {
         buf.writeln(
@@ -115,6 +132,8 @@ class SessionExporter {
             _csvField(r.squatKneeShiftRatio?.toStringAsFixed(4) ?? ''),
             _csvField(r.squatHeelLiftRatio?.toStringAsFixed(4) ?? ''),
             _csvField(r.squatVariant?.name ?? ''),
+            _csvField(r.squatMinKneeAngle?.toStringAsFixed(2) ?? ''),
+            _csvField(r.squatMaxKneeAngle?.toStringAsFixed(2) ?? ''),
             _csvField(r.bicepsLeanDeg?.toStringAsFixed(2) ?? ''),
             _csvField(r.bicepsShoulderDriftRatio?.toStringAsFixed(4) ?? ''),
             _csvField(r.bicepsElbowDriftRatio?.toStringAsFixed(4) ?? ''),
@@ -133,12 +152,18 @@ class SessionExporter {
   /// directory, and return the paths so the caller can hand them to a share
   /// sheet. Caller is responsible for cleanup; the OS will eventually purge
   /// the temp dir on its own schedule.
-  Future<ExportResult> exportToTempDir({Directory? tmpOverride}) async {
-    final summaries = await repository.listSessions(
+  Future<ExportResult> exportToTempDir({
+    Directory? tmpOverride,
+    bool excludeDemo = true,
+  }) async {
+    final summariesRaw = await repository.listSessions(
       // No exercise filter — export everything.
       limit:
           100000, // effectively unbounded; matches the typical user's lifetime
     );
+    final summaries = excludeDemo
+        ? summariesRaw.where((s) => !s.isDemo).toList(growable: false)
+        : summariesRaw;
     final details = <({SessionSummary session, SessionDetail detail})>[];
     var repCount = 0;
     for (final s in summaries) {
@@ -153,8 +178,11 @@ class SessionExporter {
     final sessionsFile = File('${dir.path}/fitrack_sessions_$stamp.csv');
     final repsFile = File('${dir.path}/fitrack_reps_$stamp.csv');
 
-    await sessionsFile.writeAsString(sessionsCsv(summaries));
-    await repsFile.writeAsString(repsCsv(details));
+    // Pass excludeDemo:false here — `summaries`/`details` are already pre-filtered.
+    await sessionsFile.writeAsString(
+      sessionsCsv(summaries, excludeDemo: false),
+    );
+    await repsFile.writeAsString(repsCsv(details, excludeDemo: false));
 
     return ExportResult(
       sessionsCsv: sessionsFile.path,

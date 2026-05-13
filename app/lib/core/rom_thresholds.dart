@@ -6,8 +6,8 @@
 library;
 
 import 'constants.dart';
-import 'default_rom_thresholds.dart';
-import 'manual_rom_overrides.dart';
+import 'pipeline_rom_defaults.dart';
+import 'curl_rom_defaults.dart';
 import 'types.dart';
 
 /// Forward declaration shape — the real bucket lives in
@@ -46,34 +46,35 @@ class RomThresholds {
   ///
   /// [sensitivity] is applied only on this path — calibrated and auto-calibrated
   /// thresholds are personal and are never modified by sensitivity. Defaults to
-  /// [CurlSensitivity.medium] so all existing callers compile unchanged.
+  /// [FeedbackSensitivity.medium] so all existing callers compile unchanged.
   ///
-  /// Three-tier resolver, sensitivity-aware:
-  ///   1. Manual override — sensitivity selects the strict/default/permissive
+  /// Three-tier resolver, sensitivity-aware. Per the project convention
+  /// (2026-05-13), Tier 1 is the canonical source; Tier 2 is shelved.
+  ///   1. Telemetry-derived defaults — sensitivity selects the strict/default
   ///      constant directly (no delta math needed).
-  ///   2. Data-driven generated — sensitivity deltas applied via
-  ///      [_applyRomSensitivity] after derivation.
+  ///   2. Pipeline-derived defaults (SHELVED) — sensitivity deltas applied via
+  ///      [_applyRomSensitivity] after derivation. Gated off by default.
   ///   3. Legacy hand-tuned constants — same delta application.
   factory RomThresholds.global([
     CurlCameraView view = CurlCameraView.unknown,
-    CurlSensitivity sensitivity = CurlSensitivity.medium,
+    FeedbackSensitivity sensitivity = FeedbackSensitivity.medium,
   ]) {
-    // Tier 1 — manual override (sensitivity-aware; each level is a separate constant).
-    if (kUseManualOverrides) {
-      final override = ManualRomOverrides.forView(view, sensitivity);
-      if (override != null) {
+    // Tier 1 — telemetry-derived defaults (project convention; sensitivity-aware).
+    if (kUseTelemetryRomDefaults) {
+      final telemetry = CurlRomDefaults.forView(view, sensitivity);
+      if (telemetry != null) {
         return RomThresholds(
-          startAngle: override.startAngle,
-          peakAngle: override.peakAngle,
-          peakExitAngle: override.peakExitAngle,
-          endAngle: override.endAngle,
+          startAngle: telemetry.startAngle,
+          peakAngle: telemetry.peakAngle,
+          peakExitAngle: telemetry.peakExitAngle,
+          endAngle: telemetry.endAngle,
           source: ThresholdSource.global,
         );
       }
     }
-    // Tier 2 — data-driven generated defaults; apply sensitivity deltas.
-    if (kUseDataDrivenThresholds) {
-      final set = DefaultRomThresholds.forView(view);
+    // Tier 2 — pipeline-derived defaults (SHELVED); apply sensitivity deltas.
+    if (kUsePipelineRomDefaults) {
+      final set = PipelineRomDefaults.forView(view);
       return _applyRomSensitivity(
         RomThresholds(
           startAngle: set.startAngle,
@@ -107,15 +108,19 @@ class RomThresholds {
   /// peakExitAngle is always re-derived from the adjusted peak + kCurlPeakExitGap.
   static RomThresholds _applyRomSensitivity(
     RomThresholds base,
-    CurlSensitivity sensitivity, [
+    FeedbackSensitivity sensitivity, [
     CurlCameraView view = CurlCameraView.unknown,
   ]) {
-    if (sensitivity == CurlSensitivity.medium) return base;
+    if (sensitivity == FeedbackSensitivity.medium) return base;
     // ROM deltas: (dStart, dPeak, dEnd)
     // High: tighter gates — must curl deeper and extend more fully.
     final (dStart, dPeak, dEnd) = switch (sensitivity) {
-      CurlSensitivity.high => (5.0, -10.0, 0.0),
-      CurlSensitivity.medium => (0.0, 0.0, 0.0), // unreachable; guarded above
+      FeedbackSensitivity.high => (5.0, -10.0, 0.0),
+      FeedbackSensitivity.medium => (
+        0.0,
+        0.0,
+        0.0,
+      ), // unreachable; guarded above
     };
     final peak = base.peakAngle + dPeak;
     final start = base.startAngle + dStart;

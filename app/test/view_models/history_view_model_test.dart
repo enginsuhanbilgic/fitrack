@@ -50,7 +50,6 @@ class _ThrowingRepo implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
-    List<double?> dtwSimilarities = const [],
   }) async => 0;
 
   @override
@@ -74,6 +73,16 @@ class _ThrowingRepo implements SessionRepository {
     required Duration window,
     int limitReps = 200,
   }) async => const [];
+
+  @override
+  Future<int> insertSeededSession({
+    required Map<String, Object?> sessionRow,
+    required List<Map<String, Object?>> repRows,
+    required List<Map<String, Object?>> formErrorRows,
+  }) async => 0;
+
+  @override
+  Future<int> deleteDemoSessions() async => 0;
 }
 
 void main() {

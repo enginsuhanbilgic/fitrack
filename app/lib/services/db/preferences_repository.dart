@@ -6,12 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../core/types.dart';
+import '../../models/user_profile.dart' show Units;
 
 abstract class PreferencesRepository {
-  /// Whether DTW reference-rep scoring is enabled. Defaults to false.
-  Future<bool> getEnableDtwScoring();
-  Future<void> setEnableDtwScoring(bool value);
-
   /// User-selected theme mode. Defaults to [ThemeMode.system].
   Future<ThemeMode> getThemeMode();
   Future<void> setThemeMode(ThemeMode mode);
@@ -56,17 +53,58 @@ abstract class PreferencesRepository {
   Future<bool> getSquatDebugSession();
   Future<void> setSquatDebugSession(bool value);
 
-  /// Form/ROM sensitivity for biceps curl. Defaults to [CurlSensitivity.medium].
-  /// Affects only cold-start (`ThresholdSource.global`) reps — calibrated
-  /// and auto-calibrated paths are personal and are never modified.
-  Future<CurlSensitivity> getCurlSensitivity();
-  Future<void> setCurlSensitivity(CurlSensitivity value);
+  /// Unified form/ROM coaching sensitivity for all exercises.
+  /// Defaults to [FeedbackSensitivity.medium]. Affects only cold-start
+  /// (`ThresholdSource.global`) reps — calibrated and auto-calibrated
+  /// paths are personal and are never modified.
+  Future<FeedbackSensitivity> getFeedbackSensitivity();
+  Future<void> setFeedbackSensitivity(FeedbackSensitivity value);
 
-  /// Form sensitivity for squat. Defaults to [SquatSensitivity.medium].
-  /// Snapshot-on-construction — mid-session Settings changes apply to the
-  /// next workout only.
-  Future<SquatSensitivity> getSquatSensitivity();
-  Future<void> setSquatSensitivity(SquatSensitivity value);
+  /// Display + input units. Defaults to [Units.metric] (cm, kg). Storage
+  /// is always metric — this preference only affects formatting and form
+  /// inputs in [EditProfileScreen]. Toggling units never mutates any saved
+  /// height_cm / weight_kg values.
+  Future<Units> getUnits();
+  Future<void> setUnits(Units value);
+
+  /// Whether spoken coaching cues (TTS) play during workouts. Defaults to
+  /// `true`. Read at workout start and frozen for the session.
+  Future<bool> getTtsEnabled();
+  Future<void> setTtsEnabled(bool value);
+
+  /// How chatty the TTS coaching is when [getTtsEnabled] is true. Defaults
+  /// to [TtsVerbosity.medium]. Caps the number of times the voice fires
+  /// per *form error* per session; visual highlights and the session-end
+  /// summary are unaffected. Read at workout start and frozen for the
+  /// session.
+  Future<TtsVerbosity> getTtsVerbosity();
+  Future<void> setTtsVerbosity(TtsVerbosity value);
+
+  /// Whether haptic feedback fires on rep completion / form errors.
+  /// Defaults to `true`. Read at workout start and frozen for the session.
+  Future<bool> getHapticsEnabled();
+  Future<void> setHapticsEnabled(bool value);
+
+  // ── Demo Mode (revision 6 of `plans_of_claude/demo-mode-toggle.md`) ──
+
+  /// Whether Demo Mode is currently active. Defaults to `false`.
+  /// Flipped LAST in both `enableAndSeed()` and `disable()` so a partial
+  /// failure mid-toggle leaves the pref reflecting the pre-toggle state.
+  Future<bool> getDemoModeEnabled();
+  Future<void> setDemoModeEnabled(bool value);
+
+  /// Whether the user has answered the first-launch "Try with sample data?"
+  /// dialog. Defaults to `false`. Once true, the dialog never reappears.
+  Future<bool> getOnboardingChoiceMade();
+  Future<void> setOnboardingChoiceMade(bool value);
+
+  /// JSON-encoded backup of the user's real `user_profile` row taken before
+  /// `enableAndSeed()` overwrites it with Demo Alex. Restored by `disable()`
+  /// step 3 Case A. Null when no backup exists (fresh install OR user was
+  /// previously demo-only). See Gap 33 in the plan.
+  Future<String?> getUserProfileBackup();
+  Future<void> setUserProfileBackup(String? json);
+  Future<void> clearUserProfileBackup();
 }
 
 class SqlitePreferencesRepository implements PreferencesRepository {
@@ -74,7 +112,6 @@ class SqlitePreferencesRepository implements PreferencesRepository {
 
   final Database _db;
 
-  static const String _kDtwScoringKey = 'enable_dtw_scoring';
   static const String _kSquatVariantKey = 'squat_variant';
   static const String _kSquatLongFemurKey = 'squat_long_femur_lifter';
   static const String _kDiagnosticDisableAutoCalibrationKey =
@@ -82,29 +119,15 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   static const String _kCurlDebugSessionKey = 'curl_debug_session';
   static const String _kSquatDebugSessionKey = 'squat_debug_session';
   static const String _kThemeModeKey = 'theme_mode';
-  static const String _kCurlSensitivityKey = 'curl_sensitivity';
-  static const String _kSquatSensitivityKey = 'squat_sensitivity';
-
-  @override
-  Future<bool> getEnableDtwScoring() async {
-    final rows = await _db.query(
-      'preferences',
-      columns: ['value'],
-      where: 'key = ?',
-      whereArgs: [_kDtwScoringKey],
-      limit: 1,
-    );
-    if (rows.isEmpty) return false;
-    return rows.first['value'] == 'true';
-  }
-
-  @override
-  Future<void> setEnableDtwScoring(bool value) async {
-    await _db.insert('preferences', {
-      'key': _kDtwScoringKey,
-      'value': value.toString(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-  }
+  static const String _kFeedbackSensitivityKey = 'feedback_sensitivity';
+  static const String _kUnitsKey = 'units';
+  static const String _kTtsEnabledKey = 'tts_enabled';
+  static const String _kTtsVerbosityKey = 'tts_verbosity';
+  static const String _kHapticsEnabledKey = 'haptics_enabled';
+  // ── Demo Mode keys (schema v10 / demo-mode-toggle.md) ──
+  static const String _kDemoModeEnabledKey = 'demo_mode_enabled';
+  static const String _kOnboardingChoiceMadeKey = 'onboarding_choice_made';
+  static const String _kUserProfileBackupKey = 'user_profile_backup';
 
   @override
   Future<SquatVariant> getSquatVariant() async {
@@ -219,55 +242,28 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   }
 
   @override
-  Future<CurlSensitivity> getCurlSensitivity() async {
+  Future<FeedbackSensitivity> getFeedbackSensitivity() async {
     final rows = await _db.query(
       'preferences',
       columns: ['value'],
       where: 'key = ?',
-      whereArgs: [_kCurlSensitivityKey],
+      whereArgs: [_kFeedbackSensitivityKey],
       limit: 1,
     );
-    if (rows.isEmpty) return CurlSensitivity.medium;
+    if (rows.isEmpty) return FeedbackSensitivity.medium;
     final raw = rows.first['value'] as String?;
-    if (raw == null) return CurlSensitivity.medium;
+    if (raw == null) return FeedbackSensitivity.medium;
     try {
-      return CurlSensitivity.values.byName(raw);
+      return FeedbackSensitivity.values.byName(raw);
     } catch (_) {
-      return CurlSensitivity.medium;
+      return FeedbackSensitivity.medium;
     }
   }
 
   @override
-  Future<void> setCurlSensitivity(CurlSensitivity value) async {
+  Future<void> setFeedbackSensitivity(FeedbackSensitivity value) async {
     await _db.insert('preferences', {
-      'key': _kCurlSensitivityKey,
-      'value': value.name,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-  }
-
-  @override
-  Future<SquatSensitivity> getSquatSensitivity() async {
-    final rows = await _db.query(
-      'preferences',
-      columns: ['value'],
-      where: 'key = ?',
-      whereArgs: [_kSquatSensitivityKey],
-      limit: 1,
-    );
-    if (rows.isEmpty) return SquatSensitivity.medium;
-    final raw = rows.first['value'] as String?;
-    if (raw == null) return SquatSensitivity.medium;
-    try {
-      return SquatSensitivity.values.byName(raw);
-    } catch (_) {
-      return SquatSensitivity.medium;
-    }
-  }
-
-  @override
-  Future<void> setSquatSensitivity(SquatSensitivity value) async {
-    await _db.insert('preferences', {
-      'key': _kSquatSensitivityKey,
+      'key': _kFeedbackSensitivityKey,
       'value': value.name,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -298,27 +294,196 @@ class SqlitePreferencesRepository implements PreferencesRepository {
     'dark' => ThemeMode.dark,
     _ => ThemeMode.system,
   };
+
+  @override
+  Future<Units> getUnits() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kUnitsKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return Units.metric;
+    final raw = rows.first['value'] as String?;
+    if (raw == null) return Units.metric;
+    try {
+      return Units.values.byName(raw);
+    } catch (_) {
+      return Units.metric;
+    }
+  }
+
+  @override
+  Future<void> setUnits(Units value) async {
+    await _db.insert('preferences', {
+      'key': _kUnitsKey,
+      'value': value.name,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<bool> getTtsEnabled() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kTtsEnabledKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return true;
+    return rows.first['value'] != 'false';
+  }
+
+  @override
+  Future<void> setTtsEnabled(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kTtsEnabledKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<TtsVerbosity> getTtsVerbosity() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kTtsVerbosityKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return TtsVerbosity.medium;
+    final raw = rows.first['value'] as String?;
+    if (raw == null) return TtsVerbosity.medium;
+    try {
+      return TtsVerbosity.values.byName(raw);
+    } catch (_) {
+      return TtsVerbosity.medium;
+    }
+  }
+
+  @override
+  Future<void> setTtsVerbosity(TtsVerbosity value) async {
+    await _db.insert('preferences', {
+      'key': _kTtsVerbosityKey,
+      'value': value.name,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<bool> getHapticsEnabled() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kHapticsEnabledKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return true;
+    return rows.first['value'] != 'false';
+  }
+
+  @override
+  Future<void> setHapticsEnabled(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kHapticsEnabledKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<bool> getDemoModeEnabled() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kDemoModeEnabledKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    return rows.first['value'] == 'true';
+  }
+
+  @override
+  Future<void> setDemoModeEnabled(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kDemoModeEnabledKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<bool> getOnboardingChoiceMade() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kOnboardingChoiceMadeKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    return rows.first['value'] == 'true';
+  }
+
+  @override
+  Future<void> setOnboardingChoiceMade(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kOnboardingChoiceMadeKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<String?> getUserProfileBackup() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kUserProfileBackupKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['value'] as String?;
+  }
+
+  @override
+  Future<void> setUserProfileBackup(String? json) async {
+    if (json == null) {
+      await clearUserProfileBackup();
+      return;
+    }
+    await _db.insert('preferences', {
+      'key': _kUserProfileBackupKey,
+      'value': json,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<void> clearUserProfileBackup() async {
+    await _db.delete(
+      'preferences',
+      where: 'key = ?',
+      whereArgs: [_kUserProfileBackupKey],
+    );
+  }
 }
 
 /// In-memory test double. No SQLite dependency.
 class InMemoryPreferencesRepository implements PreferencesRepository {
-  bool _enableDtwScoring = false;
   SquatVariant _squatVariant = SquatVariant.bodyweight;
   bool _squatLongFemur = false;
   bool _diagnosticDisableAutoCalibration = false;
   bool _curlDebugSession = false;
   bool _squatDebugSession = false;
-  CurlSensitivity _curlSensitivity = CurlSensitivity.medium;
-  SquatSensitivity _squatSensitivity = SquatSensitivity.medium;
+  FeedbackSensitivity _feedbackSensitivity = FeedbackSensitivity.medium;
   ThemeMode _themeMode = ThemeMode.system;
-
-  @override
-  Future<bool> getEnableDtwScoring() async => _enableDtwScoring;
-
-  @override
-  Future<void> setEnableDtwScoring(bool value) async {
-    _enableDtwScoring = value;
-  }
+  Units _units = Units.metric;
+  bool _ttsEnabled = true;
+  TtsVerbosity _ttsVerbosity = TtsVerbosity.medium;
+  bool _hapticsEnabled = true;
+  bool _demoModeEnabled = false;
+  bool _onboardingChoiceMade = false;
+  String? _userProfileBackup;
 
   @override
   Future<SquatVariant> getSquatVariant() async => _squatVariant;
@@ -362,19 +527,12 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   }
 
   @override
-  Future<CurlSensitivity> getCurlSensitivity() async => _curlSensitivity;
+  Future<FeedbackSensitivity> getFeedbackSensitivity() async =>
+      _feedbackSensitivity;
 
   @override
-  Future<void> setCurlSensitivity(CurlSensitivity value) async {
-    _curlSensitivity = value;
-  }
-
-  @override
-  Future<SquatSensitivity> getSquatSensitivity() async => _squatSensitivity;
-
-  @override
-  Future<void> setSquatSensitivity(SquatSensitivity value) async {
-    _squatSensitivity = value;
+  Future<void> setFeedbackSensitivity(FeedbackSensitivity value) async {
+    _feedbackSensitivity = value;
   }
 
   @override
@@ -383,5 +541,66 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   @override
   Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;
+  }
+
+  @override
+  Future<Units> getUnits() async => _units;
+
+  @override
+  Future<void> setUnits(Units value) async {
+    _units = value;
+  }
+
+  @override
+  Future<bool> getTtsEnabled() async => _ttsEnabled;
+
+  @override
+  Future<void> setTtsEnabled(bool value) async {
+    _ttsEnabled = value;
+  }
+
+  @override
+  Future<TtsVerbosity> getTtsVerbosity() async => _ttsVerbosity;
+
+  @override
+  Future<void> setTtsVerbosity(TtsVerbosity value) async {
+    _ttsVerbosity = value;
+  }
+
+  @override
+  Future<bool> getHapticsEnabled() async => _hapticsEnabled;
+
+  @override
+  Future<void> setHapticsEnabled(bool value) async {
+    _hapticsEnabled = value;
+  }
+
+  @override
+  Future<bool> getDemoModeEnabled() async => _demoModeEnabled;
+
+  @override
+  Future<void> setDemoModeEnabled(bool value) async {
+    _demoModeEnabled = value;
+  }
+
+  @override
+  Future<bool> getOnboardingChoiceMade() async => _onboardingChoiceMade;
+
+  @override
+  Future<void> setOnboardingChoiceMade(bool value) async {
+    _onboardingChoiceMade = value;
+  }
+
+  @override
+  Future<String?> getUserProfileBackup() async => _userProfileBackup;
+
+  @override
+  Future<void> setUserProfileBackup(String? json) async {
+    _userProfileBackup = json;
+  }
+
+  @override
+  Future<void> clearUserProfileBackup() async {
+    _userProfileBackup = null;
   }
 }

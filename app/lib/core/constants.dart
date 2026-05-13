@@ -68,36 +68,36 @@ const double kCurlPeakExitAngle = 85.0;
 const double kCurlEndAngle = 140.0;
 
 // ── Threshold source toggle (developer) ─────────────────
-/// Developer toggle: when `true`, `RomThresholds.global(view)` returns the
-/// T2.4-derived per-view thresholds from `DefaultRomThresholds.forView()`;
-/// when `false`, it returns the hand-tuned legacy constants above
-/// (`kCurlStartAngle`, `kCurlPeakAngle`, `kCurlPeakExitAngle`, `kCurlEndAngle`).
+/// PROJECT CONVENTION (2026-05-13)
+/// ───────────────────────────────
+/// FiTrack's cold-start ROM thresholds are derived from **live in-app
+/// diagnostic-session telemetry** — the "Curl debug session" toggle in
+/// Settings records per-rep extremes, which are post-processed into the
+/// per-view threshold buckets in `curl_rom_defaults.dart`.
 ///
-/// Default: `false` — preserves the shipping-2026-04 behavior so the T2.4 v2
-/// wiring is a zero-behavior-change landing. Flip to `true` to ship the
-/// data-driven defaults once validated on-device.
+/// The alternative — deriving thresholds from an offline video-clip
+/// analysis pipeline (`tools/dataset_analysis/`) — is SHELVED. The
+/// pipeline output remains in `pipeline_rom_defaults.dart` for a future
+/// re-derivation when the recorded dataset grows, but is not consumed at
+/// runtime today.
 ///
-/// Only affects users without a `CurlRomProfile` or auto-calibration data —
-/// i.e. the cold-start `ThresholdSource.global` fallback. Personal Calibration
-/// and Auto-Calibration paths are unchanged.
-///
-/// See `T2.4_STATE.md §11.4` for the derived threshold values.
-const bool kUseDataDrivenThresholds = false;
+/// Three-tier resolver (see `rom_thresholds.dart`):
+///   1. Telemetry-derived defaults  (this flag, default `true`)        ★ shipping
+///   2. Pipeline-derived defaults   (`kUsePipelineRomDefaults`, false)   shelved
+///   3. Legacy hand-tuned constants (`kCurl*` above)                     fallback
 
-/// When true, `RomThresholds.global(view)` consults
-/// [ManualRomOverrides.forView] before either the data-driven or legacy
-/// path. Views with a null override entry fall through to the next tier.
-///
-/// Three-tier precedence:
-///   1. Manual override (`manual_rom_overrides.dart`) — this flag
-///   2. Data-driven generated defaults (`default_rom_thresholds.dart`) —
-///      gated by [kUseDataDrivenThresholds]
-///   3. Legacy constants (`kCurlStartAngle` etc.) — always available
-///
-/// Default `true` so the diagnostic-derived front-view numbers ship.
-/// Flip to `false` to A/B test against the lower tiers without losing
-/// the manual values.
-const bool kUseManualOverrides = true;
+/// Tier 1 gate. When `true`, `RomThresholds.global(view)` consults
+/// [CurlRomDefaults.forView] first. Views with a null entry fall
+/// through to the next tier. This is the **project convention** — leave on.
+const bool kUseTelemetryRomDefaults = true;
+
+/// Tier 2 gate. When `true`, `RomThresholds.global(view)` consults
+/// `PipelineRomDefaults.forView` after the telemetry tier and before the
+/// legacy constants. Default `false` — the pipeline is shelved pending a
+/// larger dataset (current leave-one-clip-out cross-validation std is ±20–28°,
+/// not yet generalizable). Only affects users without a `CurlRomProfile`
+/// or auto-calibration data — the cold-start `ThresholdSource.global` path.
+const bool kUsePipelineRomDefaults = false;
 
 // ── Form feedback thresholds ────────────────────────────
 /// Torso swing: ΔX_shoulder / L_torso.
@@ -229,6 +229,22 @@ const double kHeadSigmaDriftCap = 2.0;
 /// Minimum seconds between two audio cues of the same type.
 const double kFeedbackCooldownSec = 3.0;
 
+/// Per-error voice-cue cap when [TtsVerbosity.low] is selected. After this
+/// many fires of the same error in a single session, the voice falls silent
+/// for that error — visual highlights and the session-end summary still
+/// surface every fire. Tuned to 1 (single spoken reminder per cue per
+/// session) because the "low" tier exists for users who've internalized
+/// the coaching and want a quiet workout.
+const int kTtsVerbosityLowCap = 1;
+
+/// Per-error voice-cue cap when [TtsVerbosity.medium] is selected. After
+/// this many fires of the same error in a single session, the voice falls
+/// silent for that error — visual highlights and the session-end summary
+/// still surface every fire. Tuned to 3 (initial cue + two follow-ups)
+/// because most form errors fire 2-5 times per set, so the cap silences
+/// the *repeat* without missing the first warning. Default tier.
+const int kTtsVerbosityMediumCap = 3;
+
 // ── 1€ Filter defaults ──────────────────────────────────
 /// Paper defaults (Casiez et al., CHI 2012). Kept as the base for any
 /// consumer that wants the reference behavior (e.g. a future engine-side
@@ -293,6 +309,65 @@ const double kSquatBottomAngle = 90.0;
 
 /// ASCENDING → IDLE when knee angle returns above this → rep++.
 const double kSquatEndAngle = 160.0;
+
+// ── Squat FSM thresholds — High sensitivity (research, 2026-05-13) ─
+/// Tightened gates for `FeedbackSensitivity.high`. Source: deep-research
+/// biomechanical spec (2026-05-13). Medium-sensitivity defaults (160/90/160)
+/// are preserved bit-for-bit; see [kSquatStartAngle] / [kSquatBottomAngle] /
+/// [kSquatEndAngle] above for the existing values.
+///
+/// Wired into the FSM via [SquatRomThresholdSet.forSensitivity] — these
+/// constants are unreferenced today and become live the first time a session
+/// runs at High sensitivity. Existing-user behavior at Medium is unchanged.
+const double kSquatStartAngleHigh = 165.0;
+const double kSquatBottomAngleHigh = 88.0;
+const double kSquatEndAngleHigh = 163.0;
+
+// ── Squat form thresholds — High sensitivity (research, 2026-05-13) ─
+/// Tightened form-error thresholds for `FeedbackSensitivity.high`. Citations:
+///   - 42° BW lean: Straub & Powers 2024 base (40°) + 2° noise margin.
+///   - 48° HBBS lean: Glassbrook 2017 + Straub & Powers synthesis.
+///   - 0.32 knee-shift: deep-research 0.35 minus 0.03 strictness buffer.
+///   - 0.025 heel-lift: Macrum 2012 "2.5% of leg length" exact value.
+///
+/// Foundation PR: these constants are defined but not yet consumed by
+/// `SquatFormThresholds.forSensitivity(high)` — that method continues to
+/// return defaults + additive deltas. A later PR re-points `forSensitivity`
+/// at these values once telemetry-derived squat thresholds land.
+const double kSquatLeanWarnDegBodyweightHigh = 42.0;
+const double kSquatLeanWarnDegHBBSHigh = 48.0;
+const double kSquatKneeShiftWarnRatioHigh = 0.32;
+const double kSquatHeelLiftWarnRatioHigh = 0.025;
+
+// ── Squat personal calibration ──────────────────────────
+/// Minimum reps required for squat personal calibration to commit. Mirrors
+/// [kCalibrationMinReps] (curl) and lives as a separate constant so a future
+/// per-exercise dial can diverge the two values without a refactor.
+const int kSquatCalibrationMinReps = 3;
+
+/// Minimum ROM excursion (degrees) for a squat rep to qualify as a valid
+/// calibration sample. CANONICAL NAME — referenced by upcoming Parts 5, 6, 8
+/// of the squat overhaul plan. Looser than the curl floor (25°) because squat
+/// reps with shallow knee flexion still carry calibration value via the
+/// long-femur path.
+const double kSquatMinViableRomDegrees = 40.0;
+
+/// Margin added to `observedMinKneeAngle` when deriving the BOTTOM gate from
+/// a calibrated profile. Mirrors [kPushUpProfileBottomMargin] / the curl
+/// profile's peak-tolerance pattern — the gate sits a touch *above* the
+/// observed deepest angle so a noisy rep doesn't fail the user's own bar.
+const double kSquatProfileBottomMargin = 5.0;
+
+/// Margin subtracted from `observedMaxKneeAngle` for the START gate. Wider
+/// than the END margin so the FSM enters DESCENDING decisively before the
+/// user is committed to the rep.
+const double kSquatProfileStartMargin = 10.0;
+
+/// Margin subtracted from `observedMaxKneeAngle` for the END gate. Tighter
+/// than the START margin so the rep doesn't commit prematurely — mirrors
+/// curl's `start > end` FSM invariant (which prevents jitter at the top from
+/// flipping into a new rep before the user has stabilized).
+const double kSquatProfileEndMargin = 5.0;
 
 // ── Push-up FSM thresholds (degrees) ────────────────────
 /// IDLE → DESCENDING when elbow angle drops below this.
@@ -374,8 +449,34 @@ const double kQualitySquatLeanMaxDeduction = 0.20;
 
 /// Maximum quality deduction for heel lift. Applied proportionally.
 const double kQualitySquatHeelLiftMaxDeduction = 0.10;
+
+/// Maximum quality deduction for hip-lead ("Stripper Squat" / "Good Morning
+/// Squat"). Severity = `((ratio − threshold) / 0.6).clamp(0, 1)` so a ratio
+/// of 1.4 = 0 deduction, ratio of 2.0 = full 0.15 deduction. Mirrors the
+/// proportional-severity model used for lean + heel-lift.
+const double kQualitySquatHipLeadMaxDeduction = 0.15;
 // `forwardKneeShift` is intentionally excluded — informational only.
 // `squatDepth` is handled via the depth_factor multiplier, not a subtraction.
+
+// ── Hip-lead detector (research, 2026-05-13) ────────────
+/// Hip vs shoulder vertical-velocity ratio threshold. When the hip rises
+/// faster than the shoulder by more than this multiple during the first
+/// [kHipLeadAscendingWindowFraction] of ASCENDING, the lifter is leading
+/// with the hips — a classic "Stripper Squat" / "Good Morning Squat"
+/// fault. Source: deep-research biomechanical spec (2026-05-13).
+const double kHipLeadVelocityRatio = 1.4;
+
+/// Fraction of the ASCENDING phase evaluated for hip-lead. Only the first
+/// 30% — by mid-ascent the spine straightens out naturally even on a
+/// hip-lead rep, so evaluating later would mask the fault. The first
+/// third is where the "Good Morning" pattern is biomechanically visible.
+const double kHipLeadAscendingWindowFraction = 0.30;
+
+/// Minimum raw ASCENDING frames required before the hip-lead check runs.
+/// Floors out single-frame velocity spikes and very fast reps where the
+/// 30%-window math degenerates to a 1–2 frame sample. Fail-open below
+/// this count.
+const int kHipLeadMinAscendingFrames = 6;
 
 // ── Push-up form thresholds ──────────────────────────────
 /// Max shoulder-hip-ankle collinearity deviation for hip sag (degrees).
@@ -407,6 +508,27 @@ const double kLongFemurBottomAngle = 100.0;
 
 /// Number of completed reps used to detect long-femur pattern.
 const int kLongFemurDetectReps = 3;
+
+// ── Anatomical long-femur classification (research, 2026-05-13) ──
+/// Femur/torso ratio above which the user is classified as a long-femur
+/// lifter and the squat BOTTOM gate relaxes to [kLongFemurBottomAngle]
+/// from rep 1. Derived from biomechanical research: lifters with
+/// femur/torso > 0.60 cannot reach 90° knee flexion without losing
+/// balance over the midfoot. Replaces the rep-history heuristic (which
+/// required 3 consecutive shallow reps before relaxing the gate) for
+/// users whose first 5 high-confidence frames already classify them.
+const double kLongFemurRatioThreshold = 0.60;
+
+/// Minimum number of high-confidence frames the `_FemurTorsoClassifier`
+/// must observe before it locks a ratio decision. The window-median
+/// over ≥ this many samples filters ML Kit's first-frame jitter.
+const int kFemurTorsoMinSamples = 5;
+
+/// Maximum number of recent ratio samples retained for the
+/// `_FemurTorsoClassifier`'s window-median calculation. Once locked,
+/// the classifier ignores further samples — so this bound only applies
+/// during the pre-lock accumulation phase.
+const int kFemurTorsoWindowSize = 15;
 
 // ── Countdown & Session ──────────────────────────────────
 /// Starting value for the hands-free countdown (counts down to 1 then fires GO).
@@ -593,15 +715,6 @@ const int kRepBoundaryMinDwellFrames = 8;
 const int kTelemetryRingSize = 500;
 
 // ── Feature flags ────────────────────────────────────────
-/// Front-view biceps curl is temporarily hidden from the user-facing UI
-/// while side-view accuracy is the active focus. Engine code paths
-/// (`CurlFormAnalyzer`, `CurlViewDetector` front branch, front ROM
-/// buckets) remain intact — this flag only gates surfaces the user
-/// sees: the curl view picker, calibration progress matrix, settings
-/// ROM-override rows, calibration overlay live label, and summary view
-/// label. Flip back to `true` to restore.
-const bool kCurlFrontViewEnabled = false;
-
 /// Exposes the "Curl Debug Session" entry on the home screen and the
 /// matching toggle in Settings. When `true`, the user can launch a
 /// silent observation session that:

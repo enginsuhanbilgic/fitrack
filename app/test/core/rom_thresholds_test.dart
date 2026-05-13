@@ -13,37 +13,40 @@ class _StubBucket implements RomBucketLike {
 
 void main() {
   group('RomThresholds.global', () {
-    // Three-tier resolver: manual override > data-driven > legacy.
-    // These tests describe behavior under the SHIPPING flag config: manual
-    // overrides on, data-driven off. If either flag flips, rework the tests
+    // Three-tier resolver: telemetry-derived defaults > pipeline-derived (shelved) > legacy.
+    // These tests describe behavior under the SHIPPING flag config: telemetry
+    // defaults on, pipeline defaults off. If either flag flips, rework the tests
     // (with explicit acknowledgement of the new tier in scope) rather than
     // silently regressing.
-    test('manual-override branch is active under kUseManualOverrides', () {
-      expect(
-        kUseManualOverrides,
-        isTrue,
-        reason:
-            'Test file assumes the manual-override branch is enabled. Flip '
-            'this precondition if the flag is intentionally set to false.',
-      );
-    });
+    test(
+      'telemetry-defaults branch is active under kUseTelemetryRomDefaults',
+      () {
+        expect(
+          kUseTelemetryRomDefaults,
+          isTrue,
+          reason:
+              'Test file assumes the telemetry-defaults branch is enabled. Flip '
+              'this precondition if the flag is intentionally set to false.',
+        );
+      },
+    );
 
-    test('front view returns the manual override bucket', () {
+    test('front (legacy sentinel) returns invariant-holding thresholds', () {
+      // Front view removed 2026-05; the enum is now a view-detector
+      // fallback sentinel. RomThresholds.global must still hand the FSM
+      // valid thresholds (via the pipeline-tier side fallback in
+      // PipelineRomDefaults.forView).
+      // ignore: deprecated_member_use
       final t = RomThresholds.global(CurlCameraView.front);
-
-      // Values from manual_rom_overrides.dart — derived from the 2026-04-26
-      // diagnostic-mode session with generalization tolerances.
-      expect(t.startAngle, closeTo(148.0, 0.01));
-      expect(t.peakAngle, closeTo(35.0, 0.01));
-      expect(t.peakExitAngle, closeTo(50.0, 0.01));
-      expect(t.endAngle, closeTo(128.0, 0.01));
+      expect(t.startAngle, greaterThan(t.endAngle));
+      expect(t.peakExitAngle, greaterThan(t.peakAngle));
       expect(t.source, ThresholdSource.global);
     });
 
     test(
-      'sideLeft view returns the manual override bucket (derived 2026-04-28)',
+      'sideLeft view returns the telemetry-defaults bucket (derived 2026-04-28)',
       () {
-        // ManualRomOverrides.sideLeftDefault is now populated from a --from-frames
+        // CurlRomDefaults.sideLeftDefault is now populated from a --from-frames
         // diagnostic session. Medium sensitivity is the no-arg default.
         final t = RomThresholds.global(CurlCameraView.sideLeft);
 

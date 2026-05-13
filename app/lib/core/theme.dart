@@ -541,9 +541,12 @@ BoxDecoration ftCardDecoration(BuildContext context, {double radius = 12}) {
   );
 }
 
-/// Card with a colored left-accent strip.  Use this instead of passing
-/// [borderAccent] to a Container — Flutter disallows borderRadius on borders
-/// with non-uniform side colors.
+/// Plain rounded card.
+///
+/// **2026-05-13:** the left-accent strip was removed app-wide per product
+/// direction — the "AI surface" visual cue is gone. [accentColor] is retained
+/// for source-compat with existing call-sites but no longer rendered. New
+/// call-sites should prefer `Container(decoration: ftCardDecoration(...))`.
 class FtAccentCard extends StatelessWidget {
   const FtAccentCard({
     super.key,
@@ -554,37 +557,22 @@ class FtAccentCard extends StatelessWidget {
   });
 
   final Widget child;
+
+  /// Retained for source-compat; no longer painted. See class doc.
   final Color accentColor;
   final EdgeInsetsGeometry padding;
   final double radius;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(radius),
-          border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
-        child: Stack(
-          children: [
-            Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              child: Container(width: 3, color: accentColor),
-            ),
-            Padding(
-              padding: padding.add(const EdgeInsets.only(left: 3)),
-              child: child,
-            ),
-          ],
-        ),
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
+      padding: padding,
+      child: child,
     );
   }
 }
@@ -673,6 +661,8 @@ class FtSparkline extends StatelessWidget {
     this.color = FiTrackTheme.cyan,
     this.width = 80,
     this.height = 28,
+    this.minOverride,
+    this.maxOverride,
   });
 
   final List<double> data;
@@ -680,26 +670,47 @@ class FtSparkline extends StatelessWidget {
   final double width;
   final double height;
 
+  /// When set, the painter uses this as the bottom of the value range instead
+  /// of `data.reduce(min)`. Combined with [maxOverride] this lets a series of
+  /// quality scores render on a fixed `0..1` scale, so a flat-good session
+  /// draws as a flat line instead of getting auto-amplified.
+  final double? minOverride;
+
+  /// Top of the value range; see [minOverride].
+  final double? maxOverride;
+
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) return SizedBox(width: width, height: height);
     return CustomPaint(
       size: Size(width, height),
-      painter: _SparklinePainter(data: data, color: color),
+      painter: _SparklinePainter(
+        data: data,
+        color: color,
+        minOverride: minOverride,
+        maxOverride: maxOverride,
+      ),
     );
   }
 }
 
 class _SparklinePainter extends CustomPainter {
-  _SparklinePainter({required this.data, required this.color});
+  _SparklinePainter({
+    required this.data,
+    required this.color,
+    this.minOverride,
+    this.maxOverride,
+  });
   final List<double> data;
   final Color color;
+  final double? minOverride;
+  final double? maxOverride;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (data.length < 2) return;
-    final max = data.reduce((a, b) => a > b ? a : b);
-    final min = data.reduce((a, b) => a < b ? a : b);
+    final max = maxOverride ?? data.reduce((a, b) => a > b ? a : b);
+    final min = minOverride ?? data.reduce((a, b) => a < b ? a : b);
     final range = max - min == 0 ? 1.0 : max - min;
     final paint = Paint()
       ..color = color
@@ -710,7 +721,10 @@ class _SparklinePainter extends CustomPainter {
     final path = Path();
     for (var i = 0; i < data.length; i++) {
       final x = (i / (data.length - 1)) * size.width;
-      final y = size.height - ((data[i] - min) / range) * size.height;
+      // Clamp against the fixed range so out-of-band values don't draw outside
+      // the box (e.g. a stray 1.05 quality would otherwise overshoot the top).
+      final norm = ((data[i] - min) / range).clamp(0.0, 1.0);
+      final y = size.height - norm * size.height;
       i == 0 ? path.moveTo(x, y) : path.lineTo(x, y);
     }
     canvas.drawPath(path, paint);
@@ -718,7 +732,10 @@ class _SparklinePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_SparklinePainter old) =>
-      old.data != data || old.color != color;
+      old.data != data ||
+      old.color != color ||
+      old.minOverride != minOverride ||
+      old.maxOverride != maxOverride;
 }
 
 /// Progress ring — maps to design's `FtRing`.

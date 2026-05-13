@@ -17,7 +17,9 @@ library;
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:fitrack/core/constants.dart';
 import 'package:fitrack/core/types.dart';
+import 'package:fitrack/engine/squat/squat_rom_profile.dart';
 import 'package:fitrack/models/pose_result.dart';
 import 'package:fitrack/services/camera_service.dart';
 import 'package:fitrack/services/db/preferences_repository.dart';
@@ -119,7 +121,6 @@ class _ThrowingSessionRepository implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
-    List<double?> dtwSimilarities = const [],
   }) async {
     throw StateError('simulated persistence failure');
   }
@@ -143,6 +144,16 @@ class _ThrowingSessionRepository implements SessionRepository {
     required Duration window,
     int limitReps = 200,
   }) async => const [];
+
+  @override
+  Future<int> insertSeededSession({
+    required Map<String, Object?> sessionRow,
+    required List<Map<String, Object?>> repRows,
+    required List<Map<String, Object?>> formErrorRows,
+  }) async => 0;
+
+  @override
+  Future<int> deleteDemoSessions() async => 0;
 }
 
 void main() {
@@ -370,6 +381,52 @@ void main() {
         vm.dispose();
       },
     );
+
+    // Pins the Part-4 audit wiring: `_triggerCompleted` must populate the
+    // squat context bundle for squat sessions. Without this, a late-init
+    // bug (e.g. accidentally constructing the bundle for the wrong
+    // exercise, or forgetting to set it) would only be caught by a live
+    // run. We don't assert on the per-rep profile/autoCal contents here
+    // — those have dedicated tests in form_auditor_test.dart — just that
+    // the bundle exists and carries the session's variant + sensitivity.
+    test(
+      'finishWorkout on squat emits a non-null squatContext bundle',
+      () async {
+        final vm = buildVm(exercise: ExerciseType.squat);
+        final completion = vm.completionEvents.first;
+        vm.finishWorkout();
+        final e = await completion;
+
+        expect(
+          e.squatContext,
+          isNotNull,
+          reason: 'squat sessions must always produce a squatContext.',
+        );
+        expect(e.squatContext!.variant, e.squatVariant);
+        expect(
+          e.squatContext!.longFemurLifter,
+          e.squatLongFemurLifter,
+          reason: 'context.longFemurLifter must mirror the flat field.',
+        );
+        expect(e.squatContext!.feedbackSensitivity, e.feedbackSensitivity);
+        vm.dispose();
+      },
+    );
+
+    test(
+      'finishWorkout on non-squat exercises emits a null squatContext',
+      () async {
+        // Symmetric guard: the bundle is squat-only. A future refactor
+        // that accidentally constructs SquatSessionContext for curl
+        // sessions should fail this test.
+        final vm = buildVm(); // defaults to bicepsCurlFront
+        final completion = vm.completionEvents.first;
+        vm.finishWorkout();
+        final e = await completion;
+        expect(e.squatContext, isNull);
+        vm.dispose();
+      },
+    );
   });
 
   group('WorkoutViewModel — completion snapshot immutability', () {
@@ -582,6 +639,164 @@ void main() {
           reason: '$err must not be silently suppressed from TTS',
         );
       }
+    });
+
+    test('FormError.hipLead → "Lead with your chest" cue', () {
+      // Lock the user-visible TTS phrasing for the new hip-lead cue.
+      // The plan explicitly named this string ("Lead with your chest")
+      // — a future refactor that swaps it for a less-actionable phrase
+      // ("Chest up", etc.) would be visible at review time via this
+      // test rather than only at on-device QA.
+      expect(
+        WorkoutViewModel.errorMessageForTest(FormError.hipLead),
+        'Lead with your chest',
+      );
+    });
+
+    test('every FormError has a non-empty TTS cue', () {
+      // Belt-and-suspenders: every enum value must map to a non-empty
+      // string. If someone adds a new FormError without wiring it
+      // into the switch, the analyzer will flag exhaustiveness — but
+      // an empty default would slip through. Guard against that.
+      for (final err in FormError.values) {
+        final cue = WorkoutViewModel.errorMessageForTest(err);
+        expect(cue, isNotEmpty, reason: '$err must have a TTS cue');
+      }
+    });
+  });
+
+  group('WorkoutViewModel — _resolveSquatThresholds tier priority', () {
+    test(
+      'Tier 3: no profile, no auto-cal → cold-start sensitivity defaults',
+      () {
+        TelemetryLog.instance.clear();
+        final vm = buildVm(exercise: ExerciseType.squat);
+
+        final t = vm.resolveSquatThresholds(0);
+
+        // Medium-sensitivity defaults (160 / 90 / 160) — the VM defaults to
+        // medium when the preferences repo returns its default sensitivity.
+        expect(t.startAngle, kSquatStartAngle);
+        expect(t.bottomAngle, kSquatBottomAngle);
+        expect(t.endAngle, kSquatEndAngle);
+
+        // Telemetry pin: Tier 3 fired.
+        expect(
+          TelemetryLog.instance.entries.any(
+            (e) =>
+                e.tag == 'squat.thresholds_resolved' &&
+                e.message.contains('tier=3'),
+          ),
+          isTrue,
+        );
+
+        vm.dispose();
+      },
+    );
+
+    test('Tier 2: auto-cal viable → resolver returns auto-cal tuple', () {
+      TelemetryLog.instance.clear();
+      final vm = buildVm(exercise: ExerciseType.squat);
+
+      // Seed the auto-cal with two reps that span a viable ROM:
+      // min=85°, max=175°, ROM excursion = 90° (≥ 40° gate).
+      vm.seedSquatAutoCalForTest(85, 175, 2);
+      final t = vm.resolveSquatThresholds(0);
+
+      // Derived from `SquatRomThresholdSet.fromBucket(85, 175)`:
+      //   start = 175 - 10 = 165
+      //   bottom = 85 + 5 = 90
+      //   end = 175 - 5 = 170
+      expect(t.startAngle, closeTo(165, 1e-9));
+      expect(t.bottomAngle, closeTo(90, 1e-9));
+      expect(t.endAngle, closeTo(170, 1e-9));
+
+      expect(
+        TelemetryLog.instance.entries.any(
+          (e) =>
+              e.tag == 'squat.thresholds_resolved' &&
+              e.message.contains('tier=2'),
+        ),
+        isTrue,
+      );
+
+      vm.dispose();
+    });
+
+    test('Tier 1: calibrated profile beats Tier 2 auto-cal '
+        '(priority order pinned)', () {
+      TelemetryLog.instance.clear();
+      final vm = buildVm(exercise: ExerciseType.squat);
+
+      // Seed BOTH a calibrated profile AND a viable auto-cal.
+      // Profile values are deliberately distinct from auto-cal values so
+      // the assertion discriminates between the two tiers.
+      vm.seedSquatProfileForTest(
+        SquatRomProfile(
+          bucket: SquatRomBucket(
+            observedMinKneeAngle: 80,
+            observedMaxKneeAngle: 180,
+            sampleCount: kSquatCalibrationMinReps,
+          ),
+        ),
+      );
+      vm.seedSquatAutoCalForTest(85, 175, 2);
+
+      final t = vm.resolveSquatThresholds(0);
+
+      // Tier 1 wins: derived from profile bucket (80, 180) with the same
+      // margin policy:  start=170, bottom=85, end=175.
+      expect(t.startAngle, closeTo(170, 1e-9));
+      expect(t.bottomAngle, closeTo(85, 1e-9));
+      expect(t.endAngle, closeTo(175, 1e-9));
+
+      expect(
+        TelemetryLog.instance.entries.any(
+          (e) =>
+              e.tag == 'squat.thresholds_resolved' &&
+              e.message.contains('tier=1'),
+        ),
+        isTrue,
+      );
+
+      vm.dispose();
+    });
+
+    test('Tier 1: uncalibrated profile (sampleCount < min) falls through '
+        'to Tier 2 / Tier 3', () {
+      TelemetryLog.instance.clear();
+      final vm = buildVm(exercise: ExerciseType.squat);
+
+      // Profile exists but is under the calibration sample-count floor —
+      // tier 1 should NOT activate. With no auto-cal seeded, the chain
+      // falls through to tier 3.
+      vm.seedSquatProfileForTest(
+        SquatRomProfile(
+          bucket: SquatRomBucket(
+            observedMinKneeAngle: 80,
+            observedMaxKneeAngle: 180,
+            sampleCount: kSquatCalibrationMinReps - 1,
+          ),
+        ),
+      );
+
+      final t = vm.resolveSquatThresholds(0);
+
+      // Tier 3 defaults — NOT the profile-derived values.
+      expect(t.startAngle, kSquatStartAngle);
+      expect(t.bottomAngle, kSquatBottomAngle);
+      expect(t.endAngle, kSquatEndAngle);
+
+      expect(
+        TelemetryLog.instance.entries.any(
+          (e) =>
+              e.tag == 'squat.thresholds_resolved' &&
+              e.message.contains('tier=3'),
+        ),
+        isTrue,
+      );
+
+      vm.dispose();
     });
   });
 }

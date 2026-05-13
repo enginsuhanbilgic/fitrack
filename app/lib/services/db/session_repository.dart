@@ -36,10 +36,6 @@ abstract class SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
-
-    /// Per-rep DTW similarity scores (0.0–1.0), index-aligned with
-    /// `event.curlRepRecords`. Null entries and missing indices persist as NULL.
-    List<double?> dtwSimilarities = const [],
   });
 
   /// History list source. Newest first (`started_at DESC`). `exercise = null`
@@ -65,6 +61,30 @@ abstract class SessionRepository {
     required Duration window,
     int limitReps = 200,
   });
+
+  /// Insert a fully-formed session for the demo seed. Bypasses the live
+  /// `insertCompletedSession` path so the demo blueprint doesn't have to
+  /// construct a `WorkoutCompletedEvent` (which carries 30+ engine fields).
+  ///
+  /// Each map uses **named-column** keys matching the SQLite column names.
+  /// `sessionRow` MUST include `is_demo: 1` to be eligible for
+  /// [deleteDemoSessions]. The rep rows automatically inherit the session
+  /// via the returned id (caller need not pre-set `session_id`).
+  ///
+  /// Runs as a single transaction — partial inserts never persist. See
+  /// ADR-6 in `plans_of_claude/demo-mode-toggle.md`.
+  Future<int> insertSeededSession({
+    required Map<String, Object?> sessionRow,
+    required List<Map<String, Object?>> repRows,
+    required List<Map<String, Object?>> formErrorRows,
+  });
+
+  /// Wipes every row in `sessions` where `is_demo = 1`. Cascades to `reps`
+  /// + `form_errors` via existing FK ON DELETE CASCADE. Used by
+  /// `DemoService.enableAndSeed` step 2 and `DemoService.disable` step 1.
+  ///
+  /// Returns the number of `sessions` rows deleted (excludes cascaded rows).
+  Future<int> deleteDemoSessions();
 }
 
 class SqliteSessionRepository implements SessionRepository {
@@ -77,7 +97,6 @@ class SqliteSessionRepository implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
-    List<double?> dtwSimilarities = const [],
   }) async {
     return _db.transaction<int>((txn) async {
       final sessionId = await txn.insert('sessions', <String, Object?>{
@@ -111,9 +130,6 @@ class SqliteSessionRepository implements SessionRepository {
             concentricDurations,
             r.repIndex - 1,
           );
-          final dtwSimilarity = r.repIndex - 1 < dtwSimilarities.length
-              ? dtwSimilarities[r.repIndex - 1]
-              : null;
           final bicepsMetric =
               isCurlSide && r.repIndex - 1 < event.bicepsSideRepMetrics.length
               ? event.bicepsSideRepMetrics[r.repIndex - 1]
@@ -130,7 +146,9 @@ class SqliteSessionRepository implements SessionRepository {
             'bucket_updated': r.bucketUpdated ? 1 : 0,
             'rejected_outlier': r.rejectedOutlier ? 1 : 0,
             'concentric_ms': concentricMs,
-            'dtw_similarity': dtwSimilarity,
+            // dtw_similarity column retained as nullable; DTW scoring was
+            // removed 2026-05-13. NULL on all new writes.
+            'dtw_similarity': null,
             'biceps_lean_deg': bicepsMetric?.leanDeg,
             'biceps_shoulder_drift_ratio': bicepsMetric?.shoulderDriftRatio,
             'biceps_elbow_drift_ratio': bicepsMetric?.elbowDriftRatio,
@@ -138,6 +156,11 @@ class SqliteSessionRepository implements SessionRepository {
             'biceps_elbow_drift_signed': bicepsMetric?.elbowDriftSigned,
             'biceps_shrug_ratio': bicepsMetric?.shrugRatio,
             'biceps_elbow_rise_ratio': bicepsMetric?.elbowRiseRatio,
+            // biceps_front_swing_ratio / biceps_front_depth_swing_ratio:
+            // front view removed 2026-05; columns retained for schema
+            // compatibility, always NULL on new writes.
+            'biceps_front_swing_ratio': null,
+            'biceps_front_depth_swing_ratio': null,
           });
         }
       } else {
@@ -159,6 +182,8 @@ class SqliteSessionRepository implements SessionRepository {
             'squat_knee_shift_ratio': squatMetric?.kneeShiftRatio,
             'squat_heel_lift_ratio': squatMetric?.heelLiftRatio,
             'squat_variant': squatMetric == null ? null : variantName,
+            'squat_min_knee_angle': squatMetric?.minKneeAngle,
+            'squat_max_knee_angle': squatMetric?.maxKneeAngle,
           });
         }
       }
@@ -232,10 +257,31 @@ class SqliteSessionRepository implements SessionRepository {
       }
     }
 
+    // Second batch query — per-rep `quality` for the History sparkline.
+    // ORDER BY rep_index keeps each session's series chronological. Rows with
+    // NULL quality are filtered server-side so legacy pre-WP6 reps don't pad
+    // the series with zeros.
+    final qualityRows = await _db.rawQuery(
+      'SELECT session_id, quality FROM reps '
+      'WHERE session_id IN ($placeholders) AND quality IS NOT NULL '
+      'ORDER BY session_id, rep_index ASC',
+      sessionIds,
+    );
+    final qualityMap = <int, List<double>>{};
+    for (final r in qualityRows) {
+      final sid = r['session_id'] as int;
+      final q = (r['quality'] as num).toDouble();
+      qualityMap.putIfAbsent(sid, () => <double>[]).add(q);
+    }
+
     return rows
         .map((r) {
           final id = r['id'] as int;
-          return _summaryFromRow(r, topErrors: topErrorsMap[id] ?? const []);
+          return _summaryFromRow(
+            r,
+            topErrors: topErrorsMap[id] ?? const [],
+            qualitySeries: qualityMap[id] ?? const [],
+          );
         })
         .toList(growable: false);
   }
@@ -290,6 +336,42 @@ class SqliteSessionRepository implements SessionRepository {
   }
 
   @override
+  Future<int> insertSeededSession({
+    required Map<String, Object?> sessionRow,
+    required List<Map<String, Object?>> repRows,
+    required List<Map<String, Object?>> formErrorRows,
+  }) async {
+    return _db.transaction<int>((txn) async {
+      // Demo seed inserts use named columns — resilient to future schema
+      // column reorderings (per Gap 26). `is_demo: 1` is required on every
+      // demo session row; assert in debug, default to 1 in release for safety.
+      assert(
+        sessionRow['is_demo'] == 1,
+        'Demo seed must set is_demo=1 on every session row',
+      );
+      final sessionId = await txn.insert('sessions', sessionRow);
+      for (final r in repRows) {
+        await txn.insert('reps', <String, Object?>{
+          ...r,
+          'session_id': sessionId,
+        });
+      }
+      for (final e in formErrorRows) {
+        await txn.insert('form_errors', <String, Object?>{
+          ...e,
+          'session_id': sessionId,
+        });
+      }
+      return sessionId;
+    });
+  }
+
+  @override
+  Future<int> deleteDemoSessions() async {
+    return _db.delete('sessions', where: 'is_demo = 1');
+  }
+
+  @override
   Future<List<Duration>> recentConcentricDurations({
     required ExerciseType exercise,
     required Duration window,
@@ -330,6 +412,7 @@ LIMIT ?
   static SessionSummary _summaryFromRow(
     Map<String, Object?> row, {
     List<FormError> topErrors = const [],
+    List<double> qualitySeries = const [],
   }) {
     final detectedViewName = row['detected_view'] as String?;
     return SessionSummary(
@@ -346,6 +429,10 @@ LIMIT ?
       fatigueDetected: (row['fatigue_detected'] as int) == 1,
       asymmetryDetected: (row['asymmetry_detected'] as int) == 1,
       topErrors: topErrors,
+      // Schema v10. Pre-v10 rows upgrade to `is_demo = 0` via the ALTER's
+      // DEFAULT, so this read is safe on legacy data too.
+      isDemo: ((row['is_demo'] as int?) ?? 0) == 1,
+      qualitySeries: qualitySeries,
     );
   }
 
@@ -371,7 +458,6 @@ LIMIT ?
           ? null
           : (row['rejected_outlier'] as int) == 1,
       concentricMs: row['concentric_ms'] as int?,
-      dtwSimilarity: (row['dtw_similarity'] as num?)?.toDouble(),
       squatLeanDeg: (row['squat_lean_deg'] as num?)?.toDouble(),
       squatKneeShiftRatio: (row['squat_knee_shift_ratio'] as num?)?.toDouble(),
       squatHeelLiftRatio: (row['squat_heel_lift_ratio'] as num?)?.toDouble(),
@@ -381,6 +467,8 @@ LIMIT ?
       squatVariant: squatVariantName == null
           ? null
           : _safeSquatVariant(squatVariantName),
+      squatMinKneeAngle: (row['squat_min_knee_angle'] as num?)?.toDouble(),
+      squatMaxKneeAngle: (row['squat_max_knee_angle'] as num?)?.toDouble(),
       bicepsLeanDeg: (row['biceps_lean_deg'] as num?)?.toDouble(),
       bicepsShoulderDriftRatio: (row['biceps_shoulder_drift_ratio'] as num?)
           ?.toDouble(),
@@ -392,6 +480,10 @@ LIMIT ?
       bicepsShrugRatio: (row['biceps_shrug_ratio'] as num?)?.toDouble(),
       bicepsElbowRiseRatio: (row['biceps_elbow_rise_ratio'] as num?)
           ?.toDouble(),
+      bicepsFrontSwingRatio: (row['biceps_front_swing_ratio'] as num?)
+          ?.toDouble(),
+      bicepsFrontDepthSwingRatio:
+          (row['biceps_front_depth_swing_ratio'] as num?)?.toDouble(),
     );
   }
 
@@ -426,7 +518,6 @@ class InMemorySessionRepository implements SessionRepository {
     WorkoutCompletedEvent event, {
     required DateTime startedAt,
     List<Duration?> concentricDurations = const [],
-    List<double?> dtwSimilarities = const [],
   }) async {
     final id = _nextId++;
     _sessions.add(
@@ -501,6 +592,10 @@ class InMemorySessionRepository implements SessionRepository {
                   bicepsElbowDriftSigned: bicepsMetric?.elbowDriftSigned,
                   bicepsShrugRatio: bicepsMetric?.shrugRatio,
                   bicepsElbowRiseRatio: bicepsMetric?.elbowRiseRatio,
+                  // Front view removed 2026-05; columns retained for schema
+                  // compatibility, always NULL on new writes.
+                  bicepsFrontSwingRatio: null,
+                  bicepsFrontDepthSwingRatio: null,
                 );
               })
               .toList(growable: false)
@@ -520,6 +615,8 @@ class InMemorySessionRepository implements SessionRepository {
               squatKneeShiftRatio: squatMetric?.kneeShiftRatio,
               squatHeelLiftRatio: squatMetric?.heelLiftRatio,
               squatVariant: squatMetric == null ? null : s.event.squatVariant,
+              squatMinKneeAngle: squatMetric?.minKneeAngle,
+              squatMaxKneeAngle: squatMetric?.maxKneeAngle,
             );
           });
     return SessionDetail(
@@ -533,6 +630,78 @@ class InMemorySessionRepository implements SessionRepository {
   @override
   Future<void> deleteSession(int sessionId) async {
     _sessions.removeWhere((s) => s.id == sessionId);
+  }
+
+  @override
+  Future<int> insertSeededSession({
+    required Map<String, Object?> sessionRow,
+    required List<Map<String, Object?>> repRows,
+    required List<Map<String, Object?>> formErrorRows,
+  }) async {
+    final id = _nextId++;
+    // Reconstruct enough of a WorkoutCompletedEvent to satisfy _toSummary and
+    // other read paths. This is a stub for the in-memory fallback.
+    final exerciseName = sessionRow['exercise'] as String;
+    final exercise = SqliteSessionRepository._parseExerciseType(exerciseName);
+    final durationMs = sessionRow['duration_ms'] as int;
+    final totalReps = sessionRow['total_reps'] as int;
+    final totalSets = sessionRow['total_sets'] as int;
+    final averageQuality =
+        (sessionRow['average_quality'] as num?)?.toDouble() ?? 0.0;
+    final detectedViewName = sessionRow['detected_view'] as String?;
+    final detectedView = detectedViewName == null
+        ? CurlCameraView.unknown
+        : CurlCameraView.values.byName(detectedViewName);
+    final fatigueDetected = (sessionRow['fatigue_detected'] as int) == 1;
+    final asymmetryDetected = (sessionRow['asymmetry_detected'] as int) == 1;
+    final eccentricTooFastCount =
+        (sessionRow['eccentric_too_fast_count'] as int?) ?? 0;
+
+    final event = WorkoutCompletedEvent(
+      exercise: exercise,
+      sessionDuration: Duration(milliseconds: durationMs),
+      totalReps: totalReps,
+      totalSets: totalSets,
+      averageQuality: averageQuality,
+      detectedView: detectedView,
+      fatigueDetected: fatigueDetected,
+      asymmetryDetected: asymmetryDetected,
+      errorsTriggered: formErrorRows
+          .map((e) => FormError.values.byName(e['error'] as String))
+          .toSet(),
+      repQualities: repRows
+          .map((r) => (r['quality'] as num?)?.toDouble() ?? 0.0)
+          .toList(),
+      curlRepRecords: [], // Not needed for summary
+      squatRepMetrics: [],
+      bicepsSideRepMetrics: [],
+      curlBucketSummaries: const [], // Required but not needed for summary
+      eccentricTooFastCount: eccentricTooFastCount,
+    );
+
+    _sessions.add(
+      _InMemorySession(
+        id: id,
+        event: event,
+        startedAt: DateTime.fromMillisecondsSinceEpoch(
+          sessionRow['started_at'] as int,
+        ),
+        isDemo: true,
+      ),
+    );
+    return id;
+  }
+
+  /// Wipes every row in `sessions` where `is_demo = 1`. Cascades to `reps`
+  /// + `form_errors` via existing FK ON DELETE CASCADE. Used by
+  /// `DemoService.enableAndSeed` step 2 and `DemoService.disable` step 1.
+  ///
+  /// Returns the number of `sessions` rows deleted (excludes cascaded rows).
+  @override
+  Future<int> deleteDemoSessions() async {
+    final count = _sessions.where((s) => s.isDemo).length;
+    _sessions.removeWhere((s) => s.isDemo);
+    return count;
   }
 
   @override
@@ -583,6 +752,11 @@ class InMemorySessionRepository implements SessionRepository {
             .map((e) => e.key)
             .toList(growable: false);
 
+    // Mirror the SQLite quality batch: in-memory repo exposes `repQualities`
+    // directly. Skip non-finite / NaN guards aren't needed — the engine writes
+    // clamped doubles in [0..1]; an empty list yields an empty series.
+    final qualitySeries = List<double>.unmodifiable(s.event.repQualities);
+
     return SessionSummary(
       id: s.id,
       exercise: s.event.exercise,
@@ -599,6 +773,9 @@ class InMemorySessionRepository implements SessionRepository {
       fatigueDetected: s.event.fatigueDetected,
       asymmetryDetected: s.event.asymmetryDetected,
       topErrors: topErrors,
+      // In-memory repo uses the isDemo flag from the internal session object.
+      isDemo: s.isDemo,
+      qualitySeries: qualitySeries,
     );
   }
 }
@@ -609,11 +786,13 @@ class _InMemorySession {
     required this.event,
     required this.startedAt,
     this.concentricDurations = const [],
+    this.isDemo = false,
   });
   final int id;
   final WorkoutCompletedEvent event;
   final DateTime startedAt;
   final List<Duration?> concentricDurations;
+  final bool isDemo;
 }
 
 /// Back-compat shim for PR1 tests that observed inserts directly. PR2 prefers

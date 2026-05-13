@@ -104,11 +104,22 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           errorCounts: e.errorCounts,
           curlRepRecords: e.curlRepRecords,
           curlBucketSummaries: e.curlBucketSummaries,
-          dtwSimilarities: e.dtwSimilarities,
           squatVariant: e.squatVariant,
           squatLongFemurLifter: e.squatLongFemurLifter,
           squatRepMetrics: e.squatRepMetrics,
           bicepsSideRepMetrics: e.bicepsSideRepMetrics,
+          curlProfile: e.curlProfile,
+          pushUpProfile: e.pushUpProfile,
+          // Squat audit inputs — pulled from the bundled context when it
+          // exists (live squat sessions). Null context falls through to
+          // null fields → Tier 3 cold-start grading, the documented
+          // graceful-degradation path for non-squat / reconstructed
+          // sessions. The forwarded `feedbackSensitivity` below already
+          // reflects the session's sensitivity for non-squat exercises.
+          squatProfile: e.squatContext?.profile,
+          autoCalSnapshot: e.autoCalSnapshot,
+          squatAutoCalSnapshot: e.squatContext?.autoCalSnapshot,
+          feedbackSensitivity: e.feedbackSensitivity,
           repConcentricMs: e.repConcentricMs,
           repDepthPercents: e.repDepthPercents,
         ),

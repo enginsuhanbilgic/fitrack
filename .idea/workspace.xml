@@ -4,39 +4,63 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="BIG UPDATE ON DESIGN">
+    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="Squat pipeline overhaul Part 1: High-sensitivity ROM tuple + schema v9 (min/max knee angle)">
+      <change afterPath="$PROJECT_DIR$/IOS_RUN_GUIDE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/RUN_GUIDE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/services/demo/demo_seed.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/services/demo/demo_service.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/view_models/session_summary_input.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/view_models/session_summary_view_model.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/view_models/telemetry/pushup_rep_line.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/widgets/demo/first_launch_demo_dialog.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/widgets/summary/summary_actions.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/widgets/summary/summary_form_issues_card.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/widgets/summary/summary_hero.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/widgets/summary/summary_insights_card.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/widgets/summary/summary_stats_grid.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/widgets/summary/summary_variant_chips.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/core/push_up_rom_defaults_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/engine/push_up/push_up_form_analyzer_extremes_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/screens/summary_screen_from_session_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/services/db/schema_migration_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/services/demo/demo_seed_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/services/demo/demo_service_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/view_models/session_summary_view_model_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/view_models/telemetry/pushup_rep_line_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/test/view_models/workout_view_model_tts_verbosity_test.dart" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_pushup_thresholds_from_telemetry.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tools/dataset_analysis/tests/test_derive_pushup.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/GLOSSARY.md" beforeDir="false" afterPath="$PROJECT_DIR$/GLOSSARY.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/ios/Podfile" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Podfile" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/ios/Podfile.lock" beforeDir="false" afterPath="$PROJECT_DIR$/app/ios/Podfile.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/PRODUCTION_ROADMAP.md" beforeDir="false" afterPath="$PROJECT_DIR$/PRODUCTION_ROADMAP.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/app.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/app.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/core/constants.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/constants.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/core/default_rom_thresholds.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/default_rom_thresholds.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/core/manual_rom_overrides.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/manual_rom_overrides.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/core/rom_thresholds.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/rom_thresholds.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/push_up_rom_defaults.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/push_up_rom_defaults.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/theme.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/theme.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/core/types.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/types.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer_extras.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_form_analyzer_extras.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_side_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_side_form_analyzer.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_strategy.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_strategy.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/push_up/push_up_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/push_up/push_up_form_analyzer.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/push_up/push_up_strategy.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/push_up/push_up_strategy.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/rep_counter.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/engine/squat/squat_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/squat/squat_form_analyzer.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/engine/squat/squat_strategy.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/squat/squat_strategy.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/edit_profile_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/edit_profile_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/history_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/history_screen.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/app_services.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/app_services.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/services/db/preferences_repository.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/preferences_repository.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/db/profile_repository.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/profile_repository.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/services/db/schema.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/schema.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/services/db/session_dtos.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/session_dtos.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/services/db/session_repository.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/session_repository.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/services/telemetry_log.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/telemetry_log.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/db/user_profile_repository.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/user_profile_repository.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/session_exporter.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/session_exporter.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/widgets/session_card.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/session_card.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/core/rom_thresholds_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/core/rom_thresholds_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/engine/curl/curl_side_form_analyzer_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/curl/curl_side_form_analyzer_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/engine/squat/squat_form_analyzer_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/squat/squat_form_analyzer_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/services/db/_test_db.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/services/db/_test_db.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/test/services/db/session_repository_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/services/db/session_repository_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/view_models/history_view_model_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/view_models/history_view_model_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/view_models/workout_view_model_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/view_models/workout_view_model_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tools/dataset_analysis/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/tools/dataset_analysis/README.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -60,7 +84,7 @@
   <component name="Git.Settings">
     <option name="RECENT_BRANCH_BY_REPOSITORY">
       <map>
-        <entry key="$PROJECT_DIR$" value="main" />
+        <entry key="$PROJECT_DIR$" value="alihan" />
       </map>
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -108,7 +132,7 @@
     &quot;cf.first.check.clang-format&quot;: &quot;false&quot;,
     &quot;cidr.known.project.marker&quot;: &quot;true&quot;,
     &quot;dart.analysis.tool.window.visible&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;alihan&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
     &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
     &quot;last_opened_file_path&quot;: &quot;/Users/alihan/AndroidStudioProjects/fitrack/tools/dataset_analysis/data/videos&quot;,
     &quot;settings.editor.selected.configurable&quot;: &quot;configurable.group.language&quot;,
@@ -308,7 +332,15 @@
       <option name="project" value="LOCAL" />
       <updated>1777254406292</updated>
     </task>
-    <option name="localTasksCounter" value="23" />
+    <task id="LOCAL-00023" summary="Squat pipeline overhaul Part 1: High-sensitivity ROM tuple + schema v9 (min/max knee angle)">
+      <option name="closed" value="true" />
+      <created>1778639118324</created>
+      <option name="number" value="00023" />
+      <option name="presentableId" value="LOCAL-00023" />
+      <option name="project" value="LOCAL" />
+      <updated>1778639118324</updated>
+    </task>
+    <option name="localTasksCounter" value="24" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -345,7 +377,8 @@
     <MESSAGE value="  chore(lint): replace prints with debugPrint, drop dead code&#10;  feat(history): swipe-to-delete with confirmation dialog&#10;  feat(a11y): Semantics + live regions across Home, RepCounter, Calibration, Summary&#10;  refactor(replay): hoist warmup const, extract _parseFrame, drop dead code&#10;  feat(settings): CSV export with share sheet&#10;  perf(workout): Selector for rep counter to skip pose-frame rebuilds" />
     <MESSAGE value="feat(T5.3): DTW reference scoring + history pagination (Layer 1)" />
     <MESSAGE value="BIG UPDATE ON DESIGN" />
-    <option name="LAST_COMMIT_MESSAGE" value="BIG UPDATE ON DESIGN" />
+    <MESSAGE value="Squat pipeline overhaul Part 1: High-sensitivity ROM tuple + schema v9 (min/max knee angle)" />
+    <option name="LAST_COMMIT_MESSAGE" value="Squat pipeline overhaul Part 1: High-sensitivity ROM tuple + schema v9 (min/max knee angle)" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

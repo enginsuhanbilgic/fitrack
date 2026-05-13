@@ -1,7 +1,6 @@
 import '../../core/rom_thresholds.dart';
 import '../../core/types.dart';
 import '../form_analyzer_base.dart';
-import 'dtw_scorer.dart';
 
 /// Curl-only extensions beyond [FormAnalyzerBase].
 ///
@@ -136,23 +135,16 @@ mixin CurlFormAnalyzerExtras {
   /// (faces camera-left); `null` = could not detect (nose or
   /// shoulder below confidence). Used as the back-lean sign convention
   /// internally; surfaced in telemetry so a user-vs-pose orientation
-  /// mismatch is visible. Always `null` on the front analyzer.
+  /// mismatch is visible.
   bool? get facingRightThisRep;
-
-  /// Score a completed rep's angle trace against the reference rep, if
-  /// DTW scoring is enabled and a reference is configured. Returns null
-  /// when scoring is disabled or no reference exists.
-  DtwScore? scoreRep(List<double> candidate);
 }
 
-/// Umbrella type for the polymorphic curl analyzer field on
-/// [CurlStrategy]. Concrete subclasses (`CurlFormAnalyzer` for front,
-/// `CurlSideFormAnalyzer` for side) extend [FormAnalyzerBase] with
-/// [CurlFormAnalyzerExtras]; this class lets the strategy hold a
-/// reference to either without per-call-site downcasts.
+/// Umbrella type for the curl analyzer field on [CurlStrategy].
 ///
-/// Empty body — the actual contract lives entirely in the parent +
-/// mixin. Exists purely so Dart's type system can express
-/// "FormAnalyzerBase AND CurlFormAnalyzerExtras" as a single named type.
+/// Historically polymorphic (front vs. side); after the 2026-05 front-view
+/// removal only [CurlSideFormAnalyzer] implements this. The umbrella type
+/// is kept so the strategy holds the analyzer as a single named type and
+/// so future variants (e.g. seated-front-cable curl) can plug in without
+/// reshuffling call sites.
 abstract class CurlAnalyzer extends FormAnalyzerBase
     with CurlFormAnalyzerExtras {}

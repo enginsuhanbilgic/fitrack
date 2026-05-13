@@ -9,22 +9,7 @@ import '_test_db.dart';
 void main() {
   initSqfliteFfi();
 
-  group('InMemoryPreferencesRepository', () {
-    test('default is false', () async {
-      final repo = InMemoryPreferencesRepository();
-      expect(await repo.getEnableDtwScoring(), isFalse);
-    });
-
-    test('round-trip set true then false', () async {
-      final repo = InMemoryPreferencesRepository();
-      await repo.setEnableDtwScoring(true);
-      expect(await repo.getEnableDtwScoring(), isTrue);
-      await repo.setEnableDtwScoring(false);
-      expect(await repo.getEnableDtwScoring(), isFalse);
-    });
-  });
-
-  group('SqlitePreferencesRepository — current schema (v2)', () {
+  group('SqlitePreferencesRepository — schema shape', () {
     late Database db;
 
     setUp(() async {
@@ -35,36 +20,23 @@ void main() {
       await db.close();
     });
 
-    test('default (no row) returns false', () async {
-      final repo = SqlitePreferencesRepository(db);
-      expect(await repo.getEnableDtwScoring(), isFalse);
-    });
-
-    test('set true, get true', () async {
-      final repo = SqlitePreferencesRepository(db);
-      await repo.setEnableDtwScoring(true);
-      expect(await repo.getEnableDtwScoring(), isTrue);
-    });
-
-    test('idempotent set — second write replaces first', () async {
-      final repo = SqlitePreferencesRepository(db);
-      await repo.setEnableDtwScoring(true);
-      await repo.setEnableDtwScoring(false);
-      expect(await repo.getEnableDtwScoring(), isFalse);
-    });
-
-    test('preferences table exists in v2 schema', () async {
+    test('preferences table exists in current schema', () async {
       final tables = await db.rawQuery(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='preferences'",
       );
       expect(tables, hasLength(1));
     });
 
-    test('reps table has dtw_similarity column in v2 schema', () async {
-      final info = await db.rawQuery('PRAGMA table_info(reps)');
-      final colNames = info.map((r) => r['name'] as String).toList();
-      expect(colNames, contains('dtw_similarity'));
-    });
+    test(
+      'reps table retains dtw_similarity column (always-NULL after DTW removal)',
+      () async {
+        // The column cannot be dropped without a table rewrite (SQLite limitation);
+        // it persists as a nullable field that all post-2026-05-13 writes leave NULL.
+        final info = await db.rawQuery('PRAGMA table_info(reps)');
+        final colNames = info.map((r) => r['name'] as String).toList();
+        expect(colNames, contains('dtw_similarity'));
+      },
+    );
   });
 
   group('Squat preferences — InMemory', () {
@@ -182,6 +154,121 @@ void main() {
           contains('dtw_similarity'),
           reason: 'column must be added on upgrade',
         );
+
+        await db.close();
+      },
+    );
+  });
+
+  group('Schema v9 — squat min/max knee angle migration', () {
+    test('v3 → v9 step-up adds both new columns', () async {
+      // Build a v1-shaped baseline, then walk the migration ladder from v3
+      // to current (kDbSchemaVersion). This is the path a long-dormant
+      // installation upgrades through.
+      final db = await databaseFactoryFfi.openDatabase(
+        inMemoryDatabasePath,
+        options: OpenDatabaseOptions(
+          version: 1,
+          onConfigure: onConfigure,
+          onCreate: (db, _) async {
+            await db.execute(ddlProfiles);
+            await db.execute(ddlSessions);
+            await db.execute(ddlReps);
+            await db.execute(ddlFormErrors);
+            await db.execute(ddlFrameTelemetry);
+          },
+        ),
+      );
+
+      await onUpgrade(db, 3, kDbSchemaVersion);
+
+      final info = await db.rawQuery('PRAGMA table_info(reps)');
+      final cols = info.map((r) => r['name'] as String).toList();
+      expect(cols, contains('squat_min_knee_angle'));
+      expect(cols, contains('squat_max_knee_angle'));
+
+      await db.close();
+    });
+
+    test('v8 → v9 step-up adds both new columns', () async {
+      // The closest realistic upgrade path: a user one schema behind ships.
+      final db = await databaseFactoryFfi.openDatabase(
+        inMemoryDatabasePath,
+        options: OpenDatabaseOptions(
+          version: 1,
+          onConfigure: onConfigure,
+          onCreate: (db, _) async {
+            await db.execute(ddlProfiles);
+            await db.execute(ddlSessions);
+            await db.execute(ddlReps);
+            await db.execute(ddlFormErrors);
+            await db.execute(ddlFrameTelemetry);
+          },
+        ),
+      );
+
+      await onUpgrade(db, 8, kDbSchemaVersion);
+
+      final info = await db.rawQuery('PRAGMA table_info(reps)');
+      final cols = info.map((r) => r['name'] as String).toList();
+      expect(cols, contains('squat_min_knee_angle'));
+      expect(cols, contains('squat_max_knee_angle'));
+
+      await db.close();
+    });
+
+    test(
+      'pre-v9 rep rows pick up NULL for both new columns on upgrade',
+      () async {
+        // Seed a v1 DB with one rep row, then walk to current. The pre-existing
+        // row must survive and both new columns must be NULL on it.
+        final db = await databaseFactoryFfi.openDatabase(
+          inMemoryDatabasePath,
+          options: OpenDatabaseOptions(
+            version: 1,
+            onConfigure: onConfigure,
+            onCreate: (db, _) async {
+              await db.execute(ddlProfiles);
+              await db.execute(ddlSessions);
+              await db.execute(ddlReps);
+              await db.execute(ddlFormErrors);
+              await db.execute(ddlFrameTelemetry);
+            },
+          ),
+        );
+
+        await db.insert('sessions', <String, Object?>{
+          'exercise': 'squat',
+          'started_at': 1_700_000_000_000,
+          'duration_ms': 0,
+          'total_reps': 1,
+          'total_sets': 1,
+          'fatigue_detected': 0,
+          'asymmetry_detected': 0,
+          'eccentric_too_fast_count': 0,
+        });
+        final sessionId =
+            (await db.query(
+                  'sessions',
+                  orderBy: 'id DESC',
+                  limit: 1,
+                )).first['id']
+                as int;
+        await db.insert('reps', <String, Object?>{
+          'session_id': sessionId,
+          'rep_index': 1,
+          'quality': 0.8,
+        });
+
+        await onUpgrade(db, 1, kDbSchemaVersion);
+
+        final reps = await db.query('reps');
+        expect(reps, hasLength(1));
+        expect(reps.first['squat_min_knee_angle'], isNull);
+        expect(reps.first['squat_max_knee_angle'], isNull);
+        // Sanity: the row's pre-existing fields survive.
+        expect(reps.first['rep_index'], 1);
+        expect(reps.first['quality'], 0.8);
 
         await db.close();
       },

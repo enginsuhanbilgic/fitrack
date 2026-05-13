@@ -16,7 +16,7 @@ void main() {
     });
 
     test('forSensitivity(medium) equals medium constant', () {
-      final built = FormThresholds.forSensitivity(CurlSensitivity.medium);
+      final built = FormThresholds.forSensitivity(FeedbackSensitivity.medium);
       const m = FormThresholds.medium;
       expect(built.swingThreshold, m.swingThreshold);
       expect(built.torsoLeanThresholdDeg, m.torsoLeanThresholdDeg);
@@ -28,7 +28,7 @@ void main() {
 
     test('high multiplies all fields by 0.75', () {
       const multiplier = 0.75;
-      final h = FormThresholds.forSensitivity(CurlSensitivity.high);
+      final h = FormThresholds.forSensitivity(FeedbackSensitivity.high);
       expect(h.swingThreshold, closeTo(kSwingThreshold * multiplier, 1e-9));
       expect(
         h.torsoLeanThresholdDeg,
@@ -47,7 +47,7 @@ void main() {
     });
 
     test('all fields > 0 for all sensitivities', () {
-      for (final s in CurlSensitivity.values) {
+      for (final s in FeedbackSensitivity.values) {
         final t = FormThresholds.forSensitivity(s);
         expect(
           t.swingThreshold,
@@ -83,8 +83,8 @@ void main() {
     });
 
     test('high is stricter than medium', () {
-      final high = FormThresholds.forSensitivity(CurlSensitivity.high);
-      final med = FormThresholds.forSensitivity(CurlSensitivity.medium);
+      final high = FormThresholds.forSensitivity(FeedbackSensitivity.high);
+      final med = FormThresholds.forSensitivity(FeedbackSensitivity.medium);
 
       expect(high.swingThreshold, lessThan(med.swingThreshold));
       expect(high.shrugThreshold, lessThan(med.shrugThreshold));

@@ -21,9 +21,12 @@ class PushUpFormAnalyzer extends FormAnalyzerBase {
 
   PushUpRomThresholds _thresholds;
   double? _minElbowAngle;
+  double? _maxElbowAngleThisRep;
   double? _maxBodyLineDeviationDeg;
   double? _lastRepQuality;
   double? _lastBodyLineDeviationDeg;
+  double? _lastRepMinElbowAngle;
+  double? _lastRepMaxElbowAngle;
 
   /// Quality score for the most recently committed rep. Null until first
   /// commit. 1.0 is clean; deductions are applied for body-line loss and
@@ -32,6 +35,17 @@ class PushUpFormAnalyzer extends FormAnalyzerBase {
 
   /// Largest shoulder-hip-ankle deviation observed on the most recent rep.
   double? get lastBodyLineDeviationDeg => _lastBodyLineDeviationDeg;
+
+  /// Lowest elbow angle observed during the most recently committed rep
+  /// (i.e. the rep's bottom extension). Null until the first commit.
+  /// Feeds the `pushup.rep` telemetry line read by the offline ROM-derivation
+  /// script.
+  double? get lastRepMinElbowAngle => _lastRepMinElbowAngle;
+
+  /// Highest elbow angle observed during the most recently committed rep
+  /// (i.e. the rep's top extension). Null until the first commit. Companion
+  /// to [lastRepMinElbowAngle] — together they define the rep's ROM tuple.
+  double? get lastRepMaxElbowAngle => _lastRepMaxElbowAngle;
 
   /// True when the user moved far enough down to treat the attempt as a
   /// shallow push-up if they return to full extension before reaching bottom.
@@ -46,6 +60,7 @@ class PushUpFormAnalyzer extends FormAnalyzerBase {
   @override
   void onRepStart(PoseResult startSnapshot) {
     _minElbowAngle = null;
+    _maxElbowAngleThisRep = null;
     _maxBodyLineDeviationDeg = null;
   }
 
@@ -53,6 +68,17 @@ class PushUpFormAnalyzer extends FormAnalyzerBase {
   void trackAngle(double elbowAngle) {
     if (_minElbowAngle == null || elbowAngle < _minElbowAngle!) {
       _minElbowAngle = elbowAngle;
+    }
+  }
+
+  /// Per-frame max-elbow tracker. Mirrors [trackAngle] but captures the
+  /// rep's top extension instead of its bottom. Called alongside
+  /// [trackAngle] from `PushUpStrategy.tick()` whenever the FSM is in an
+  /// active rep state. Separate accumulator from `_minElbowAngle` so the
+  /// existing min-tracking contract is unchanged.
+  void trackMaxElbow(double elbowAngle) {
+    if (_maxElbowAngleThisRep == null || elbowAngle > _maxElbowAngleThisRep!) {
+      _maxElbowAngleThisRep = elbowAngle;
     }
   }
 
@@ -89,7 +115,10 @@ class PushUpFormAnalyzer extends FormAnalyzerBase {
 
     _lastRepQuality = _computeQualityScore(shortRom: shortRom);
     _lastBodyLineDeviationDeg = _maxBodyLineDeviationDeg;
+    _lastRepMinElbowAngle = _minElbowAngle;
+    _lastRepMaxElbowAngle = _maxElbowAngleThisRep;
     _minElbowAngle = null;
+    _maxElbowAngleThisRep = null;
     _maxBodyLineDeviationDeg = null;
     return errors;
   }
@@ -97,9 +126,12 @@ class PushUpFormAnalyzer extends FormAnalyzerBase {
   @override
   void reset() {
     _minElbowAngle = null;
+    _maxElbowAngleThisRep = null;
     _maxBodyLineDeviationDeg = null;
     _lastRepQuality = null;
     _lastBodyLineDeviationDeg = null;
+    _lastRepMinElbowAngle = null;
+    _lastRepMaxElbowAngle = null;
   }
 
   double _computeQualityScore({required bool shortRom}) {

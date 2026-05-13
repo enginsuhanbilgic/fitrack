@@ -1,6 +1,5 @@
 platform :ios, '14.0'
 
-# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
 project 'Runner', {
@@ -39,21 +38,14 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
 
-    # Workaround for ML Kit iOS 26.4 compatibility issue
-    # Disable optimization that causes nil image crash
-    if target.name == 'GoogleMLKit'
-      target.build_configurations.each do |config|
+    target.build_configurations.each do |config|
+      # 1. Simülatör için arm64'ü kesin olarak dışla
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
+      # 2. ML Kit için optimizasyon hatasını engelle
+      if target.name == 'GoogleMLKit'
         config.build_settings['GCC_OPTIMIZATION_LEVEL'] = '0'
         config.build_settings['SWIFT_OPTIMIZATION_LEVEL'] = '-Onone'
       end
-    end
-
-    # MLKit pods (beta13) ship fat binaries with arm64 (device) + x86_64 (Intel sim)
-    # but no arm64-iphonesimulator slice. On Apple Silicon Macs the simulator runs as
-    # arm64, which collides with the device slice. Exclude arm64 from simulator builds
-    # so the linker falls back to Rosetta (x86_64) for those pods only.
-    target.build_configurations.each do |config|
-      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
     end
   end
 end

@@ -40,12 +40,20 @@ class SessionCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        summary.exercise.label,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            summary.exercise.label,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (summary.isDemo) ...[
+                            const SizedBox(width: 8),
+                            const _DemoChip(),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -204,6 +212,36 @@ class SessionCard extends StatelessWidget {
     if (summary.fatigueDetected) parts.add('fatigue detected');
     if (summary.asymmetryDetected) parts.add('asymmetry detected');
     return parts.join(', ');
+  }
+}
+
+/// "DEMO" badge shown next to the exercise label on demo session cards.
+/// Cyan tone to match the live Sample Data section banner in Settings.
+class _DemoChip extends StatelessWidget {
+  const _DemoChip();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: const Color(0xFF00BCD4).withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: const Color(0xFF00BCD4).withValues(alpha: 0.45),
+          width: 0.5,
+        ),
+      ),
+      child: const Text(
+        'DEMO',
+        style: TextStyle(
+          color: Color(0xFF00BCD4),
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
   }
 }
 

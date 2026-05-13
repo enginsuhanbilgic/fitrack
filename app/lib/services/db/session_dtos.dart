@@ -22,6 +22,8 @@ class SessionSummary {
     this.averageQuality,
     this.detectedView,
     this.topErrors = const [],
+    this.isDemo = false,
+    this.qualitySeries = const [],
   });
 
   final int id;
@@ -38,6 +40,26 @@ class SessionSummary {
   /// Up to 3 most-frequent form errors in this session, sorted by count desc.
   /// Empty when the session had no form errors or for pre-WP6 rows.
   final List<FormError> topErrors;
+
+  /// True when this session was inserted by `DemoService.enableAndSeed()`
+  /// (schema v10, `sessions.is_demo = 1`). Set by the persistence layer.
+  ///
+  /// **UI consumers ignore this field** — History list, HomeViewModel
+  /// aggregates, Dashboard cards all render demo rows identically to real
+  /// rows by design (the "lived-in app" illusion).
+  ///
+  /// Only [SessionExporter] (filters demo rows out of shared CSVs) and the
+  /// History list's `Dismissible` widget (omits swipe-to-delete on demo
+  /// tiles) consult this field. See `plans_of_claude/demo-mode-toggle.md`
+  /// ADR-9, Gap 23, and Gap 24.
+  final bool isDemo;
+
+  /// Per-rep `quality` values (0..1) in `rep_index` ASC order — drives the
+  /// History list's per-row sparkline so the line reflects the actual form
+  /// trajectory of that session. Rows with NULL `quality` are excluded, so
+  /// `length` may be < [totalReps]. Empty for pre-WP6 sessions that never
+  /// recorded per-rep quality.
+  final List<double> qualitySeries;
 }
 
 /// Full detail view for the reconstructed SummaryScreen (PR3). Wraps the
@@ -71,11 +93,12 @@ class RepRow {
     this.bucketUpdated,
     this.rejectedOutlier,
     this.concentricMs,
-    this.dtwSimilarity,
     this.squatLeanDeg,
     this.squatKneeShiftRatio,
     this.squatHeelLiftRatio,
     this.squatVariant,
+    this.squatMinKneeAngle,
+    this.squatMaxKneeAngle,
     this.bicepsLeanDeg,
     this.bicepsShoulderDriftRatio,
     this.bicepsElbowDriftRatio,
@@ -83,6 +106,8 @@ class RepRow {
     this.bicepsElbowDriftSigned,
     this.bicepsShrugRatio,
     this.bicepsElbowRiseRatio,
+    this.bicepsFrontSwingRatio,
+    this.bicepsFrontDepthSwingRatio,
   });
 
   final int repIndex;
@@ -97,10 +122,6 @@ class RepRow {
 
   /// Populated only on WP5.4+. NULL on rows written by WP5.2/WP5.3 builds.
   final int? concentricMs;
-
-  /// DTW similarity score 0.0–1.0 vs reference rep. NULL when scoring was
-  /// disabled or session predates T5.3.
-  final double? dtwSimilarity;
 
   // ── Squat-only per-rep metrics (schema v3) ──
   /// Peak forward-lean angle (degrees, signed positive) for this rep. Computed
@@ -119,6 +140,16 @@ class RepRow {
   /// `SquatVariant.name` for the variant the session ran with. NULL on
   /// non-squat rows AND on squat rows written before schema v3.
   final SquatVariant? squatVariant;
+
+  /// Minimum knee angle reached during this rep (degrees). Persisted in
+  /// `reps.squat_min_knee_angle` from schema v9 onward. NULL on non-squat
+  /// rows AND on squat rows written before schema v9.
+  final double? squatMinKneeAngle;
+
+  /// Maximum knee angle observed during this rep (degrees). Persisted in
+  /// `reps.squat_max_knee_angle` from schema v9 onward. Same NULL semantics
+  /// as [squatMinKneeAngle].
+  final double? squatMaxKneeAngle;
 
   // ── Biceps side-view per-rep metrics (schema v5) ──
   /// Peak forward-trunk-lean delta (degrees) for this rep — analyzer's
@@ -152,6 +183,15 @@ class RepRow {
   /// Peak elbow-rise ratio — schema v6. NULL on non-side-view rows and
   /// pre-v6 rows.
   final double? bicepsElbowRiseRatio;
+
+  // ── Biceps front-view per-rep metrics (schema v7) ──
+  /// Peak torso-swing ratio (`ΔX_shoulder / L_torso`) — front analyzer's
+  /// `_maxSwingRatio`. NULL on non-front-view rows and pre-v7 rows.
+  final double? bicepsFrontSwingRatio;
+
+  /// Peak depth-swing ratio (`|ΔtorsoLen / L_baseline|`) — front analyzer's
+  /// `_maxDepthRatio`. NULL on non-front-view rows and pre-v7 rows.
+  final double? bicepsFrontDepthSwingRatio;
 
   /// Rebuild a [CurlRepRecord] when every curl-specific field is present;
   /// return null for squat/push-up rows (PR3 uses `.whereType<CurlRepRecord>()`
