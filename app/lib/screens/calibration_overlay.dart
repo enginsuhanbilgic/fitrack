@@ -25,7 +25,10 @@ class CalibrationOverlay extends StatelessWidget {
   final double? currentAngle;
 
   /// Current detected view. `unknown` while still collecting evidence.
-  final CurlCameraView detectedView;
+  /// Null for exercises with no view-detection concept (squat, push-up).
+  /// When null, the view-detection chip + the "calibrating left/right
+  /// view" sub-banner are both hidden.
+  final CurlCameraView? detectedView;
 
   /// Seconds remaining before the auto-timeout fires. Null = timer not running.
   final int? secondsRemaining;
@@ -57,8 +60,12 @@ class CalibrationOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final viewLocked = detectedView != CurlCameraView.unknown;
+    // View detection only matters for curl. Squat / push-up pass
+    // `detectedView: null` and the chip + sub-banner are hidden.
+    final view = detectedView;
+    final viewLocked = view != null && view != CurlCameraView.unknown;
     final isCurl = exercise.isCurl;
+    final viewChipVisible = view != null && isCurl;
 
     return Stack(
       children: [
@@ -102,17 +109,17 @@ class CalibrationOverlay extends StatelessWidget {
                   ),
                 ),
                 if (errorMessage == null &&
-                    isCurl &&
-                    detectedView != CurlCameraView.unknown) ...[
+                    viewChipVisible &&
+                    view != CurlCameraView.unknown) ...[
                   const SizedBox(height: 8),
                   Text(
-                    detectedView == CurlCameraView.front
+                    view == CurlCameraView.front
                         ? 'Front view isn\'t supported — please turn '
                               '90° so the camera sees you from the side.'
-                        : 'Calibrating ${_viewLabel(detectedView).toLowerCase()} profile. '
-                              'Do a ${_otherViewLabel(detectedView)} workout to calibrate that view too.',
+                        : 'Calibrating ${_viewLabel(view).toLowerCase()} profile. '
+                              'Do a ${_otherViewLabel(view)} workout to calibrate that view too.',
                     style: TextStyle(
-                      color: detectedView == CurlCameraView.front
+                      color: view == CurlCameraView.front
                           ? Colors.orangeAccent
                           : Colors.white54,
                       fontSize: 12,
@@ -172,19 +179,27 @@ class CalibrationOverlay extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _Chip(
-                      icon: Icons.videocam,
-                      label: !isCurl
-                          ? 'Side view'
-                          : viewLocked
-                          ? (detectedView == CurlCameraView.front
-                                ? 'Side view needed'
-                                : _viewLabel(detectedView))
-                          : 'Detecting view…',
-                      colored:
-                          !isCurl ||
-                          (viewLocked && detectedView != CurlCameraView.front),
-                    ),
+                    // View chip hidden entirely for exercises without a
+                    // view-detection concept (squat / push-up — they pass
+                    // `detectedView: null`). The non-curl-with-detector
+                    // case ("Side view" fallback) remains for legacy
+                    // call-sites that pass a non-null but non-curl view.
+                    if (viewChipVisible)
+                      _Chip(
+                        icon: Icons.videocam,
+                        label: viewLocked
+                            ? (view == CurlCameraView.front
+                                  ? 'Side view needed'
+                                  : _viewLabel(view))
+                            : 'Detecting view…',
+                        colored: viewLocked && view != CurlCameraView.front,
+                      )
+                    else if (view != null && !isCurl)
+                      const _Chip(
+                        icon: Icons.videocam,
+                        label: 'Side view',
+                        colored: true,
+                      ),
                     if (secondsRemaining != null)
                       _Chip(
                         icon: Icons.timer_outlined,

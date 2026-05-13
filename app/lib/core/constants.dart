@@ -428,8 +428,34 @@ const double kQualitySquatLeanMaxDeduction = 0.20;
 
 /// Maximum quality deduction for heel lift. Applied proportionally.
 const double kQualitySquatHeelLiftMaxDeduction = 0.10;
+
+/// Maximum quality deduction for hip-lead ("Stripper Squat" / "Good Morning
+/// Squat"). Severity = `((ratio − threshold) / 0.6).clamp(0, 1)` so a ratio
+/// of 1.4 = 0 deduction, ratio of 2.0 = full 0.15 deduction. Mirrors the
+/// proportional-severity model used for lean + heel-lift.
+const double kQualitySquatHipLeadMaxDeduction = 0.15;
 // `forwardKneeShift` is intentionally excluded — informational only.
 // `squatDepth` is handled via the depth_factor multiplier, not a subtraction.
+
+// ── Hip-lead detector (research, 2026-05-13) ────────────
+/// Hip vs shoulder vertical-velocity ratio threshold. When the hip rises
+/// faster than the shoulder by more than this multiple during the first
+/// [kHipLeadAscendingWindowFraction] of ASCENDING, the lifter is leading
+/// with the hips — a classic "Stripper Squat" / "Good Morning Squat"
+/// fault. Source: deep-research biomechanical spec (2026-05-13).
+const double kHipLeadVelocityRatio = 1.4;
+
+/// Fraction of the ASCENDING phase evaluated for hip-lead. Only the first
+/// 30% — by mid-ascent the spine straightens out naturally even on a
+/// hip-lead rep, so evaluating later would mask the fault. The first
+/// third is where the "Good Morning" pattern is biomechanically visible.
+const double kHipLeadAscendingWindowFraction = 0.30;
+
+/// Minimum raw ASCENDING frames required before the hip-lead check runs.
+/// Floors out single-frame velocity spikes and very fast reps where the
+/// 30%-window math degenerates to a 1–2 frame sample. Fail-open below
+/// this count.
+const int kHipLeadMinAscendingFrames = 6;
 
 // ── Push-up form thresholds ──────────────────────────────
 /// Max shoulder-hip-ankle collinearity deviation for hip sag (degrees).

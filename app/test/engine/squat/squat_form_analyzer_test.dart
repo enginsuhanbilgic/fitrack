@@ -480,4 +480,305 @@ void main() {
       },
     );
   });
+
+  // ── Hip-lead detector (Part 3 Phase 7) ─────────────────────────────
+  //
+  // Sign convention: screen-Y=0 is the top of the image, so "moving up"
+  // means the landmark's `y` value DECREASES frame-to-frame. The
+  // detector's velocity formula is `-(y[i] − y[i-1])` so ascent
+  // produces POSITIVE values; descent produces NEGATIVE.
+  //
+  // The helper below drives a clean rep through the analyzer with N
+  // ASCENDING frames where the hip rises at `hipDy` per frame and the
+  // shoulder at `shoulderDy`. Both args are positive — they encode the
+  // physical motion (UP), and the test rig inverts them to match
+  // screen-Y. A pose at y=0.5 dropping to 0.3 is "rising"; the helper
+  // does that translation for the writer.
+  group('SquatFormAnalyzer — hip-lead detector', () {
+    // Drive the analyzer through one rep with synthetic ASCENDING frames.
+    //
+    // `frames`: count of raw ASCENDING frames to feed.
+    // `hipRiseRate`: per-frame screen-Y delta for the hip
+    //   (positive = rising in physical space → screen-Y decreases).
+    // `shoulderRiseRate`: per-frame screen-Y delta for the shoulder.
+    // `shoulderStationaryFrames`: count of frames where the shoulder
+    //   stays still (velocity ≈ 0). Distributed at the front of the
+    //   window — exercises the stationary-shoulder filter.
+    void driveRep({
+      required SquatFormAnalyzer a,
+      required int frames,
+      required double hipRiseRate,
+      required double shoulderRiseRate,
+      int shoulderStationaryFrames = 0,
+    }) {
+      a.onRepStart(buildPose());
+      a.trackAngle(85.0); // a deep rep so depth_factor doesn't deduct
+      a.onAscendingStart();
+      var hipY = 0.50;
+      var shoulderY = 0.20;
+      for (var i = 0; i < frames; i++) {
+        // Rising = Y decreases.
+        hipY -= hipRiseRate;
+        final shoulderStep = i < shoulderStationaryFrames
+            ? 0.0
+            : shoulderRiseRate;
+        shoulderY -= shoulderStep;
+        a.evaluate(buildPose(hipY: hipY, shoulderY: shoulderY));
+      }
+      a.onAscendingEnd();
+    }
+
+    test('sign convention: ASCENDING pose produces POSITIVE mean velocity '
+        '(load-bearing guard — ratio is sign-invariant)', () {
+      // The hip-lead ratio is invariant under a global sign flip of
+      // the velocity formula (both numerator and denominator flip;
+      // signs cancel). To actually lock the screen-Y inversion
+      // contract — that `-(y[i] − y[i-1])` is the correct formula —
+      // we must assert on each velocity COMPONENT'S SIGN, not the
+      // ratio. The analyzer exposes `lastRepHipMeanVelocity` and
+      // `lastRepShoulderMeanVelocity` specifically for this guard.
+      //
+      // Physical setup: hip + shoulder rising (physically going up).
+      // In screen-Y, "rising" means the y value DECREASES. Under
+      // `-(y[i] − y[i-1])`, the mean velocity is POSITIVE.
+      // Flipping the formula would yield NEGATIVE values — this test
+      // would fail.
+      final a = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+      );
+      a.onRepStart(buildPose());
+      a.onAscendingStart();
+      var hipY = 0.50;
+      var shoulderY = 0.20;
+      for (var i = 0; i < 10; i++) {
+        hipY -= 0.015; // hip rising (screen-Y decreasing)
+        shoulderY -= 0.010; // shoulder rising
+        a.evaluate(buildPose(hipY: hipY, shoulderY: shoulderY));
+      }
+      a.onAscendingEnd();
+
+      expect(a.lastRepHipMeanVelocity, isNotNull);
+      expect(a.lastRepShoulderMeanVelocity, isNotNull);
+      expect(
+        a.lastRepHipMeanVelocity!,
+        greaterThan(0),
+        reason:
+            'ascending hip MUST produce positive velocity '
+            '(screen-Y inversion contract)',
+      );
+      expect(
+        a.lastRepShoulderMeanVelocity!,
+        greaterThan(0),
+        reason: 'ascending shoulder MUST produce positive velocity',
+      );
+      // Magnitudes plausible (hip 0.015, shoulder 0.010 per frame).
+      expect(a.lastRepHipMeanVelocity!, closeTo(0.015, 1e-6));
+      expect(a.lastRepShoulderMeanVelocity!, closeTo(0.010, 1e-6));
+    });
+
+    test('sign convention: post-ascending DESCENDING pose produces NEGATIVE '
+        'mean velocity — complements the ascending guard', () {
+      // Inverse case. With `onAscendingStart` armed, feed frames
+      // where the hip moves DOWN physically (screen-Y increasing).
+      // Under the correct sign formula, the mean velocity is
+      // NEGATIVE. Pinning both directions catches a flip even if
+      // someone "fixed" only the positive-case assertion.
+      final a = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+      );
+      a.onRepStart(buildPose());
+      a.onAscendingStart();
+      var hipY = 0.20;
+      var shoulderY = 0.10;
+      for (var i = 0; i < 10; i++) {
+        hipY += 0.015;
+        shoulderY += 0.010;
+        a.evaluate(buildPose(hipY: hipY, shoulderY: shoulderY));
+      }
+      a.onAscendingEnd();
+      expect(
+        a.lastRepHipMeanVelocity!,
+        lessThan(0),
+        reason: 'descending hip MUST produce negative velocity',
+      );
+      expect(
+        a.lastRepShoulderMeanVelocity!,
+        lessThan(0),
+        reason: 'descending shoulder MUST produce negative velocity',
+      );
+    });
+
+    test('hip rising 1.5× faster than shoulder fires hipLead at commit', () {
+      final a = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+      );
+      driveRep(a: a, frames: 10, hipRiseRate: 0.015, shoulderRiseRate: 0.010);
+      final errs = a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
+      expect(errs, contains(FormError.hipLead));
+      expect(a.lastRepHipLeadRatio, isNotNull);
+      expect(a.lastRepHipLeadRatio!, closeTo(1.5, 1e-6));
+    });
+
+    test('balanced rep (hip rises at same rate as shoulder) does NOT fire', () {
+      final a = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+      );
+      driveRep(a: a, frames: 10, hipRiseRate: 0.010, shoulderRiseRate: 0.010);
+      final errs = a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
+      expect(errs, isNot(contains(FormError.hipLead)));
+      expect(a.lastRepHipLeadRatio, closeTo(1.0, 1e-6));
+    });
+
+    test('rep with fewer than kHipLeadMinAscendingFrames frames skips '
+        'the check (fail-open)', () {
+      final a = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+      );
+      // 5 ASCENDING frames — below the 6-frame minimum, so check is
+      // skipped silently. Even though the hip leads sharply, the
+      // detector must NOT fire.
+      driveRep(a: a, frames: 5, hipRiseRate: 0.020, shoulderRiseRate: 0.005);
+      final errs = a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
+      expect(errs, isNot(contains(FormError.hipLead)));
+      expect(a.lastRepHipLeadRatio, isNull);
+    });
+
+    test(
+      'stationary-shoulder frames are filtered out of the velocity pairs',
+      () {
+        final a = SquatFormAnalyzer(
+          variant: SquatVariant.bodyweight,
+          longFemurLifter: false,
+        );
+        // 30 raw ASCENDING frames; window = max(6, round(30×0.30)) = 9.
+        // The first 3 frames have stationary shoulder — after the
+        // div-by-zero filter the surviving pairs number 9−3 = 6
+        // (above the `< 4` fail-open gate). Those 6 valid pairs each
+        // have hip rising 1.5× shoulder.
+        //
+        // The shoulder velocity inside the window is computed over 6
+        // non-stationary pairs at 0.010 per frame. Pinning the mean
+        // shoulder velocity to ≈0.010 (not 0.010 × (6/9) ≈ 0.0067)
+        // proves the stationary frames were dropped from the
+        // SHOULDER mean and not silently averaged in as zeros — which
+        // is the exact regression a relaxed filter would introduce.
+        driveRep(
+          a: a,
+          frames: 30,
+          hipRiseRate: 0.015,
+          shoulderRiseRate: 0.010,
+          shoulderStationaryFrames: 3,
+        );
+        final errs = a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
+        expect(errs, contains(FormError.hipLead));
+        expect(a.lastRepHipLeadRatio, greaterThan(kHipLeadVelocityRatio));
+        // Mean shoulder velocity should match the per-frame rate, NOT
+        // the (rate × non-stationary-fraction) value a leaky filter
+        // would produce.
+        expect(
+          a.lastRepShoulderMeanVelocity,
+          closeTo(0.010, 1e-6),
+          reason:
+              'stationary frames must be dropped from the shoulder '
+              'velocity mean, not averaged in as zeros',
+        );
+      },
+    );
+
+    // NOTE: the `meanShoulder.abs() < 1e-6` post-mean fail-open
+    // guard in `onAscendingEnd` is intentionally defensive — it
+    // protects against pathologically-balanced shoulder velocity
+    // signals where the per-pair `> 1e-6` filter passes but their
+    // arithmetic mean still rounds to zero. Constructing this
+    // scenario synthetically requires fine-grained control over the
+    // window slice geometry that the analyzer's API doesn't expose,
+    // so we don't have a unit test for that guard specifically. The
+    // per-pair filter and the `< 4 valid pairs` gate (both tested
+    // above) cover the realistic failure modes; the post-mean guard
+    // is belt-and-suspenders.
+
+    test('evaluate() outside ASCENDING does NOT accumulate samples '
+        '(hook contract)', () {
+      final a = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+      );
+      a.onRepStart(buildPose());
+      a.trackAngle(85.0);
+      // Frames during DESCENDING / BOTTOM (no onAscendingStart yet).
+      // Even with a strong hip-lead signal in the raw pose stream,
+      // the analyzer must NOT buffer them.
+      var hipY = 0.50;
+      var shoulderY = 0.20;
+      for (var i = 0; i < 10; i++) {
+        hipY -= 0.020; // hip rising fast
+        shoulderY -= 0.005; // shoulder rising slow
+        a.evaluate(buildPose(hipY: hipY, shoulderY: shoulderY));
+      }
+      // No onAscendingStart was called — the buffer should be empty,
+      // and onAscendingEnd should hit the fail-open path.
+      a.onAscendingEnd();
+      final errs = a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
+      expect(errs, isNot(contains(FormError.hipLead)));
+      expect(a.lastRepHipLeadRatio, isNull);
+      expect(a.ascendingFrameCount, 0);
+    });
+
+    test('hipLead quality deduction at threshold (ratio = 1.4) is zero', () {
+      // At ratio = warn threshold the severity formula
+      //   `((1.4 − 1.4) / 0.6).clamp(0, 1) = 0`
+      // → quality factor = 1.0. Both the cue and the deduction must
+      // gate on `>`, not `>=`, so a borderline-fail rep does NOT get
+      // double-counted.
+      final a = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+      );
+      driveRep(a: a, frames: 10, hipRiseRate: 0.014, shoulderRiseRate: 0.010);
+      a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
+      // Ratio = 1.4 exactly. The detector's `> threshold` gate means
+      // hipLead does NOT fire (no deduction).
+      expect(a.lastRepHipLeadRatio, closeTo(1.4, 1e-6));
+      expect(a.lastRepQuality, closeTo(1.0, 1e-6));
+    });
+
+    test('hipLead quality deduction at ratio 2.0 is the full max', () {
+      // Severity 1.0 reached at warn + 0.6 = 2.0.
+      // → quality factor = 1.0 − 0.15 = 0.85.
+      final a = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+      );
+      driveRep(a: a, frames: 10, hipRiseRate: 0.020, shoulderRiseRate: 0.010);
+      a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
+      expect(a.lastRepHipLeadRatio, closeTo(2.0, 1e-6));
+      expect(
+        a.lastRepQuality,
+        closeTo(1.0 - kQualitySquatHipLeadMaxDeduction, 1e-6),
+      );
+    });
+
+    test('onDescendingStart clears hip-lead state from the prior rep', () {
+      final a = SquatFormAnalyzer(
+        variant: SquatVariant.bodyweight,
+        longFemurLifter: false,
+      );
+      // Rep 1: fires hip-lead.
+      driveRep(a: a, frames: 10, hipRiseRate: 0.020, shoulderRiseRate: 0.010);
+      a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
+      expect(a.lastRepHipLeadRatio, isNotNull);
+      // Rep 2: clean. The prior rep's ratio + flag must be cleared by
+      // `onRepStart` (which calls `onDescendingStart`) so they don't
+      // carry over and bias the new quality / cue.
+      driveRep(a: a, frames: 10, hipRiseRate: 0.010, shoulderRiseRate: 0.010);
+      final errs = a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
+      expect(errs, isNot(contains(FormError.hipLead)));
+      expect(a.lastRepHipLeadRatio, closeTo(1.0, 1e-6));
+    });
+  });
 }

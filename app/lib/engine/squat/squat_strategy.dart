@@ -182,6 +182,16 @@ class SquatStrategy extends ExerciseStrategy {
   /// Most recent peak heel-lift ratio. Null until first commit.
   double? get lastRepHeelLiftRatio => _form.lastRepHeelLiftRatio;
 
+  /// Most recent hip-lead ratio (mean v_y_hip / mean v_y_shoulder over the
+  /// first 30% of ASCENDING). Null until the hip-lead check has run AND
+  /// the window contained ≥ 4 valid velocity pairs. The host reads this
+  /// for the `squat.hip_lead` telemetry line at rep commit.
+  double? get lastRepHipLeadRatio => _form.lastRepHipLeadRatio;
+
+  /// Frames accumulated during the most recent ASCENDING window — the
+  /// `ascending_frame_count` field of the `squat.hip_lead` telemetry line.
+  int get ascendingFrameCount => _form.ascendingFrameCount;
+
   /// Active lean warning threshold (variant + tall-lifter boost). Useful
   /// for tests asserting orthogonality of long-femur signals.
   double get leanWarnDeg => _form.leanWarnDeg;
@@ -295,10 +305,19 @@ class SquatStrategy extends ExerciseStrategy {
         // Transition to ascending only when hip is actually rising.
         // In screen coordinates Y=0 is top, so rising = Y decreasing.
         if (hipY != null && _prevHipY != null && hipY < _prevHipY!) {
+          // Arm the analyzer's per-frame hip+shoulder Y accumulator —
+          // hip-lead is evaluated over the first 30% of ASCENDING.
+          _form.onAscendingStart();
           nextState = RepState.ascending;
         }
       case RepState.ascending:
         if (smoothed >= _activeThresholds.endAngle) {
+          // Close the hip-lead window BEFORE consuming completion errors —
+          // `consumeCompletionErrorsWithDepth` reads the flag set inside
+          // `onAscendingEnd` and folds `FormError.hipLead` into its
+          // returned set. Calling it after the consume would drop the
+          // error entirely.
+          _form.onAscendingEnd();
           final completionErrors = _form.consumeCompletionErrorsWithDepth(
             _effectiveBottomAngle,
           );

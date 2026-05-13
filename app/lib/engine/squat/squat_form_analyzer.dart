@@ -65,6 +65,37 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   double? _maxKneeShiftRatio;
   double? _maxHeelLiftRatio;
 
+  // ── Hip-lead detection (per-rep) ────────────────────────────
+  /// True between `onAscendingStart` and `onAscendingEnd`. Gates per-frame
+  /// hip/shoulder Y appending — `evaluate()` does not accumulate during
+  /// DESCENDING / BOTTOM so the velocity buffer is purely ASCENDING.
+  bool _ascendingPhaseActive = false;
+
+  /// Per-frame hip + shoulder Y samples accumulated during the ASCENDING
+  /// phase. Cleared at `onDescendingStart` and again at rep commit. Records
+  /// are taken from the higher-visibility camera side picked by
+  /// `_pickCameraSide` — same side selection rule as the rest of the
+  /// analyzer for consistency.
+  final List<({double hipY, double shoulderY})> _ascendingFrames = [];
+
+  /// Set by `onAscendingEnd` when the hip-lead check fires. Drained into
+  /// `consumeCompletionErrorsWithDepth`'s return set on the next call.
+  bool _lastRepHipLeadFired = false;
+
+  /// Most recent hip-lead ratio (`mean(v_y_hip) / mean(v_y_shoulder)` over
+  /// the evaluation window). Null until the check has run at least once
+  /// AND the window had ≥4 valid velocity pairs. Exposed for telemetry.
+  double? _lastRepHipLeadRatio;
+
+  /// Mean hip/shoulder screen-Y velocity recorded during the last
+  /// `onAscendingEnd`. Stored separately from the ratio so a
+  /// sign-convention test can pin the SIGN of each velocity component
+  /// independently — a regression that flipped the velocity formula
+  /// `-(y[i] − y[i-1])` to `(y[i] − y[i-1])` is invisible in the ratio
+  /// (both flip; signs cancel) but visible here.
+  double? _lastRepHipMeanVelocity;
+  double? _lastRepShoulderMeanVelocity;
+
   // ── Last-rep outputs (read by SquatStrategy after rep commit) ──
   double? _lastRepQuality;
   double? _lastRepLeanDeg;
@@ -87,6 +118,34 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   /// Most recent peak heel-lift ratio. Null until first commit.
   double? get lastRepHeelLiftRatio => _lastRepHeelLiftRatio;
 
+  /// Most recent hip-lead ratio (`mean(v_y_hip) / mean(v_y_shoulder)` over
+  /// the first 30% of ASCENDING). Null when the check hasn't run yet OR
+  /// the rep was skipped (fewer than `kHipLeadMinAscendingFrames` raw
+  /// frames OR <4 valid velocity pairs after the stationary-shoulder
+  /// filter). Surfaced for telemetry — `consumeCompletionErrorsWithDepth`
+  /// drains it, but the host reads this getter for the `squat.hip_lead`
+  /// log line.
+  double? get lastRepHipLeadRatio => _lastRepHipLeadRatio;
+
+  /// Mean per-frame screen-Y velocity of the hip over the evaluation
+  /// window (sign convention: positive = rising). Exposed so tests can
+  /// lock the screen-Y inversion contract: a sign flip in the velocity
+  /// formula would not change `lastRepHipLeadRatio` (same flip applied
+  /// to both numerator and denominator), but it WOULD invert this
+  /// value. Null in the same cases as [lastRepHipLeadRatio].
+  double? get lastRepHipMeanVelocity => _lastRepHipMeanVelocity;
+
+  /// Mean per-frame screen-Y velocity of the shoulder. Same lifecycle
+  /// and sign convention as [lastRepHipMeanVelocity].
+  double? get lastRepShoulderMeanVelocity => _lastRepShoulderMeanVelocity;
+
+  /// Number of raw frames accumulated during the most recent ASCENDING
+  /// window. Reset by `onDescendingStart` (the start of the next rep), so
+  /// the host has the full window's count between commit and the next
+  /// IDLE → DESCENDING transition. Exposed for the `squat.hip_lead`
+  /// telemetry's `ascending_frame_count` field.
+  int get ascendingFrameCount => _ascendingFrames.length;
+
   /// Call at IDLE → DESCENDING. Resets per-rep extremes; preserves the
   /// `_lastRep*` outputs so the strategy can still read the previous rep's
   /// quality between reps.
@@ -96,6 +155,83 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _maxLeanDeg = null;
     _maxKneeShiftRatio = null;
     _maxHeelLiftRatio = null;
+    onDescendingStart();
+  }
+
+  /// Per-rep state for hip-lead. Called at IDLE → DESCENDING in addition
+  /// to `onRepStart` — mirrors curl's `onRepStart` shape with an extra
+  /// hook so the strategy can wire the lifecycle explicitly. Resets the
+  /// hip-lead frame buffer + last-rep flags. Safe to call multiple times.
+  void onDescendingStart() {
+    _ascendingFrames.clear();
+    _ascendingPhaseActive = false;
+    _lastRepHipLeadFired = false;
+    _lastRepHipLeadRatio = null;
+    _lastRepHipMeanVelocity = null;
+    _lastRepShoulderMeanVelocity = null;
+  }
+
+  /// Call at BOTTOM → ASCENDING. Enables per-frame hip+shoulder Y
+  /// accumulation inside `evaluate()`.
+  void onAscendingStart() {
+    _ascendingPhaseActive = true;
+  }
+
+  /// Call at ASCENDING → IDLE (rep commit) BEFORE
+  /// `consumeCompletionErrorsWithDepth(...)`. Evaluates the hip-lead
+  /// ratio over the first [kHipLeadAscendingWindowFraction] of the
+  /// collected frames; sets `_lastRepHipLeadFired` / `_lastRepHipLeadRatio`
+  /// if the threshold is exceeded.
+  ///
+  /// Sign convention: in screen coordinates Y=0 is at the top, so
+  /// "moving up" means `y` *decreases*. Velocity is computed as
+  /// `-(y[i] − y[i-1])` so ascending produces POSITIVE values. A clean
+  /// rep where hip and shoulder rise in lock-step yields ratio ≈ 1.0;
+  /// a hip-lead rep yields ratio > 1.4.
+  void onAscendingEnd() {
+    _ascendingPhaseActive = false;
+    final frames = _ascendingFrames;
+    if (frames.length < kHipLeadMinAscendingFrames) return;
+
+    final windowSize = math.max(
+      kHipLeadMinAscendingFrames,
+      (frames.length * kHipLeadAscendingWindowFraction).round(),
+    );
+    final clipped = windowSize > frames.length ? frames.length : windowSize;
+
+    // Pairwise velocity over the window. Sign-inverted so screen-Y's
+    // top-is-zero convention produces positive values during ascent.
+    final hipVels = <double>[];
+    final shoulderVels = <double>[];
+    for (var i = 1; i < clipped; i++) {
+      final dHip = -(frames[i].hipY - frames[i - 1].hipY);
+      final dShoulder = -(frames[i].shoulderY - frames[i - 1].shoulderY);
+      // Filter out frames where the shoulder is briefly stationary —
+      // avoids div-by-zero noise on the ratio. The hip's own velocity
+      // is unfiltered so a paused-shoulder hip-rising frame doesn't
+      // drop out of the hip mean as well.
+      if (dShoulder.abs() < 1e-6) continue;
+      hipVels.add(dHip);
+      shoulderVels.add(dShoulder);
+    }
+
+    // Fail-open below the minimum valid-pair count. A noisy 30%-of-rep
+    // window where the shoulder was stationary for most frames doesn't
+    // carry enough signal to grade — better to silently skip than to
+    // false-fire on the few non-stationary samples.
+    if (hipVels.length < 4) return;
+
+    final meanHip = hipVels.reduce((a, b) => a + b) / hipVels.length;
+    final meanShoulder =
+        shoulderVels.reduce((a, b) => a + b) / shoulderVels.length;
+    _lastRepHipMeanVelocity = meanHip;
+    _lastRepShoulderMeanVelocity = meanShoulder;
+    if (meanShoulder.abs() < 1e-6) return;
+    final ratio = meanHip / meanShoulder;
+    _lastRepHipLeadRatio = ratio;
+    if (ratio > kHipLeadVelocityRatio) {
+      _lastRepHipLeadFired = true;
+    }
   }
 
   /// Track the lowest-knee-angle of the current rep. Called by
@@ -117,6 +253,27 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
 
     final side = _pickCameraSide(current);
     if (side == null) return errors;
+
+    // Hip-lead per-frame accumulation. Only active between
+    // `onAscendingStart` and `onAscendingEnd` — frames during DESCENDING
+    // and BOTTOM are deliberately excluded because the velocity signal
+    // we care about is the hip-vs-shoulder rise rate at the start of the
+    // ascent. Uses the same camera-side selection rule as the rest of
+    // the analyzer so a confidence flicker doesn't pull samples from
+    // the off-camera arm into the buffer.
+    if (_ascendingPhaseActive) {
+      final hip = current.landmark(
+        side == ExerciseSide.left ? LM.leftHip : LM.rightHip,
+        minConfidence: kMinLandmarkConfidence,
+      );
+      final shoulder = current.landmark(
+        side == ExerciseSide.left ? LM.leftShoulder : LM.rightShoulder,
+        minConfidence: kMinLandmarkConfidence,
+      );
+      if (hip != null && shoulder != null) {
+        _ascendingFrames.add((hipY: hip.y, shoulderY: shoulder.y));
+      }
+    }
 
     // Lean — signed; positive = forward, negative = backward.
     final lean = _signedLeanDeg(current, side);
@@ -170,12 +327,20 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   /// Rep-boundary evaluation — called by `SquatStrategy` at rep commit.
   /// Computes the per-rep quality score, snapshots it for the strategy
   /// to read, then resets the per-rep extremes.
+  ///
+  /// IMPORTANT: callers must invoke `onAscendingEnd()` BEFORE this so the
+  /// hip-lead check has populated `_lastRepHipLeadFired` /
+  /// `_lastRepHipLeadRatio`. The quality score also reads
+  /// `_lastRepHipLeadRatio`, so the ordering is load-bearing.
   List<FormError> consumeCompletionErrorsWithDepth(
     double effectiveBottomAngle,
   ) {
     final errors = <FormError>[];
     if (_minKneeAngle != null && _minKneeAngle! >= effectiveBottomAngle) {
       errors.add(FormError.squatDepth);
+    }
+    if (_lastRepHipLeadFired) {
+      errors.add(FormError.hipLead);
     }
 
     _lastRepQuality = _computeQualityScore(
@@ -189,6 +354,9 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _maxLeanDeg = null;
     _maxKneeShiftRatio = null;
     _maxHeelLiftRatio = null;
+    // `_ascendingFrames` is cleared at the NEXT `onDescendingStart` so a
+    // test that inspects mid-rep state can still read the buffer
+    // post-commit. `_lastRepHipLead*` fields drain the same way.
     return errors;
   }
 
@@ -202,6 +370,12 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _lastRepLeanDeg = null;
     _lastRepKneeShiftRatio = null;
     _lastRepHeelLiftRatio = null;
+    _ascendingPhaseActive = false;
+    _ascendingFrames.clear();
+    _lastRepHipLeadFired = false;
+    _lastRepHipLeadRatio = null;
+    _lastRepHipMeanVelocity = null;
+    _lastRepShoulderMeanVelocity = null;
   }
 
   // ── Internals ────────────────────────────────────────────
@@ -361,6 +535,21 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     if (maxHeel != null && maxHeel > _formThresholds.heelLiftWarnRatio) {
       final severity = (maxHeel / 0.05).clamp(0.0, 1.0);
       score *= 1.0 - severity * kQualitySquatHeelLiftMaxDeduction;
+    }
+
+    // Hip-lead — proportional. Applied AFTER lean and heel-lift per plan
+    // ordering (multiplicative composition, so the order doesn't change
+    // the numerical outcome — but documents the design intent). Severity
+    // 1.0 reached at ratio = warn + 0.6 (i.e. 2.0); ratio at threshold
+    // (1.4) yields zero deduction so a borderline-fail rep doesn't
+    // double-count between the cue and the quality score.
+    final hipLeadRatio = _lastRepHipLeadRatio;
+    if (hipLeadRatio != null && hipLeadRatio > kHipLeadVelocityRatio) {
+      final severity = ((hipLeadRatio - kHipLeadVelocityRatio) / 0.6).clamp(
+        0.0,
+        1.0,
+      );
+      score *= 1.0 - severity * kQualitySquatHipLeadMaxDeduction;
     }
 
     return score.clamp(0.0, 1.0);

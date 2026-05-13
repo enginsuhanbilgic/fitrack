@@ -21,6 +21,9 @@ import '../core/constants.dart';
 import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
 import '../engine/push_up/push_up_rom_profile.dart';
+import '../engine/squat/squat_rom_profile.dart'
+    as squat_profile
+    show SquatRomProfile;
 import '../services/app_services.dart';
 import '../services/db/profile_repository.dart';
 import '../services/telemetry_log.dart';
@@ -38,6 +41,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _servicesResolved = false;
   CurlRomProfile? _profile;
   PushUpRomProfile? _pushUpProfile;
+  squat_profile.SquatRomProfile? _squatProfile;
   bool _loading = true;
   bool _showDetails = false;
   bool _squatLongFemurLifter = false;
@@ -63,6 +67,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final services = AppServicesScope.of(context);
     final p = await _repository.loadCurl();
     final pushUpProfile = await _repository.loadPushUp();
+    final squatProfile = await _repository.loadSquat();
     final longFemur = await services.preferencesRepository
         .getSquatLongFemurLifter();
     final diagnosticDisableAutoCal = await services.preferencesRepository
@@ -79,6 +84,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _profile = p;
       _pushUpProfile = pushUpProfile;
+      _squatProfile = squatProfile;
       _squatLongFemurLifter = longFemur;
       _diagnosticDisableAutoCalibration = diagnosticDisableAutoCal;
       _squatDebugSession = squatDebug;
@@ -88,6 +94,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _hapticsEnabled = haptics;
       _loading = false;
     });
+  }
+
+  Future<void> _confirmResetSquat() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset Squat Profile?'),
+        content: const Text(
+          'This deletes your saved squat range of motion. The next workout '
+          'will fall back to default thresholds until you recalibrate. This '
+          'cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _repository.resetSquat();
+      await _reload();
+    }
   }
 
   Future<void> _setTtsEnabled(bool value) async {
@@ -226,6 +261,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: const Text('Biceps curl side view'),
               subtitle: const Text('Stand sideways to the camera'),
               onTap: () => Navigator.pop(ctx, ExerciseType.bicepsCurlSide),
+            ),
+            ListTile(
+              leading: const Icon(Icons.accessibility),
+              title: const Text('Squat'),
+              subtitle: const Text('Calibrate your full squat range of motion'),
+              onTap: () => Navigator.pop(ctx, ExerciseType.squat),
             ),
             ListTile(
               leading: const Icon(Icons.accessibility_new),
@@ -379,6 +420,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       letterSpacing: 0.6,
                     ),
                   ),
+                ),
+                _SquatProfileSection(profile: _squatProfile),
+                _ActionRow(
+                  icon: Icons.refresh,
+                  label: 'Recalibrate squat',
+                  subtitle:
+                      'Record your full squat range of motion. Opt-in only — '
+                      'never auto-launches.',
+                  onTap: () => Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const WorkoutScreen(
+                        exercise: ExerciseType.squat,
+                        forceCalibration: true,
+                      ),
+                    ),
+                  ),
+                ),
+                _ActionRow(
+                  icon: Icons.delete_outline,
+                  label: 'Reset squat profile',
+                  subtitle:
+                      'Delete your calibrated squat range — falls back to '
+                      'default thresholds.',
+                  destructive: true,
+                  onTap: _confirmResetSquat,
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -706,6 +773,95 @@ class _StatusPill extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Squat-profile summary card. Mirrors the shape of `_ProfileSection`'s
+/// push-up block but with squat-specific terminology — squat has no
+/// `(side, view)` axis, so just one row of "Bottom · Top · ROM" plus a
+/// diagnostics line with sample count + last-updated.
+class _SquatProfileSection extends StatelessWidget {
+  final squat_profile.SquatRomProfile? profile;
+
+  const _SquatProfileSection({required this.profile});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final p = profile;
+    final bucket = p?.bucket;
+    final isCalibrated = p?.isCalibrated ?? false;
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.accessibility, color: Color(0xFF00E676)),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Squat Profile',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                _StatusPill(
+                  label: isCalibrated ? 'Calibrated' : 'Uncalibrated',
+                  color: isCalibrated
+                      ? const Color(0xFF00E676)
+                      : theme.colorScheme.onSurface.withValues(alpha: 0.38),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (bucket == null)
+              Text(
+                'Not calibrated. Use Recalibrate to record your deepest '
+                'squat and standing extension.',
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
+                ),
+              )
+            else
+              Text(
+                'Bottom ${bucket.observedMinKneeAngle.toStringAsFixed(0)}° · '
+                'Top ${bucket.observedMaxKneeAngle.toStringAsFixed(0)}° · '
+                'ROM ${(bucket.observedMaxKneeAngle - bucket.observedMinKneeAngle).toStringAsFixed(0)}°',
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
+                ),
+              ),
+            if (bucket != null) ...[
+              const SizedBox(height: 6),
+              // Diagnostics line — sample count + last updated. Matches
+              // the curl block's `_BucketRow` "N reps" / showDetails
+              // exposure but lives inline because squat has only one
+              // bucket so there's nothing to expand/collapse.
+              Text(
+                '${bucket.sampleCount} ${bucket.sampleCount == 1 ? "rep" : "reps"} '
+                '· updated ${_relativeTime(bucket.lastUpdated)}',
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _relativeTime(DateTime t) {
+    final delta = DateTime.now().difference(t);
+    if (delta.inMinutes < 1) return 'just now';
+    if (delta.inHours < 1) return '${delta.inMinutes}m ago';
+    if (delta.inDays < 1) return '${delta.inHours}h ago';
+    return '${delta.inDays}d ago';
   }
 }
 

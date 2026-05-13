@@ -336,6 +336,29 @@ class RepCounter {
     return strategy.formExtras;
   }
 
+  /// Frame count from the most recent ASCENDING window — feeds the
+  /// `squat.hip_lead` telemetry line. Null when the active strategy is
+  /// not squat. Cleared by the strategy at the next IDLE → DESCENDING
+  /// transition, so the host must read this between commit and the next
+  /// rep start.
+  int? get squatAscendingFrameCount {
+    final strategy = _strategy;
+    if (strategy is! SquatStrategy) return null;
+    return strategy.ascendingFrameCount;
+  }
+
+  /// Computes the squat's primary joint angle (knee angle, averaged over
+  /// both sides when both are above the confidence gate) without driving
+  /// the FSM. Used by [WorkoutViewModel] during the squat-calibration
+  /// phase to feed the `RepBoundaryDetector` without entering ACTIVE.
+  /// Returns null when the active strategy is not squat, or when neither
+  /// side has the required landmarks.
+  double? computeSquatPrimaryAngle(PoseResult pose) {
+    final strategy = _strategy;
+    if (strategy is! SquatStrategy) return null;
+    return strategy.computePrimaryAngle(pose);
+  }
+
   // ── Internals ─────────────────────────────────────────────────────
 
   void _resetToIdle() {
@@ -364,6 +387,7 @@ class RepCounter {
         heelLiftRatio: strategy.lastRepHeelLiftRatio,
         minKneeAngle: _pendingSquatMinKneeAngle,
         maxKneeAngle: _pendingSquatMaxKneeAngle,
+        hipLeadRatio: strategy.lastRepHipLeadRatio,
       );
     }
     _pendingSquatMinKneeAngle = null;
@@ -444,4 +468,5 @@ typedef SquatRepCommitCallback =
       required double? heelLiftRatio,
       required double? minKneeAngle,
       required double? maxKneeAngle,
+      required double? hipLeadRatio,
     });

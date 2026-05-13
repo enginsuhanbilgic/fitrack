@@ -584,6 +584,29 @@ void main() {
         );
       }
     });
+
+    test('FormError.hipLead → "Lead with your chest" cue', () {
+      // Lock the user-visible TTS phrasing for the new hip-lead cue.
+      // The plan explicitly named this string ("Lead with your chest")
+      // — a future refactor that swaps it for a less-actionable phrase
+      // ("Chest up", etc.) would be visible at review time via this
+      // test rather than only at on-device QA.
+      expect(
+        WorkoutViewModel.errorMessageForTest(FormError.hipLead),
+        'Lead with your chest',
+      );
+    });
+
+    test('every FormError has a non-empty TTS cue', () {
+      // Belt-and-suspenders: every enum value must map to a non-empty
+      // string. If someone adds a new FormError without wiring it
+      // into the switch, the analyzer will flag exhaustiveness — but
+      // an empty default would slip through. Guard against that.
+      for (final err in FormError.values) {
+        final cue = WorkoutViewModel.errorMessageForTest(err);
+        expect(cue, isNotEmpty, reason: '$err must have a TTS cue');
+      }
+    });
   });
 
   group('WorkoutViewModel — _resolveSquatThresholds tier priority', () {

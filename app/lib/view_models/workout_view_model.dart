@@ -410,6 +410,15 @@ class WorkoutViewModel extends ChangeNotifier {
     ],
     FormError.forwardKneeShift: [LM.leftKnee, LM.rightKnee],
     FormError.heelLift: [LM.leftHeel, LM.rightHeel],
+    // Hip-lead manifests as hips rising faster than shoulders — the user's
+    // chest collapses forward as they ascend. Highlighting both shoulder
+    // and hip pairs makes the geometric story visible.
+    FormError.hipLead: [
+      LM.leftShoulder,
+      LM.rightShoulder,
+      LM.leftHip,
+      LM.rightHip,
+    ],
     // trunkTibia retained — legacy session rendering path.
     FormError.trunkTibia: [LM.leftHip, LM.rightHip],
     // Push-up
@@ -470,13 +479,20 @@ class WorkoutViewModel extends ChangeNotifier {
   String? get calibrationError => _calibrationError;
   double? get calibrationCurrentAngle => _calibrationCurrentAngle;
   CalibrationSummary? get calibrationSummary => _calibrationSummary;
-  int get calibrationProgressTarget =>
-      exercise == ExerciseType.pushUp ? 3 : kCalibrationMinReps;
+  int get calibrationProgressTarget => switch (exercise) {
+    ExerciseType.pushUp => 3,
+    ExerciseType.squat => kSquatCalibrationMinReps,
+    _ => kCalibrationMinReps,
+  };
   String get calibrationProgressLabel =>
       exercise == ExerciseType.pushUp ? 'steps' : 'reps';
-  String get calibrationInstruction => exercise == ExerciseType.pushUp
-      ? _pushUpCalibrationInstruction
-      : 'Curl through your full natural range — $kCalibrationMinReps reps.';
+  String get calibrationInstruction => switch (exercise) {
+    ExerciseType.pushUp => _pushUpCalibrationInstruction,
+    ExerciseType.squat =>
+      'Squat through your full natural range — '
+          '$kSquatCalibrationMinReps reps.',
+    _ => 'Curl through your full natural range — $kCalibrationMinReps reps.',
+  };
 
   /// True once a `forceCalibration: true` session has finished its calibration
   /// summary and should pop back to whatever route launched the recalibrate
@@ -654,10 +670,14 @@ class WorkoutViewModel extends ChangeNotifier {
         pushUpThresholds:
             _pushUpProfile?.thresholds ?? PushUpRomThresholds.defaults,
       );
-      if ((exercise.isCurl || exercise == ExerciseType.pushUp) &&
+      if ((exercise.isCurl ||
+              exercise == ExerciseType.pushUp ||
+              exercise == ExerciseType.squat) &&
           forceCalibration) {
         // Personal calibration is opt-in only — Settings → Recalibrate sets
-        // `forceCalibration`. We never launch it automatically.
+        // `forceCalibration`. We never launch it automatically. Squat
+        // calibration is opt-in per the `feedback_calibration_opt_in.md`
+        // memory: only the gear/Settings entry-point opens the overlay.
         _enterCalibration();
       }
       _camera.startStream(_onFrame);
@@ -1171,6 +1191,26 @@ class WorkoutViewModel extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    if (exercise == ExerciseType.squat) {
+      // Squat reuses the curl `RepBoundaryDetector` as-is — its smoothing
+      // and direction-confirmation gates work on any monotonic joint
+      // angle (knee vs elbow), and the per-rep min/max it emits map
+      // cleanly to the squat ROM bucket. The accept-rep gate is
+      // squat-specific (`kSquatMinViableRomDegrees`, applied in
+      // `_onCalibrationRep`).
+      _calibrationDetector = RepBoundaryDetector();
+      _calibrationSub = _calibrationDetector!.extremes.listen(
+        _onCalibrationRep,
+      );
+      TelemetryLog.instance.log('squat.calibration.start', 'phase entered');
+      _tts.speak(
+        'Squat through your full natural range, '
+        '$kSquatCalibrationMinReps times.',
+      );
+      _startCalibrationTimeout();
+      notifyListeners();
+      return;
+    }
     _calibrationDetector = RepBoundaryDetector();
     _calibrationSub = _calibrationDetector!.extremes.listen(_onCalibrationRep);
     TelemetryLog.instance.log('calibration.start', 'phase entered');
@@ -1208,6 +1248,24 @@ class WorkoutViewModel extends ChangeNotifier {
   }
 
   void _onCalibrationRep(RepExtreme rep) {
+    if (exercise == ExerciseType.squat) {
+      // Squat-specific viability gate. The boundary detector already
+      // applies `kCalibrationMinExcursion` (40°) at its emit gate, but
+      // we apply the named-for-squat threshold explicitly here so a
+      // future divergence (lifting `kCalibrationMinExcursion` while
+      // keeping squat at 40°) just works without re-plumbing the
+      // detector. Rejected reps don't bump the counter — they vanish
+      // silently, mirroring how the detector drops sub-excursion reps.
+      final rom = (rep.maxAngle - rep.minAngle).abs();
+      if (rom < kSquatMinViableRomDegrees) return;
+      _calibrationCollected.add(rep);
+      _calibrationReps = _calibrationCollected.length;
+      notifyListeners();
+      if (_calibrationReps >= kSquatCalibrationMinReps) {
+        _completeSquatCalibration();
+      }
+      return;
+    }
     _calibrationCollected.add(rep);
     _calibrationReps = _calibrationCollected.length;
     notifyListeners();
@@ -1290,9 +1348,94 @@ class WorkoutViewModel extends ChangeNotifier {
     });
   }
 
+  /// Squat calibration completion. Mirrors `_completeCalibration` but
+  /// targets `SquatRomProfile` instead of `CurlRomProfile`, and there's
+  /// no `(side, view)` axis to seed — squat has one bucket per user.
+  ///
+  /// Persists via `_profileRepository.saveSquat`. The save is awaited
+  /// inside a fire-and-forget block so a slow disk write doesn't block
+  /// the 2s summary card. Failures are non-fatal — the in-memory
+  /// `_squatProfile` is still set, so the current session can use it,
+  /// and the dispose-time flush will retry the write.
+  void _completeSquatCalibration() {
+    _calibrationTimeoutTimer?.cancel();
+
+    final avgMin =
+        _calibrationCollected.map((r) => r.minAngle).reduce((a, b) => a + b) /
+        _calibrationCollected.length;
+    final avgMax =
+        _calibrationCollected.map((r) => r.maxAngle).reduce((a, b) => a + b) /
+        _calibrationCollected.length;
+
+    // Belt-and-suspenders ROM check — `_onCalibrationRep` already gated
+    // each rep at `kSquatMinViableRomDegrees`, but averaging the
+    // collected reps could in principle still slip below the bar if the
+    // detector emitted a borderline-passing rep alongside others.
+    if ((avgMax - avgMin) < kSquatMinViableRomDegrees) {
+      _failCalibration(
+        'Range too small (${(avgMax - avgMin).toStringAsFixed(0)}°). '
+        'Use your full motion.',
+      );
+      return;
+    }
+
+    // Seed (or extend) the squat bucket with every collected rep.
+    final profile = _squatProfile ?? squat_profile.SquatRomProfile();
+    final bucket = profile.bucket ?? squat_profile.SquatRomBucket.empty();
+    for (final rep in _calibrationCollected) {
+      bucket.applyRep(rep.minAngle, rep.maxAngle);
+    }
+    profile.bucket = bucket;
+    _squatProfile = profile;
+    _squatProfileDirty = true;
+
+    TelemetryLog.instance.log(
+      'squat.calibration.complete',
+      'reps=${_calibrationCollected.length} '
+          'avgMin=${avgMin.toStringAsFixed(1)} '
+          'avgMax=${avgMax.toStringAsFixed(1)} '
+          'samples=${bucket.sampleCount}',
+    );
+    unawaited(_flushSquatProfileIfDirty());
+
+    _calibrationSummary = CalibrationSummary(
+      viewLabel: 'Squat ROM',
+      sidesLabel:
+          'Bottom ${avgMin.toStringAsFixed(0)}° · '
+          'Top ${avgMax.toStringAsFixed(0)}°',
+    );
+    notifyListeners();
+    Timer(const Duration(seconds: 2), () {
+      _calibrationSummary = null;
+      if (forceCalibration) {
+        _disposeCalibrationResources();
+        _shouldExitAfterCalibration = true;
+        notifyListeners();
+        return;
+      }
+      _exitCalibration(toPhase: WorkoutPhase.setupCheck);
+    });
+  }
+
   void _failCalibration(String reason) {
     _calibrationTimeoutTimer?.cancel();
-    TelemetryLog.instance.log('calibration.fail', reason);
+    // Free the boundary-detector stream subscription + detector itself.
+    // Without this, a failed calibration would leak both — the stream
+    // sub never closes until `retryCalibration()` or `skipCalibration()`
+    // fires, and a user who closes the workout from the error banner
+    // would carry orphaned resources for the rest of the session.
+    // Mirrors the cleanup that `_exitCalibration` already performs on
+    // the happy path.
+    _calibrationSub?.cancel();
+    _calibrationSub = null;
+    _calibrationDetector?.dispose();
+    _calibrationDetector = null;
+    // Squat uses a dedicated telemetry tag so the dataset-analysis
+    // workflow can filter by exercise without parsing the message body.
+    final tag = exercise == ExerciseType.squat
+        ? 'squat.calibration.fail'
+        : 'calibration.fail';
+    TelemetryLog.instance.log(tag, reason);
     _calibrationError = reason;
     notifyListeners();
   }
@@ -1368,6 +1511,22 @@ class WorkoutViewModel extends ChangeNotifier {
   void _updateCalibration(PoseResult result, List<PoseLandmark> smoothed) {
     if (exercise == ExerciseType.pushUp) {
       _updatePushUpCalibration(result, smoothed);
+      return;
+    }
+
+    if (exercise == ExerciseType.squat) {
+      // Knee angle drives the detector here. The detector tracks raw
+      // extremes — min during descent (deepest knee flexion) and max
+      // during ascent (standing extension) — which map directly to the
+      // `SquatRomBucket` extremes the calibration commit needs. Reuse
+      // the strategy's `computePrimaryAngle` so the same picking rule
+      // (averaging two sides when both available) used in the active
+      // FSM is also used in calibration.
+      final angle = _repCounter.computeSquatPrimaryAngle(result);
+      if (angle != null) _calibrationDetector?.onAngle(angle);
+      _landmarks = smoothed;
+      _calibrationCurrentAngle = angle;
+      notifyListeners();
       return;
     }
 
@@ -2109,6 +2268,13 @@ class WorkoutViewModel extends ChangeNotifier {
   static bool isTtsSuppressed(FormError err) =>
       err == FormError.forwardKneeShift;
 
+  /// Test seam exposing the spoken cue for a given form error. Lets
+  /// the test suite pin the user-visible TTS phrasing — without this,
+  /// a future refactor could silently swap the cue for a regression.
+  /// Mirrors the `isTtsSuppressed` pattern on the same surface.
+  @visibleForTesting
+  static String errorMessageForTest(FormError err) => _errorMessage(err);
+
   // ── Form feedback coordinator ─────────────────────────
   void _onFormErrors(List<FormError> errors) {
     // Curl debug session: silent observation. Skip cooldown bookkeeping,
@@ -2154,6 +2320,7 @@ class WorkoutViewModel extends ChangeNotifier {
     required double? heelLiftRatio,
     required double? minKneeAngle,
     required double? maxKneeAngle,
+    required double? hipLeadRatio,
   }) {
     _squatRepMetrics.add(
       SquatRepMetrics(
@@ -2165,32 +2332,7 @@ class WorkoutViewModel extends ChangeNotifier {
       ),
     );
 
-    // Feed the in-session auto-calibrator + persist bucket update when
-    // extremes are available. Skip on null extremes (edge-case commits
-    // where one or both extremes weren't captured).
-    if (minKneeAngle != null && maxKneeAngle != null) {
-      _squatAutoCalibrator.recordRepExtremes(minKneeAngle, maxKneeAngle);
-      final profile = _squatProfile;
-      if (profile != null) {
-        final bucket = profile.bucket ?? squat_profile.SquatRomBucket.empty();
-        bucket.applyRep(minKneeAngle, maxKneeAngle);
-        profile.bucket = bucket;
-        // Dirty unconditionally — `applyRep` always mutates the FIFO
-        // recent-samples buffers and the shrink-confirm counters, even
-        // on rejectedOutlier / shrinkPending outcomes. Skipping those
-        // mutations on save means the shrink-counter resets to zero on
-        // next session, weakening the shrink-detection guarantee.
-        _squatProfileDirty = true;
-      } else {
-        // First-time user with no profile yet: seed one in memory so
-        // future reps can accumulate. Save-on-session-end will persist
-        // it.
-        final bucket = squat_profile.SquatRomBucket.empty();
-        bucket.applyRep(minKneeAngle, maxKneeAngle);
-        _squatProfile = squat_profile.SquatRomProfile(bucket: bucket);
-        _squatProfileDirty = true;
-      }
-    }
+    _recordSquatExtremes(minKneeAngle, maxKneeAngle);
 
     // Always log — not gated on debug session. Production data is valuable
     // for threshold derivation. The Python script filters by variant.
@@ -2207,6 +2349,54 @@ class WorkoutViewModel extends ChangeNotifier {
           'min_knee=${minKneeAngle?.toStringAsFixed(2) ?? "null"} '
           'max_knee=${maxKneeAngle?.toStringAsFixed(2) ?? "null"}',
     );
+
+    // Hip-lead diagnostic line — separate from `squat.rep` so the Python
+    // tuning workflow can filter by tag. Null ratio means the rep had
+    // fewer than `kHipLeadMinAscendingFrames` raw ASCENDING frames OR <4
+    // valid velocity pairs after the stationary-shoulder filter; either
+    // way no grade was emitted (fail-open). `ascending_frame_count`
+    // contextualizes the ratio — a ratio computed from 6 frames carries
+    // less signal than one from 20.
+    final hipLeadFrames = _repCounter.squatAscendingFrameCount ?? 0;
+    TelemetryLog.instance.log(
+      'squat.hip_lead',
+      'rep=$_squatDebugRepIndex '
+          'ratio=${hipLeadRatio?.toStringAsFixed(3) ?? "null"} '
+          'ascending_frame_count=$hipLeadFrames '
+          'threshold=$kHipLeadVelocityRatio',
+    );
+  }
+
+  /// Feeds the in-session auto-calibrator and the persistent squat
+  /// bucket with the rep's observed extremes. Extracted from
+  /// `_handleSquatRepCommit` per the architecture review — keeps that
+  /// method under the 80-LOC decomposition trigger and creates a clean
+  /// seam for a future `SquatSessionCoordinator` extraction.
+  ///
+  /// Null extremes (rare — abandoned reps where one or both weren't
+  /// captured) are silently skipped: the auto-cal needs paired
+  /// readings and the bucket's `applyRep` would crash on null.
+  void _recordSquatExtremes(double? minKneeAngle, double? maxKneeAngle) {
+    if (minKneeAngle == null || maxKneeAngle == null) return;
+    _squatAutoCalibrator.recordRepExtremes(minKneeAngle, maxKneeAngle);
+    final profile = _squatProfile;
+    if (profile != null) {
+      final bucket = profile.bucket ?? squat_profile.SquatRomBucket.empty();
+      bucket.applyRep(minKneeAngle, maxKneeAngle);
+      profile.bucket = bucket;
+      // Dirty unconditionally — `applyRep` always mutates the FIFO
+      // recent-samples buffers and the shrink-confirm counters, even on
+      // rejectedOutlier / shrinkPending outcomes. Skipping those
+      // mutations on save would weaken the shrink-detection guarantee.
+      _squatProfileDirty = true;
+    } else {
+      // First-time user with no profile yet: seed one in memory so
+      // future reps can accumulate. Save-on-session-end will persist it.
+      final bucket = squat_profile.SquatRomBucket.empty();
+      bucket.applyRep(minKneeAngle, maxKneeAngle);
+      _squatProfile = squat_profile.SquatRomProfile(bucket: bucket);
+      _squatProfileDirty = true;
+    }
   }
 
   /// Tier-priority squat threshold resolver. Called once per rep at the
@@ -2238,6 +2428,36 @@ class WorkoutViewModel extends ChangeNotifier {
     for (var i = 0; i < repCount; i++) {
       _squatAutoCalibrator.recordRepExtremes(minKnee, maxKnee);
     }
+  }
+
+  /// Test seam: enter `WorkoutPhase.calibration` without the camera
+  /// stream. Used by `workout_view_model_squat_calibration_test.dart` to
+  /// exercise the squat calibration FSM in isolation.
+  ///
+  /// Skips the camera/pose path entirely — production calibration enters
+  /// via `init()` when `forceCalibration` is true.
+  @visibleForTesting
+  void enterCalibrationForTest() => _enterCalibration();
+
+  /// Test seam: simulate a single calibration rep arriving from the
+  /// `RepBoundaryDetector`. Drives the same path the live stream would
+  /// (rep gating + counter + completion trigger).
+  @visibleForTesting
+  void ingestCalibrationRepForTest({
+    required double minAngle,
+    required double maxAngle,
+  }) {
+    _onCalibrationRep(RepExtreme(minAngle: minAngle, maxAngle: maxAngle));
+  }
+
+  /// Test seam: fire the calibration timeout immediately. Production
+  /// path runs a 1-second `Timer.periodic`; tests don't want to wait.
+  @visibleForTesting
+  void timeoutCalibrationForTest() {
+    final message = exercise == ExerciseType.pushUp
+        ? "Couldn't complete calibration — try again or skip."
+        : "Didn't see any reps — try again or skip.";
+    _failCalibration(message);
   }
 
   SquatRomThresholdSet _resolveSquatThresholds(int repIndexInSet) {
@@ -2322,6 +2542,7 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.trunkTibia => 'Keep your chest up',
     FormError.excessiveForwardLean => 'Chest up — keep your back tall',
     FormError.heelLift => 'Drive your heels into the floor',
+    FormError.hipLead => 'Lead with your chest',
     // forwardKneeShift intentionally has a fallback string — TTS suppression
     // happens in `_onFormErrors`, not here. The string is still used by the
     // visual highlight subtitle if the in-workout overlay surfaces it.

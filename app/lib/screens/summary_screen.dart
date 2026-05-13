@@ -449,6 +449,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
     FormError.hipSag => 'Body Line Lost',
     FormError.pushUpShortRom => 'Shallow Push-up',
     FormError.trunkTibia => 'Trunk-Tibia (legacy)',
+    FormError.hipLead => 'Hip Lead',
   };
 
   /// 5-tier knee-shift bucket label (plan flow-decision plan-time #1).

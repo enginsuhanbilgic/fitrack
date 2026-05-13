@@ -209,6 +209,7 @@ tolerances multiplied by `kProfileWarmupMultiplier` = 1.5.
 | **Excessive forward lean** (`FormError.excessiveForwardLean`) | Squat | Trunk-from-vertical (signed `atan2(hip.x − shoulder.x, dy)`) > `kSquatLeanWarnDegBodyweight` (45°) for bodyweight or `kSquatLeanWarnDegHBBS` (50°) for high-bar back squat. `+5°` (`kSquatLongFemurLeanBoost`) when the "Tall lifter" Settings toggle is on. Backward lean (negative signed angle) does NOT fire — the signed formula is the fix that prevents false positives for users who lean back as they squat. Cue: "Chest up — keep your back tall". Highlights both shoulders + hips. Per-rep proportional quality penalty up to `kQualitySquatLeanMaxDeduction` (0.20). |
 | **Heel lift** (`FormError.heelLift`) | Squat | `(foot_index_y − heel_y) / leg_len_px > kSquatHeelLiftWarnRatio` (0.03). Heel rises above the forefoot in screen space. Cue: "Drive your heels into the floor". Highlights both heels. Per-rep proportional quality penalty up to `kQualitySquatHeelLiftMaxDeduction` (0.10). |
 | **Forward knee shift** (`FormError.forwardKneeShift`) | Squat | `(knee_x − ankle_x) / femur_len_px > kSquatKneeShiftWarnRatio` (0.30). **Informational metric only** — no TTS cue, no quality penalty. Visual highlight on knees only (dimmer orange palette to distinguish from active warnings). Surfaced on Summary screen via 5-tier bucket (`Low / Moderate / Notable / High / Very high`). |
+| **Hip lead** (`FormError.hipLead`) | Squat | "Stripper Squat" / "Good Morning Squat" — during the first `kHipLeadAscendingWindowFraction` (0.30) of ASCENDING, `mean(v_y_hip) / mean(v_y_shoulder) > kHipLeadVelocityRatio` (1.4). Hip rises faster than the shoulder, so the chest collapses forward. Cue: "Lead with your chest". Highlights both shoulders + hips. Per-rep proportional quality penalty up to `kQualitySquatHipLeadMaxDeduction` (0.15). Source: deep-research biomechanical spec, 2026-05-13. |
 | **Hip sag** | Push-up | Shoulder-hip-ankle collinearity deviation > `kHipSagDeviation` (15°). |
 | **Push-up short ROM** | Push-up | Rep completed without elbow reaching `kPushUpBottomAngle` (90°). |
 
@@ -261,6 +262,25 @@ tolerances multiplied by `kProfileWarmupMultiplier` = 1.5.
 **Veto rule.** `(kHeadVerticalWeight × |verticalZ| + kHeadScaleWeight × |scaleZ|) ≥ kHeadCorroborationMinZ` (0.6) — head moved enough to corroborate, NO veto, warning fires. Below threshold → veto, warning suppressed (with `debugPrint` telemetry in debug mode for empirical tuning).
 
 **Fail-open contract.** When nose or either ear is below the visibility floor, or when the corroborator's baseline has not yet closed, the analyzer treats the result as "no veto" — the original sway detector's verdict stands. The corroborator can only suppress false positives, never introduce false negatives. Same reset lifecycle as `_swayDetector` — cleared at view change and at session reset.
+
+### 4.1e Hip-Lead Detector
+
+Squat-only detector that catches the "Stripper Squat" / "Good Morning Squat" pattern: the hips rise faster than the shoulders during the start of ASCENDING, so the chest collapses forward even as the rep technically completes.
+
+**Why it lives inside `SquatFormAnalyzer`.** The detector reuses the analyzer's per-frame `evaluate(pose, now:)` cadence and its camera-side picking rule, so the buffered samples follow the same confidence + visibility gates as lean / heel-lift. Three new lifecycle hooks (`onDescendingStart` / `onAscendingStart` / `onAscendingEnd`) mirror curl's `onRepStart` / `onPeakReached` / `onEccentricStart` / `onRepEnd` pattern. `SquatStrategy` fires the hooks at FSM transitions — the analyzer never infers phase from raw poses.
+
+**Window math.** `windowSize = max(kHipLeadMinAscendingFrames (6), round(frames × kHipLeadAscendingWindowFraction (0.30)))`. Only frames in the first 30 % of ASCENDING are evaluated because by mid-ascent the spine straightens out naturally even on a hip-lead rep.
+
+**Velocity formula.** `velocity = -(y[i] − y[i-1])` because screen-Y=0 is at the top, so "rising" physically means `y` decreases. The sign-inversion produces POSITIVE values for ascent. The ratio `mean(v_y_hip) / mean(v_y_shoulder)` is sign-invariant under a global flip of this formula, so the contract is locked by two tests that assert on `lastRepHipMeanVelocity` / `lastRepShoulderMeanVelocity` directly (one for ASCENDING → positive, one for descending → negative).
+
+**Fail-open at three places:**
+1. Fewer than `kHipLeadMinAscendingFrames` (6) raw frames buffered → skip the check.
+2. Pairwise filter drops stationary-shoulder pairs (`|dShoulder| < 1e-6`); if fewer than 4 valid pairs survive → skip.
+3. `meanShoulder.abs() < 1e-6` after the per-pair filter → skip (defensive belt-and-suspenders for pathologically-balanced signals).
+
+**Fires** `FormError.hipLead` when `ratio > kHipLeadVelocityRatio` (1.4). Quality deduction: severity `= ((ratio − 1.4) / 0.6).clamp(0, 1) × kQualitySquatHipLeadMaxDeduction (0.15)`, applied multiplicatively in `_computeQualityScore` AFTER lean and heel-lift. TTS cue: "Lead with your chest" with the standard 3 s cooldown.
+
+**Per-rep state lifecycle.** `_ascendingFrames` cleared at `onDescendingStart` (called from `onRepStart`); accumulated during ASCENDING when `_ascendingPhaseActive == true`; drained by `onAscendingEnd` BEFORE `consumeCompletionErrorsWithDepth(...)` reads the flag. The ordering is load-bearing — calling `consumeCompletionErrorsWithDepth` first would lose the error.
 
 ### 4.2 Quality scoring
 

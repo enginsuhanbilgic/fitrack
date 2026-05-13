@@ -66,6 +66,12 @@ enum FormError {
   excessiveForwardLean, // trunk-from-vertical > kSquatLeanWarnDeg (45° BW / 50° HBBS)
   forwardKneeShift, // (knee_x − ankle_x) / femur_len > kSquatKneeShiftWarnRatio — informational, no TTS
   heelLift, // (foot_index_y − heel_y) / leg_len > kSquatHeelLiftWarnRatio
+  /// Hip-lead — "Stripper Squat" / "Good Morning Squat". During the first
+  /// `kHipLeadAscendingWindowFraction` of ASCENDING, the hip rises faster
+  /// than the shoulder by more than `kHipLeadVelocityRatio`. TTS cue:
+  /// "Lead with your chest". Source: deep-research biomechanical spec
+  /// (2026-05-13); added by Squat Pipeline Overhaul — Part 3.
+  hipLead,
   // Push-up
   hipSag, // shoulder-hip-ankle collinearity deviation > 15°
   pushUpShortRom, // rep completed without elbow reaching bottom threshold

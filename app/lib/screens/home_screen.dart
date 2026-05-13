@@ -11,6 +11,9 @@ import '../core/constants.dart';
 import '../core/theme.dart';
 import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
+import '../engine/squat/squat_rom_profile.dart'
+    as squat_profile
+    show SquatRomProfile;
 import '../models/user_profile.dart';
 import '../services/app_services.dart';
 import '../services/db/profile_repository.dart';
@@ -43,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
   HomeViewModel? _homeVm;
   bool _servicesResolved = false;
   Color? _badgeColor;
+  Color? _squatBadgeColor;
   // Keyed access to the History tab so the shell's app-bar filter button
   // can delegate filter-sheet wiring back into the tab's own VM.
   final GlobalKey<_HistoryTabState> _historyTabKey =
@@ -91,8 +95,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _refreshBadge() async {
     final p = await _profileRepository.loadCurl();
+    final sp = await _profileRepository.loadSquat();
     if (!mounted) return;
-    setState(() => _badgeColor = _computeBadgeColor(p));
+    setState(() {
+      _badgeColor = _computeBadgeColor(p);
+      _squatBadgeColor = _computeSquatBadgeColor(sp);
+    });
   }
 
   static Color? _computeBadgeColor(CurlRomProfile? profile) {
@@ -102,6 +110,23 @@ class _HomeScreenState extends State<HomeScreen> {
         .length;
     if (calibratedCount == 0) return Colors.redAccent;
     if (calibratedCount < _expectedCombos.length) return Colors.orangeAccent;
+    return null;
+  }
+
+  /// Squat badge color matches the curl model in spirit:
+  ///   - red   = uncalibrated (no profile OR bucket below sample-count gate)
+  ///   - orange = stale (calibrated, but last sample was >30 days ago)
+  ///   - null  = calibrated and fresh (no badge rendered)
+  ///
+  /// Squat has only one bucket (no `(side, view)` axis), so there's no
+  /// "partially calibrated" middle state — the orange tier is reserved
+  /// for staleness instead.
+  static Color? _computeSquatBadgeColor(squat_profile.SquatRomProfile? p) {
+    if (p == null || !p.isCalibrated) return Colors.redAccent;
+    final bucket = p.bucket;
+    if (bucket == null) return Colors.redAccent;
+    final ageDays = DateTime.now().difference(bucket.lastUpdated).inDays;
+    if (ageDays > 30) return Colors.orangeAccent;
     return null;
   }
 
@@ -163,6 +188,7 @@ class _HomeScreenState extends State<HomeScreen> {
           else
             const Center(child: CircularProgressIndicator()),
           _TrainTab(
+            squatBadgeColor: _squatBadgeColor,
             onStartWorkout: _startWorkout,
             onLaunchMLKitTest: () => Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const MLKitTestScreen()),
@@ -874,11 +900,17 @@ class _TrainTab extends StatelessWidget {
   const _TrainTab({
     required this.onStartWorkout,
     required this.onLaunchMLKitTest,
+    this.squatBadgeColor,
   });
 
   final Future<void> Function(ExerciseType, {ExerciseSide curlSide})
   onStartWorkout;
   final VoidCallback onLaunchMLKitTest;
+
+  /// Calibration state badge color for the squat tile. Red =
+  /// uncalibrated, orange = stale (>30d since last sample), null =
+  /// fresh and no badge rendered.
+  final Color? squatBadgeColor;
 
   @override
   Widget build(BuildContext context) {
@@ -927,6 +959,7 @@ class _TrainTab extends StatelessWidget {
                 icon: Icons.accessibility,
                 title: ExerciseType.squat.label,
                 subtitle: 'Side view · stand 2 m away at waist height',
+                badgeColor: squatBadgeColor,
                 onTap: () => onStartWorkout(ExerciseType.squat),
               ),
               const SizedBox(height: 10),
@@ -1057,12 +1090,17 @@ class _ExerciseCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.badgeColor,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+
+  /// Calibration-state dot rendered on the icon block. Red = uncalibrated,
+  /// orange = stale, null = no badge.
+  final Color? badgeColor;
 
   @override
   Widget build(BuildContext context) {
@@ -1085,16 +1123,35 @@ class _ExerciseCard extends StatelessWidget {
             ),
             child: Row(
               children: [
-                // Placeholder image block
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    color: ft.surface3,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: ft.stroke),
-                  ),
-                  child: Icon(icon, size: 32, color: ft.accent),
+                // Placeholder image block with optional calibration badge
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 64,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        color: ft.surface3,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: ft.stroke),
+                      ),
+                      child: Icon(icon, size: 32, color: ft.accent),
+                    ),
+                    if (badgeColor != null)
+                      Positioned(
+                        top: -2,
+                        right: -2,
+                        child: Container(
+                          width: 14,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            color: badgeColor,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: ft.surface1, width: 2),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(width: 14),
                 Expanded(
