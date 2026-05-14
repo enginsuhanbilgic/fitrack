@@ -199,39 +199,43 @@ void main() {
       },
     );
 
-    // ── Sensitivity propagation through form-error thresholds ─────────────
-    test('sensitivity propagation — lean fires at High but NOT at Medium', () {
-      // Bodyweight lean: Medium gate=45°, High gate=42°. A rep at 44°
-      // should fire on High but pass on Medium (the 2026-05-13 parity
-      // requirement — squat audit must use the user's sensitivity, NOT
-      // always-high).
-      final reps = [rep(leanDeg: 44.0)];
+    // ── Form-audit thresholds are tier-independent ────────────────────────
+    // 2026-05-14 doctrine flip (Sensitivity vs Form Audit, .agent_brain/SKILLS.md):
+    // form-audit thresholds are FIXED. The pre-2026-05-14 version of this test
+    // asserted the *safety inversion* (Medium=45°, High=42° — gentler-tier
+    // users got weaker warnings). That contract is removed; the inverted
+    // assertion below pins the new doctrine.
+    test('lean threshold fires identically regardless of sensitivity', () {
+      // Bodyweight gate is fixed at 45°. A rep at 46° fires on BOTH tiers;
+      // a rep at 44° passes on BOTH tiers. The High/Medium choice no longer
+      // moves the form-audit gate.
+      for (final sensitivity in FeedbackSensitivity.values) {
+        final auditFire = auditor.auditSquat(
+          squatRepMetrics: [rep(leanDeg: 46.0)],
+          variant: SquatVariant.bodyweight,
+          longFemurLifter: false,
+          fatigueDetected: false,
+          sensitivity: sensitivity,
+        );
+        expect(
+          criterionByName(auditFire, 'Forward lean').fired,
+          1,
+          reason: 'Tier $sensitivity: a 46° lean must fire (fixed gate=45°).',
+        );
 
-      final auditMedium = auditor.auditSquat(
-        squatRepMetrics: reps,
-        variant: SquatVariant.bodyweight,
-        longFemurLifter: false,
-        fatigueDetected: false,
-        sensitivity: FeedbackSensitivity.medium,
-      );
-      expect(
-        criterionByName(auditMedium, 'Forward lean').fired,
-        0,
-        reason: 'Medium gate=45° — a 44° rep should pass.',
-      );
-
-      final auditHigh = auditor.auditSquat(
-        squatRepMetrics: reps,
-        variant: SquatVariant.bodyweight,
-        longFemurLifter: false,
-        fatigueDetected: false,
-        sensitivity: FeedbackSensitivity.high,
-      );
-      expect(
-        criterionByName(auditHigh, 'Forward lean').fired,
-        1,
-        reason: 'High gate=42° — a 44° rep should fire.',
-      );
+        final auditPass = auditor.auditSquat(
+          squatRepMetrics: [rep(leanDeg: 44.0)],
+          variant: SquatVariant.bodyweight,
+          longFemurLifter: false,
+          fatigueDetected: false,
+          sensitivity: sensitivity,
+        );
+        expect(
+          criterionByName(auditPass, 'Forward lean').fired,
+          0,
+          reason: 'Tier $sensitivity: a 44° lean must pass (fixed gate=45°).',
+        );
+      }
     });
 
     // ── Pre-v9 reconstructed session: depth dropped to "not graded" ───────

@@ -30,19 +30,20 @@ TWO OPERATING MODES
         accordingly (default MIN_DWELL_FRAMES_FRAMES=2 ≈ 1 s).
 
 METHODOLOGY
-    Identical to Phase D-v2 (derive_thresholds_v2.py) where the sample
-    size allows:
+    Phase D-v2 lineage, with the PR B (2026-05-14) anchor switch:
       * Per-rep extremes from ``rep.extremes`` lines OR frame-signal
         detection (``min=``, ``max=``, ``min_at_peak=`` — wrist-snap
         corrected peak; in frame mode peak = local min, start/end = local maxs)
-      * MAD outlier rejection (threshold 2.5 × MAD — slightly tighter than
-        the 3.5 used on large CSV datasets; small-session telemetry n is
-        usually < 30, so aggressive rejection does more harm)
-      * Harrell-Davis percentile estimator (P5 for peak, P95 for start/end)
+      * MAD outlier rejection (3.5 × MAD via `scripts.stats.mad_reject`).
+      * Median anchor (bootstrapped HD P50) for both peak and start
+        angle — matches the doctrine in `.agent_brain/SKILLS.md`
+        "Threshold Derivation Pipeline" (ROM gates → median_anchor).
+        Pre-PR-B curl used P5(peak) / P95(start) which anchored on the
+        user's deepest/most-extended rep; median is more robust at small n.
       * BCa bootstrap CI (1 000 resamples — fewer than v2's 10 000 to keep
-        CLI latency under 1 s at n ≈ 15)
+        CLI latency under 1 s at n ≈ 15).
       * Design-effect correction using session as cluster (ICC from
-        one-way random-effects ANOVA)
+        one-way random-effects ANOVA).
 
 GENERALIZATION TOLERANCES  (mirrors manual_rom_overrides.dart provenance)
     peak:       personal median + 28°   (covers users with ~40° peak ROM)
@@ -90,13 +91,32 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
-import math
 import os
 import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+# Shared pipeline modules (2026-05-14 PR B). The math, the tier names, the
+# anchor functions, and the invariant clamp all live in dedicated modules so
+# every exercise (curl / squat / push-up) reads from the same source of
+# truth. Adding a new exercise = writing a config dict; the helpers below
+# do not need to be touched.
+from scripts.anchors import median_anchor, p95_anchor  # noqa: F401 — median_anchor re-exported for push-up script
+from scripts.invariants import enforce_ordering
+from scripts.sensitivity import TIERS, TIER_SUFFIX
+from scripts.stats import (
+    BOOTSTRAP_RESAMPLES,
+    BOOTSTRAP_SEED,
+    MAD_REJECTION_THRESHOLD,
+    _mad,
+    _median,
+    bca_ci,
+    design_effect,
+    hd_percentile,
+    mad_reject,
+)
 
 # Default location for tee-captured derived reports. Resolved relative to the
 # repository root so the script can be invoked from anywhere (the repo is
@@ -112,28 +132,23 @@ _DEFAULT_OUT_DIR = (
 CURL_PEAK_EXIT_GAP_DEG = 15.0   # kCurlPeakExitGap
 PROFILE_END_TOLERANCE = 20.0    # kProfileEndTolerance
 
-# Generalization tolerances per sensitivity level.
-# Keys must match CurlSensitivity.name values in types.dart.
+# Per-tier tolerances for curl ROM gates.
+# Keys must match `TIERS` from `scripts.sensitivity` (two-tier rule enforced
+# by app/test/core/feedback_sensitivity_test.dart). The dict layout stays
+# even after PR B's extraction because tolerances are *per-exercise*; only
+# the tier *names* themselves are shared via `TIERS`.
 # Values: peak_tolerance added to personal median peak (larger = looser gate);
 #         start_tolerance subtracted from personal median start (larger = stricter start).
+# 2026-05-14: tolerances loosened (high 20→25/5→7, medium 28→33/8→10) to admit
+# borderline reps users were complaining about. Tier gap on peak preserved at 8°.
 SENSITIVITIES: dict[str, dict[str, float]] = {
-    "high":   {"peak_tolerance": 20.0, "start_tolerance": 5.0},
-    "medium": {"peak_tolerance": 28.0, "start_tolerance": 8.0},
+    "high":   {"peak_tolerance": 25.0, "start_tolerance": 7.0},
+    "medium": {"peak_tolerance": 33.0, "start_tolerance": 10.0},
 }
-# Dart field name suffixes for each level (matches ManualRomOverrides convention).
-_SENSITIVITY_SUFFIX: dict[str, str] = {
-    "high":   "Strict",
-    "medium": "Default",
-}
-
-# MAD outlier rejection threshold — matches derive_thresholds_v2.py.
-# 2.5 was tried for small-n telemetry but caused over-rejection when peak angles
-# cluster tightly (MAD < 1°), so a 3.5× cut removes reps that are within normal ROM.
-MAD_REJECTION_THRESHOLD = 3.5
-
-# Bootstrap
-BOOTSTRAP_RESAMPLES = 1_000
-BOOTSTRAP_SEED = 42
+# Dart field-name suffixes — re-exported from `scripts.sensitivity.TIER_SUFFIX`
+# under the old name for backward compatibility with the in-file consumers
+# below. New code reads `TIER_SUFFIX` directly.
+_SENSITIVITY_SUFFIX: dict[str, str] = TIER_SUFFIX
 
 # Minimum reps needed to produce a threshold estimate
 MIN_REPS_REQUIRED = 5
@@ -421,199 +436,14 @@ def _detect_reps_from_angles(
 
 
 # ---------------------------------------------------------------------------
-# Statistics (self-contained stdlib-only — no numpy/scipy dependency)
+# Statistics — moved to `scripts.stats` in 2026-05-14 PR B so push-up and
+# any future exercise share the same math without re-importing this script.
+# `bca_ci`, `hd_percentile`, `mad_reject`, `design_effect`,
+# `MAD_REJECTION_THRESHOLD`, `BOOTSTRAP_RESAMPLES`, and `BOOTSTRAP_SEED` are
+# imported at the top of this file (and re-exported as module attributes)
+# so call sites that did `from scripts.derive_thresholds_from_telemetry
+# import bca_ci` keep working.
 # ---------------------------------------------------------------------------
-
-
-def _median(values: list[float]) -> float:
-    s = sorted(values)
-    n = len(s)
-    mid = n // 2
-    return s[mid] if n % 2 == 1 else (s[mid - 1] + s[mid]) / 2.0
-
-
-def _mad(values: list[float]) -> float:
-    """Median absolute deviation scaled by 1.4826 (normal-consistent σ estimator)."""
-    med = _median(values)
-    return 1.4826 * _median([abs(v - med) for v in values])
-
-
-def mad_reject(values: list[float], threshold: float = MAD_REJECTION_THRESHOLD) -> list[float]:
-    """Return values with outliers removed (> threshold × MAD from median)."""
-    if len(values) < 4:
-        return values[:]
-    med = _median(values)
-    mad = _mad(values)
-    if mad == 0:
-        return values[:]
-    return [v for v in values if abs(v - med) / mad <= threshold]
-
-
-# -- Regularised incomplete Beta via Lentz continued fractions ---------------
-
-def _beta_cdf(x: float, a: float, b: float) -> float:
-    if x <= 0:
-        return 0.0
-    if x >= 1:
-        return 1.0
-    if x > (a + 1.0) / (a + b + 2.0):
-        return 1.0 - _beta_cdf(1.0 - x, b, a)
-    bt = math.exp(
-        math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
-        + a * math.log(x) + b * math.log(1.0 - x)
-    )
-    eps, fpmin = 3e-7, 1e-30
-    qab, qap, qam = a + b, a + 1.0, a - 1.0
-    c, d = 1.0, 1.0 - qab * x / qap
-    if abs(d) < fpmin:
-        d = fpmin
-    d = 1.0 / d
-    h = d
-    for m in range(1, 201):
-        m2 = 2 * m
-        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
-        d = 1.0 + aa * d
-        if abs(d) < fpmin:
-            d = fpmin
-        c = 1.0 + aa / c
-        if abs(c) < fpmin:
-            c = fpmin
-        d = 1.0 / d
-        h *= d * c
-        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
-        d = 1.0 + aa * d
-        if abs(d) < fpmin:
-            d = fpmin
-        c = 1.0 + aa / c
-        if abs(c) < fpmin:
-            c = fpmin
-        d = 1.0 / d
-        delta = d * c
-        h *= delta
-        if abs(delta - 1.0) < eps:
-            break
-    return bt * h / a
-
-
-def hd_percentile(values: list[float], q: float) -> float:
-    """Harrell-Davis estimator of the q-th percentile (Harrell & Davis, 1982)."""
-    s = sorted(values)
-    n = len(s)
-    if n == 1:
-        return s[0]
-    p = q / 100.0
-    a_par = p * (n + 1)
-    b_par = (1.0 - p) * (n + 1)
-    total = 0.0
-    prev = _beta_cdf(0.0, a_par, b_par)
-    for i in range(1, n + 1):
-        curr = _beta_cdf(i / n, a_par, b_par)
-        total += (curr - prev) * s[i - 1]
-        prev = curr
-    return total
-
-
-# -- BCa bootstrap CI --------------------------------------------------------
-
-def _normal_cdf(z: float) -> float:
-    return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
-
-
-def _probit(p: float) -> float:
-    """Beasley-Springer-Moro normal quantile — accurate to ~1e-9."""
-    if p <= 0.0 or p >= 1.0:
-        raise ValueError(f"probit out of range: {p}")
-    a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
-         1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00]
-    b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
-         6.680131188771972e+01, -1.328068155288572e+01]
-    c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
-         -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00]
-    d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
-         3.754408661907416e+00]
-    p_low = 0.02425
-    if p < p_low:
-        q = math.sqrt(-2 * math.log(p))
-        return ((((( c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / (((( d[0]*q+d[1])*q+d[2])*q+d[3])*q+1)
-    if p <= 1 - p_low:
-        q = p - 0.5
-        r = q * q
-        return ((((( a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q / (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1)
-    q = math.sqrt(-2 * math.log(1 - p))
-    return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1)
-
-
-def bca_ci(
-    values: list[float],
-    statistic,
-    alpha: float = 0.05,
-    n_boot: int = BOOTSTRAP_RESAMPLES,
-    seed: int = BOOTSTRAP_SEED,
-) -> tuple[float, float, float]:
-    """Return (ci_low, ci_high, point_estimate) using BCa bootstrap."""
-    import random
-    rng = random.Random(seed)
-    n = len(values)
-    if n < 2:
-        v = values[0] if values else 0.0
-        return v, v, v
-
-    theta_hat = statistic(values)
-
-    boot = sorted(
-        statistic([values[rng.randrange(n)] for _ in range(n)])
-        for _ in range(n_boot)
-    )
-
-    n_below = sum(1 for s in boot if s < theta_hat)
-    z0 = _probit(max(1, min(n_boot - 1, n_below)) / n_boot)
-
-    jack = [statistic(values[:i] + values[i + 1:]) for i in range(n)]
-    jmean = sum(jack) / n
-    num = sum((jmean - j) ** 3 for j in jack)
-    den = 6.0 * (sum((jmean - j) ** 2 for j in jack)) ** 1.5
-    a_hat = num / den if den > 0 else 0.0
-
-    z_lo, z_hi = _probit(alpha / 2), _probit(1 - alpha / 2)
-
-    def adjusted(z: float) -> float:
-        denom = 1.0 - a_hat * (z0 + z)
-        if denom == 0:
-            return 0.5
-        return _normal_cdf(z0 + (z0 + z) / denom)
-
-    al = max(0.0, min(1.0, adjusted(z_lo)))
-    ah = max(0.0, min(1.0, adjusted(z_hi)))
-    il = max(0, min(n_boot - 1, int(math.floor(al * n_boot))))
-    ih = max(0, min(n_boot - 1, int(math.ceil(ah * n_boot)) - 1))
-    return boot[il], boot[ih], theta_hat
-
-
-# -- Design-effect (ICC) correction ------------------------------------------
-
-def design_effect(
-    values_by_session: dict[int, list[float]],
-) -> tuple[float, float, int]:
-    """Return (deff, icc, effective_n). Session is the cluster."""
-    clusters = [v for v in values_by_session.values() if v]
-    n_total = sum(len(c) for c in clusters)
-    k = len(clusters)
-    if k < 2 or n_total < 4:
-        return 1.0, 0.0, n_total
-
-    means = [sum(c) / len(c) for c in clusters]
-    gm = sum(means) / k
-    ss_b = sum(len(c) * (m - gm) ** 2 for c, m in zip(clusters, means))
-    ss_w = sum(sum((v - m) ** 2 for v in c) for c, m in zip(clusters, means))
-    df_b, df_w = k - 1, n_total - k
-    if df_b <= 0 or df_w <= 0:
-        return 1.0, 0.0, n_total
-    ms_b, ms_w = ss_b / df_b, ss_w / df_w
-    avg_m = n_total / k
-    icc_d = ms_b + (avg_m - 1) * ms_w
-    icc = max(0.0, (ms_b - ms_w) / icc_d) if icc_d > 0 else 0.0
-    deff = 1.0 + (avg_m - 1) * icc
-    return deff, icc, int(n_total / deff) if deff > 0 else n_total
 
 
 # ---------------------------------------------------------------------------
@@ -622,7 +452,7 @@ def design_effect(
 
 @dataclass
 class DerivedThresholds:
-    sensitivity: str   # "high" | "medium" | "low"
+    sensitivity: str   # "high" | "medium"  (two-tier rule, 2026-05-14)
     view: str
     side: str
     n_reps: int
@@ -712,19 +542,37 @@ def _derive(
                 break
     deff, icc, eff_n = design_effect(by_session_kept)
 
-    # HD percentile estimators + BCa CI — computed once
-    def stat_peak(vs: list[float]) -> float:
-        return hd_percentile(vs, 5.0)
+    # Median anchor (PR B, 2026-05-14): both peak and start anchor on the
+    # bootstrapped median of the user's reps — the user's *typical* depth
+    # and *typical* extension. Tolerance constants in SENSITIVITIES are
+    # added (peak) or subtracted (start) to admit borderline reps.
+    #
+    # Pre-2026-05-14 curl used BCa(P5) for peak and BCa(P95) for start —
+    # i.e. the user's deepest/most-extended rep + small tolerance. That
+    # anchored on the extreme, which is more sensitive to a single
+    # outlier at FiTrack's typical n=8–12 reps/session. Median anchoring
+    # matches clinical biomechanics convention (Reese & Bandy, FMS) and
+    # the doctrine in `.agent_brain/SKILLS.md` "Threshold Derivation
+    # Pipeline".
+    #
+    # The CI is computed by BCa wrapping the same Harrell-Davis median
+    # estimator, so the reported `*_ci` bounds reflect the actual
+    # statistic used as the anchor (not the old P5/P95 picks).
+    def stat_median(vs: list[float]) -> float:
+        return hd_percentile(vs, 50.0)
 
-    def stat_start(vs: list[float]) -> float:
-        return hd_percentile(vs, 95.0)
+    peak_ci_lo, peak_ci_hi, peak_point = bca_ci(kept_peaks, stat_median)
+    start_ci_lo, start_ci_hi, start_point = bca_ci(kept_starts, stat_median)
 
-    peak_ci_lo, peak_ci_hi, peak_point = bca_ci(kept_peaks, stat_peak)
-    start_ci_lo, start_ci_hi, start_point = bca_ci(kept_starts, stat_start)
-
-    # Apply each sensitivity level's tolerances independently
+    # Apply each sensitivity tier's tolerances independently. `TIERS` from
+    # `scripts.sensitivity` is the single source of truth for which tiers
+    # exist; iterating it (instead of `SENSITIVITIES.items()`) means adding
+    # a new tier requires touching `scripts.sensitivity` *and* the per-
+    # exercise `SENSITIVITIES` dict in lock-step — the lookup error here
+    # surfaces the omission immediately.
     results: list[DerivedThresholds] = []
-    for sens_name, tols in SENSITIVITIES.items():
+    for tier in TIERS:
+        tols = SENSITIVITIES[tier]
         peak_tol = tols["peak_tolerance"]
         start_tol = tols["start_tolerance"]
 
@@ -760,7 +608,7 @@ def _derive(
             )
 
         results.append(DerivedThresholds(
-            sensitivity=sens_name,
+            sensitivity=tier,
             view=candidate_view,
             side=candidate_side,
             n_reps=n_total,
@@ -801,7 +649,11 @@ def _dart_field_base(view: str, side: str) -> str:
 
 
 def _dart_snippets(results: list[DerivedThresholds]) -> str:
-    """Emit three named constants (Strict / Default / Permissive) for one view."""
+    """Emit two named constants (Strict / Default) for one view.
+
+    Two-tier rule (2026-05-14, PR A): a `Permissive` block is no longer
+    emitted — the Dart `FeedbackSensitivity` enum has no `low` value.
+    """
     if not results:
         return ""
     first = results[0]
@@ -844,10 +696,10 @@ def _print_report(results: list[DerivedThresholds], verbose: bool) -> None:
     print(f"  sessions: {first.n_sessions}   ICC={first.icc:.3f}   "
           f"deff={first.deff:.2f}   eff_n={first.effective_n}")
     print()
-    print("  Personal medians (HD percentile before tolerances):")
-    print(f"    peak   P5  = {first.median_peak_deg:>6.1f}°  "
+    print("  Median anchors (bootstrapped HD P50 before tolerances) — PR B doctrine:")
+    print(f"    peak  (median of peak_angle)  = {first.median_peak_deg:>6.1f}°  "
           f"CI [{first.peak_ci[0]:.1f}°, {first.peak_ci[1]:.1f}°]")
-    print(f"    start  P95 = {first.median_start_deg:>6.1f}°  "
+    print(f"    start (median of start_angle) = {first.median_start_deg:>6.1f}°  "
           f"CI [{first.start_ci[0]:.1f}°, {first.start_ci[1]:.1f}°]")
     print()
 
@@ -907,15 +759,20 @@ SQUAT_LEAN_WARN_HBBS = 50.0
 SQUAT_KNEE_SHIFT_WARN = 0.30
 SQUAT_HEEL_LIFT_WARN = 0.03
 
-# Tolerance added to P95 per sensitivity level.
-# Looser than curl (squat biomechanics have wider inter-individual variation).
-SQUAT_SENSITIVITIES: dict[str, dict[str, float]] = {
-    "high":   {"lean_tol": 3.0,  "shift_tol": 0.03, "lift_tol": 0.005},
-    "medium": {"lean_tol": 5.0,  "shift_tol": 0.05, "lift_tol": 0.008},
-    "low":    {"lean_tol": 8.0,  "shift_tol": 0.08, "lift_tol": 0.012},
-}
-_SQUAT_SENSITIVITY_SUFFIX: dict[str, str] = {
-    "high": "Strict", "medium": "Default", "low": "Permissive",
+# 2026-05-14 — Sensitivity vs Form Audit doctrine split.
+# See .agent_brain/SKILLS.md → "Sensitivity vs Form Audit". Form-audit
+# thresholds (lean / shift / lift) no longer vary by tier; only ROM does.
+# Squat has no ROM tier dict here — squat ROM derivation (when added) lives
+# in a future workflow. The form-audit dict is the entire squat surface today.
+
+# Form-audit tolerance — single fixed config, NOT tier-keyed.
+# Values match the previous `medium` row so existing medium users see no
+# behavior change; high users get marginally more lenient form warnings
+# (the corrected behavior — pre-2026-05-14 high was the safety inversion).
+SQUAT_FORM_AUDIT_CONFIG: dict[str, float] = {
+    "lean_tol":  5.0,
+    "shift_tol": 0.05,
+    "lift_tol":  0.008,
 }
 
 
@@ -986,11 +843,15 @@ def _parse_squat_sessions(text: str) -> list[dict]:
 # Squat threshold derivation
 # ---------------------------------------------------------------------------
 
-def _derive_squat(
+def _derive_squat_form_audit(
     reps: list[dict],
     variant_filter: Optional[str] = None,
-) -> Optional[list[DerivedSquatThresholds]]:
-    """Derive squat thresholds for all 3 sensitivity levels.
+) -> Optional[DerivedSquatThresholds]:
+    """Derive squat **form-audit** thresholds — a single fixed result, NOT tier-keyed.
+
+    Per the Sensitivity vs Form Audit doctrine (.agent_brain/SKILLS.md, 2026-05-14),
+    form-audit values are biomechanical truth, not user preference. The Python
+    script no longer emits one block per tier; it emits one block, full stop.
 
     variant_filter: 'bodyweight' | 'highBarBackSquat' | None (all variants).
     Returns None when there are fewer than 10 reps with lean data.
@@ -1006,81 +867,89 @@ def _derive_squat(
     shift_vals = [r["knee_shift"] for r in filtered if r["knee_shift"] is not None]
     lift_vals  = [r["heel_lift"]  for r in filtered if r["heel_lift"]  is not None]
 
-    # MAD rejection (same 2.5× threshold as curl pipeline)
+    # MAD rejection (same 3.5× threshold as curl pipeline)
     lean_clean  = mad_reject(lean_vals)
     shift_clean = mad_reject(shift_vals)
     lift_clean  = mad_reject(lift_vals)
 
-    # P95 Harrell-Davis — upper-bound metric; threshold covers 95% of population
-    lean_p95  = hd_percentile(lean_clean,  0.95)
-    shift_p95 = hd_percentile(shift_clean, 0.95)
-    lift_p95  = hd_percentile(lift_clean,  0.95)
+    # P95 anchor (PR B, 2026-05-14): fault upper bound — threshold covers
+    # ~95% of population reps. Pre-PR-B these calls passed `0.95` as the
+    # percentile, but `hd_percentile` expects PERCENT (0..100), not fraction
+    # (0..1) — so the pre-PR-B squat form-audit derivation was effectively
+    # asking for the 0.95th percentile (i.e. near the minimum) and producing
+    # absurdly tight gates. Switching to `p95_anchor`, which internally
+    # calls `hd_percentile(values, 95.0)`, both fixes that latent bug and
+    # gives squat the same shared anchor doctrine as curl/push-up. See
+    # `.agent_brain/SKILLS.md` "Threshold Derivation Pipeline" doctrine.
+    lean_p95  = p95_anchor(lean_clean)
+    shift_p95 = p95_anchor(shift_clean)
+    lift_p95  = p95_anchor(lift_clean)
 
-    results: list[DerivedSquatThresholds] = []
-    for sens_name, tols in SQUAT_SENSITIVITIES.items():
-        lean_thresh  = lean_p95  + tols["lean_tol"]
-        shift_thresh = shift_p95 + tols["shift_tol"]
-        lift_thresh  = lift_p95  + tols["lift_tol"]
+    tols = SQUAT_FORM_AUDIT_CONFIG
+    lean_thresh  = lean_p95  + tols["lean_tol"]
+    shift_thresh = shift_p95 + tols["shift_tol"]
+    lift_thresh  = lift_p95  + tols["lift_tol"]
 
-        # No FSM ordering invariant for squat — thresholds are independent
-        violations: list[str] = []
-        if lean_thresh <= 0:
-            violations.append("lean_thresh must be > 0")
-        if shift_thresh <= 0:
-            violations.append("shift_thresh must be > 0")
-        if lift_thresh <= 0:
-            violations.append("lift_thresh must be > 0")
+    # No FSM ordering invariant for squat form audit — thresholds are independent
+    violations: list[str] = []
+    if lean_thresh <= 0:
+        violations.append("lean_thresh must be > 0")
+    if shift_thresh <= 0:
+        violations.append("shift_thresh must be > 0")
+    if lift_thresh <= 0:
+        violations.append("lift_thresh must be > 0")
 
-        results.append(DerivedSquatThresholds(
-            sensitivity=sens_name,
-            variant=variant_filter or "all",
-            lean_warn_deg=round(lean_thresh, 1),
-            knee_shift_warn=round(shift_thresh, 4),
-            heel_lift_warn=round(lift_thresh, 4),
-            lean_n=len(lean_clean),
-            shift_n=len(shift_clean),
-            lift_n=len(lift_clean),
-            invariants_ok=len(violations) == 0,
-            violations=violations,
-        ))
-    return results
+    return DerivedSquatThresholds(
+        # Sentinel name; form audit is untiered. Kept on the dataclass for the
+        # report formatter's column compatibility with curl's tiered output.
+        sensitivity="fixed",
+        variant=variant_filter or "all",
+        lean_warn_deg=round(lean_thresh, 1),
+        knee_shift_warn=round(shift_thresh, 4),
+        heel_lift_warn=round(lift_thresh, 4),
+        lean_n=len(lean_clean),
+        shift_n=len(shift_clean),
+        lift_n=len(lift_clean),
+        invariants_ok=len(violations) == 0,
+        violations=violations,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Squat output helpers
 # ---------------------------------------------------------------------------
 
-def _dart_squat_snippet(results: list[DerivedSquatThresholds], variant: str) -> str:
-    lines = [f"// Squat thresholds derived from telemetry — variant: {variant}"]
-    for r in results:
-        suffix = _SQUAT_SENSITIVITY_SUFFIX[r.sensitivity]
-        comment = "// DEFAULT — replaces constants.dart value" if r.sensitivity == "medium" else ""
-        lines += [
-            "",
-            f"// {r.sensitivity.upper()} sensitivity (n={r.lean_n} reps)",
-            f"const double kSquatLeanWarnDeg{variant.title().replace('_','')}{'Strict' if suffix == 'Strict' else '' if suffix == 'Default' else 'Permissive'} = {r.lean_warn_deg}; {comment}",
-            f"const double kSquatKneeShiftWarnRatio{'Strict' if suffix == 'Strict' else '' if suffix == 'Default' else 'Permissive'} = {r.knee_shift_warn};",
-            f"const double kSquatHeelLiftWarnRatio{'Strict' if suffix == 'Strict' else '' if suffix == 'Default' else 'Permissive'} = {r.heel_lift_warn};",
-        ]
-    return "\n".join(lines)
+def _dart_squat_snippet(result: DerivedSquatThresholds, variant: str) -> str:
+    """Emit a Dart snippet for the FIXED squat form-audit thresholds.
+
+    Form audit is untiered (Sensitivity vs Form Audit doctrine, 2026-05-14).
+    The snippet maps to constants in `app/lib/core/squat_form_audit_defaults.dart`.
+    """
+    variant_suffix = variant.title().replace('_', '')
+    return "\n".join([
+        f"// Squat form-audit thresholds derived from telemetry — variant: {variant}",
+        f"// Fixed (no sensitivity tier) per Sensitivity vs Form Audit doctrine.",
+        f"// n={result.lean_n} reps after MAD rejection.",
+        f"const double kSquatLeanWarnDeg{variant_suffix} = {result.lean_warn_deg};",
+        f"const double kSquatKneeShiftWarnRatio = {result.knee_shift_warn};",
+        f"const double kSquatHeelLiftWarnRatio = {result.heel_lift_warn};",
+    ])
 
 
-def _print_squat_report(results: list[DerivedSquatThresholds], variant: str) -> None:
+def _print_squat_report(result: DerivedSquatThresholds, variant: str) -> None:
     print(f"\n{'─'*60}")
-    print(f"  Squat thresholds — {variant}")
+    print(f"  Squat form-audit thresholds — {variant} (fixed; untiered)")
     print(f"{'─'*60}")
-    header = f"{'Sensitivity':<12} {'Lean (°)':<12} {'Knee shift':<14} {'Heel lift':<12} N"
+    header = f"{'Lean (°)':<12} {'Knee shift':<14} {'Heel lift':<12} N"
     print(header)
     print("─" * len(header))
-    for r in results:
-        flag = "" if r.invariants_ok else " ⚠ VIOLATION"
-        print(
-            f"{r.sensitivity:<12} "
-            f"{r.lean_warn_deg:<12.1f} "
-            f"{r.knee_shift_warn:<14.4f} "
-            f"{r.heel_lift_warn:<12.4f} "
-            f"{r.lean_n}{flag}"
-        )
+    flag = "" if result.invariants_ok else " ⚠ VIOLATION"
+    print(
+        f"{result.lean_warn_deg:<12.1f} "
+        f"{result.knee_shift_warn:<14.4f} "
+        f"{result.heel_lift_warn:<12.4f} "
+        f"{result.lean_n}{flag}"
+    )
     print()
 
 
@@ -1237,11 +1106,11 @@ def _run_analysis(text: str, args: argparse.Namespace) -> int:
                 variant_reps = [r for r in squat_reps if r["variant"] == variant]
                 if not variant_reps:
                     continue
-                results = _derive_squat(variant_reps, variant_filter=variant)
-                if results:
-                    _print_squat_report(results, variant)
-                    print(_dart_squat_snippet(results, variant))
-                    if any(not r.invariants_ok for r in results):
+                result = _derive_squat_form_audit(variant_reps, variant_filter=variant)
+                if result:
+                    _print_squat_report(result, variant)
+                    print(_dart_squat_snippet(result, variant))
+                    if not result.invariants_ok:
                         squat_any_failed = True
             if squat_any_failed:
                 return 1

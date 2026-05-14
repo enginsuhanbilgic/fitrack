@@ -1,0 +1,141 @@
+[2026-05-14T16:31:53.835101] pose.quality_warn: missing_landmarks ids=13,15 conf=0.02,0.00 nearedge=true inference_ms=34
+[2026-05-14T16:31:52.778331] pose.quality_warn: missing_landmarks ids=14,16 conf=0.03,0.02 nearedge=true inference_ms=22
+[2026-05-14T16:31:51.696106] pose.quality_warn: missing_landmarks ids=13,15 conf=0.04,0.01 nearedge=true inference_ms=35
+[2026-05-14T16:31:50.582861] pose.quality_warn: missing_landmarks ids=13,15 conf=0.02,0.00 nearedge=true inference_ms=34
+[2026-05-14T16:31:49.527873] pose.quality_warn: missing_landmarks ids=13,15 conf=0.04,0.00 nearedge=true inference_ms=50
+[2026-05-14T16:31:45.749687] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:45.670734] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.827002] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.747604] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.667868] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.592546] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.515788] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.442139] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.368195] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.302282] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.228670] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.158865] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.073885] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:44.025296] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.933976] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.865359] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.792729] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.723719] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.641615] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.580609] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.499710] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.430484] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.355426] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.296487] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.207815] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.146984] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:43.065082] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:42.558630] rep.side_metrics: rep=15 side=right view=sideRight lean_deg=4.83 shoulder_drift_ratio=0.0859 elbow_drift_ratio=0.0770 elbow_drift_signed=0.0770 back_lean_deg=2.32 shrug_ratio=0.0082 elbow_rise_ratio=0.0172 rep_quality=0.839 concentric_ms=555 source=calibrated
+[2026-05-14T16:31:42.558603] rep.arm_resolved: rep=15 declared_side=right declared_view=sideRight resolved_arm=left committed_side=right left_conf=2.98 right_conf=2.97 pose_facing=right arm_match=false
+[2026-05-14T16:31:42.558575] rep.extremes: rep=15 side=right view=sideRight min=116.9 max=130.0 rom=13.1 min_at_peak=116.9 concentric_ms=555 source=calibrated result=applied
+[2026-05-14T16:31:42.558544] profile.update: side=right view=sideRight result=applied samples=8 min=111.8 max=149.6
+[2026-05-14T16:31:42.558414] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.85 peak=126.85 peakExit=141.85 end=156.85 samples=8
+[2026-05-14T16:31:40.173242] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:39.636037] rep.side_metrics: rep=14 side=right view=sideRight lean_deg=2.63 shoulder_drift_ratio=0.0623 elbow_drift_ratio=0.0903 elbow_drift_signed=0.0903 back_lean_deg=0.00 shrug_ratio=0.0072 elbow_rise_ratio=0.0835 rep_quality=0.850 concentric_ms=540 source=calibrated
+[2026-05-14T16:31:39.636009] rep.arm_resolved: rep=14 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.98 right_conf=2.99 pose_facing=right arm_match=true
+[2026-05-14T16:31:39.635979] rep.extremes: rep=14 side=right view=sideRight min=115.5 max=137.7 rom=22.2 min_at_peak=115.5 concentric_ms=540 source=calibrated result=shrinkPending
+[2026-05-14T16:31:39.635946] profile.update: side=right view=sideRight result=shrinkPending samples=7 min=111.3 max=151.8
+[2026-05-14T16:31:39.635779] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:36.992517] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:36.912722] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:36.842933] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:36.299989] rep.side_metrics: rep=13 side=right view=sideRight lean_deg=2.50 shoulder_drift_ratio=0.0467 elbow_drift_ratio=0.1601 elbow_drift_signed=0.1601 back_lean_deg=2.50 shrug_ratio=0.0000 elbow_rise_ratio=0.0920 rep_quality=0.850 concentric_ms=537 source=calibrated
+[2026-05-14T16:31:36.299949] rep.arm_resolved: rep=13 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.99 right_conf=2.99 pose_facing=right arm_match=true
+[2026-05-14T16:31:36.294528] rep.extremes: rep=13 side=right view=sideRight min=120.0 max=134.8 rom=14.8 min_at_peak=120.0 concentric_ms=537 source=calibrated result=shrinkPending
+[2026-05-14T16:31:36.294495] profile.update: side=right view=sideRight result=shrinkPending samples=7 min=111.3 max=151.8
+[2026-05-14T16:31:36.294284] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:33.657591] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:33.573136] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:33.037444] rep.side_metrics: rep=12 side=right view=sideRight lean_deg=1.88 shoulder_drift_ratio=0.0400 elbow_drift_ratio=0.1048 elbow_drift_signed=0.1048 back_lean_deg=0.00 shrug_ratio=0.0319 elbow_rise_ratio=0.0000 rep_quality=0.750 concentric_ms=804 source=calibrated
+[2026-05-14T16:31:33.037410] rep.arm_resolved: rep=12 declared_side=right declared_view=sideRight resolved_arm=left committed_side=right left_conf=2.97 right_conf=2.96 pose_facing=right arm_match=false
+[2026-05-14T16:31:33.037382] rep.extremes: rep=12 side=right view=sideRight min=124.8 max=140.7 rom=15.9 min_at_peak=124.8 concentric_ms=804 source=calibrated result=rejectedOutlier
+[2026-05-14T16:31:33.037348] profile.update: side=right view=sideRight result=rejectedOutlier samples=7 min=111.3 max=151.8
+[2026-05-14T16:31:33.037198] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:30.621273] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:30.555660] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:30.524958] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:29.891758] rep.side_metrics: rep=11 side=right view=sideRight lean_deg=2.83 shoulder_drift_ratio=0.0796 elbow_drift_ratio=0.1331 elbow_drift_signed=0.1331 back_lean_deg=0.00 shrug_ratio=0.0000 elbow_rise_ratio=0.0000 rep_quality=0.850 concentric_ms=541 source=calibrated
+[2026-05-14T16:31:29.891729] rep.arm_resolved: rep=11 declared_side=right declared_view=sideRight resolved_arm=left committed_side=right left_conf=2.99 right_conf=2.99 pose_facing=right arm_match=false
+[2026-05-14T16:31:29.891692] rep.extremes: rep=11 side=right view=sideRight min=117.9 max=141.9 rom=24.0 min_at_peak=117.9 concentric_ms=541 source=calibrated result=applied
+[2026-05-14T16:31:29.891659] profile.update: side=right view=sideRight result=applied samples=7 min=111.3 max=151.8
+[2026-05-14T16:31:29.891492] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=141.83 peak=126.28 peakExit=141.28 end=156.28 samples=7
+[2026-05-14T16:31:27.637068] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=142.93 peak=126.28 peakExit=141.28 end=156.28 samples=6
+[2026-05-14T16:31:27.569496] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=142.93 peak=126.28 peakExit=141.28 end=156.28 samples=6
+[2026-05-14T16:31:27.487080] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=142.93 peak=126.28 peakExit=141.28 end=156.28 samples=6
+[2026-05-14T16:31:27.420291] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=142.93 peak=126.28 peakExit=141.28 end=156.28 samples=6
+[2026-05-14T16:31:26.841047] rep.side_metrics: rep=10 side=right view=sideRight lean_deg=8.16 shoulder_drift_ratio=0.1486 elbow_drift_ratio=0.1284 elbow_drift_signed=0.1284 back_lean_deg=2.28 shrug_ratio=0.0526 elbow_rise_ratio=0.0553 rep_quality=0.956 concentric_ms=518 source=calibrated
+[2026-05-14T16:31:26.840997] rep.arm_resolved: rep=10 declared_side=right declared_view=sideRight resolved_arm=left committed_side=right left_conf=2.97 right_conf=2.96 pose_facing=right arm_match=false
+[2026-05-14T16:31:26.840962] rep.extremes: rep=10 side=right view=sideRight min=122.2 max=133.8 rom=11.6 min_at_peak=122.2 concentric_ms=518 source=calibrated result=shrinkPending
+[2026-05-14T16:31:26.840933] profile.update: side=right view=sideRight result=shrinkPending samples=6 min=111.3 max=152.9
+[2026-05-14T16:31:26.840807] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=142.93 peak=126.28 peakExit=141.28 end=156.28 samples=6
+[2026-05-14T16:31:22.196998] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=142.93 peak=126.28 peakExit=141.28 end=156.28 samples=6
+[2026-05-14T16:31:22.112132] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=142.93 peak=126.28 peakExit=141.28 end=156.28 samples=6
+[2026-05-14T16:31:21.590638] rep.side_metrics: rep=9 side=right view=sideRight lean_deg=3.78 shoulder_drift_ratio=0.0988 elbow_drift_ratio=0.1162 elbow_drift_signed=0.1162 back_lean_deg=3.78 shrug_ratio=0.0000 elbow_rise_ratio=0.0980 rep_quality=0.850 concentric_ms=566 source=calibrated
+[2026-05-14T16:31:21.590606] rep.arm_resolved: rep=9 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.97 right_conf=2.97 pose_facing=right arm_match=true
+[2026-05-14T16:31:21.590567] rep.extremes: rep=9 side=right view=sideRight min=117.9 max=135.3 rom=17.4 min_at_peak=117.9 concentric_ms=566 source=calibrated result=shrinkPending
+[2026-05-14T16:31:21.590536] profile.update: side=right view=sideRight result=shrinkPending samples=6 min=111.3 max=152.9
+[2026-05-14T16:31:21.590399] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=142.93 peak=126.28 peakExit=141.28 end=156.28 samples=6
+[2026-05-14T16:31:19.757865] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=142.93 peak=126.28 peakExit=141.28 end=156.28 samples=6
+[2026-05-14T16:31:19.255696] rep.side_metrics: rep=8 side=right view=sideRight lean_deg=3.60 shoulder_drift_ratio=0.0667 elbow_drift_ratio=0.0777 elbow_drift_signed=0.0777 back_lean_deg=2.67 shrug_ratio=0.0000 elbow_rise_ratio=0.0000 rep_quality=0.850 concentric_ms=557 source=calibrated
+[2026-05-14T16:31:19.255623] rep.arm_resolved: rep=8 declared_side=right declared_view=sideRight resolved_arm=left committed_side=right left_conf=2.98 right_conf=2.97 pose_facing=right arm_match=false
+[2026-05-14T16:31:19.255595] rep.extremes: rep=8 side=right view=sideRight min=110.7 max=132.8 rom=22.1 min_at_peak=110.7 concentric_ms=557 source=calibrated result=applied
+[2026-05-14T16:31:19.255564] profile.update: side=right view=sideRight result=applied samples=6 min=111.3 max=152.9
+[2026-05-14T16:31:19.255410] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=142.93 peak=126.28 peakExit=141.28 end=156.28 samples=6
+[2026-05-14T16:31:17.215147] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=145.17 peak=126.28 peakExit=141.28 end=156.28 samples=5
+[2026-05-14T16:31:16.715303] rep.side_metrics: rep=7 side=right view=sideRight lean_deg=3.88 shoulder_drift_ratio=0.0876 elbow_drift_ratio=0.1508 elbow_drift_signed=0.1508 back_lean_deg=0.00 shrug_ratio=0.0000 elbow_rise_ratio=0.1600 rep_quality=0.850 concentric_ms=566 source=calibrated
+[2026-05-14T16:31:16.715276] rep.arm_resolved: rep=7 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.98 right_conf=2.98 pose_facing=right arm_match=true
+[2026-05-14T16:31:16.715250] rep.extremes: rep=7 side=right view=sideRight min=114.4 max=134.5 rom=20.2 min_at_peak=114.4 concentric_ms=566 source=calibrated result=applied
+[2026-05-14T16:31:16.715220] profile.update: side=right view=sideRight result=applied samples=5 min=111.3 max=155.2
+[2026-05-14T16:31:16.715092] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=145.17 peak=126.28 peakExit=141.28 end=156.28 samples=5
+[2026-05-14T16:31:14.534043] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=145.17 peak=125.94 peakExit=140.94 end=155.94 samples=4
+[2026-05-14T16:31:14.460703] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=145.17 peak=125.94 peakExit=140.94 end=155.94 samples=4
+[2026-05-14T16:31:13.899823] rep.side_metrics: rep=6 side=right view=sideRight lean_deg=1.91 shoulder_drift_ratio=0.0398 elbow_drift_ratio=0.1233 elbow_drift_signed=0.1233 back_lean_deg=0.00 shrug_ratio=0.0000 elbow_rise_ratio=0.0927 rep_quality=0.850 concentric_ms=572 source=calibrated
+[2026-05-14T16:31:13.899716] rep.arm_resolved: rep=6 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.94 right_conf=2.97 pose_facing=right arm_match=true
+[2026-05-14T16:31:13.899677] rep.extremes: rep=6 side=right view=sideRight min=112.6 max=140.8 rom=28.2 min_at_peak=114.1 concentric_ms=572 source=calibrated result=shrinkPending
+[2026-05-14T16:31:13.899633] profile.update: side=right view=sideRight result=shrinkPending samples=4 min=110.9 max=155.2
+[2026-05-14T16:31:13.899287] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=145.17 peak=125.94 peakExit=140.94 end=155.94 samples=4
+[2026-05-14T16:31:11.776308] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=145.17 peak=125.94 peakExit=140.94 end=155.94 samples=4
+[2026-05-14T16:31:11.218918] rep.side_metrics: rep=5 side=right view=sideRight lean_deg=2.90 shoulder_drift_ratio=0.1096 elbow_drift_ratio=0.0581 elbow_drift_signed=-0.0581 back_lean_deg=2.90 shrug_ratio=0.0000 elbow_rise_ratio=0.0736 rep_quality=0.850 concentric_ms=526 source=calibrated
+[2026-05-14T16:31:11.218890] rep.arm_resolved: rep=5 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.97 right_conf=2.98 pose_facing=right arm_match=true
+[2026-05-14T16:31:11.218862] rep.extremes: rep=5 side=right view=sideRight min=112.3 max=141.4 rom=29.1 min_at_peak=112.3 concentric_ms=526 source=calibrated result=applied
+[2026-05-14T16:31:11.218829] profile.update: side=right view=sideRight result=applied samples=4 min=110.9 max=155.2
+[2026-05-14T16:31:11.218681] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=145.17 peak=125.94 peakExit=140.94 end=155.94 samples=4
+[2026-05-14T16:31:08.744896] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=146.70 peak=125.94 peakExit=140.94 end=155.94 samples=3
+[2026-05-14T16:31:08.671981] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=146.70 peak=125.94 peakExit=140.94 end=155.94 samples=3
+[2026-05-14T16:31:08.607083] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=146.70 peak=125.94 peakExit=140.94 end=155.94 samples=3
+[2026-05-14T16:31:08.529671] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=146.70 peak=125.94 peakExit=140.94 end=155.94 samples=3
+[2026-05-14T16:31:08.461392] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=146.70 peak=125.94 peakExit=140.94 end=155.94 samples=3
+[2026-05-14T16:31:07.903418] rep.side_metrics: rep=4 side=right view=sideRight lean_deg=3.25 shoulder_drift_ratio=0.0576 elbow_drift_ratio=0.0963 elbow_drift_signed=0.0963 back_lean_deg=3.25 shrug_ratio=0.0033 elbow_rise_ratio=0.1118 rep_quality=0.850 concentric_ms=506 source=calibrated
+[2026-05-14T16:31:07.903391] rep.arm_resolved: rep=4 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.94 right_conf=2.97 pose_facing=right arm_match=true
+[2026-05-14T16:31:07.903362] rep.extremes: rep=4 side=right view=sideRight min=111.8 max=135.1 rom=23.3 min_at_peak=116.6 concentric_ms=506 source=calibrated result=applied
+[2026-05-14T16:31:07.903330] profile.update: side=right view=sideRight result=applied samples=3 min=110.9 max=156.7
+[2026-05-14T16:31:07.903165] curl.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=146.70 peak=125.94 peakExit=140.94 end=155.94 samples=3
+[2026-05-14T16:31:05.531475] curl.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=142.46 peak=127.46 peakExit=142.46 end=157.46
+[2026-05-14T16:31:05.468607] curl.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=142.46 peak=127.46 peakExit=142.46 end=157.46
+[2026-05-14T16:31:05.387012] curl.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=142.46 peak=127.46 peakExit=142.46 end=157.46
+[2026-05-14T16:31:05.321749] curl.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=142.46 peak=127.46 peakExit=142.46 end=157.46
+[2026-05-14T16:31:05.250971] curl.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=142.46 peak=127.46 peakExit=142.46 end=157.46
+[2026-05-14T16:31:04.683071] rep.side_metrics: rep=3 side=right view=sideRight lean_deg=0.90 shoulder_drift_ratio=0.0474 elbow_drift_ratio=0.1126 elbow_drift_signed=0.1126 back_lean_deg=0.00 shrug_ratio=0.0464 elbow_rise_ratio=0.0170 rep_quality=0.750 concentric_ms=550 source=autoCalibrated
+[2026-05-14T16:31:04.683020] rep.arm_resolved: rep=3 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.92 right_conf=2.97 pose_facing=right arm_match=true
+[2026-05-14T16:31:04.682989] rep.extremes: rep=3 side=right view=sideRight min=112.3 max=112.3 rom=0.0 min_at_peak=121.1 concentric_ms=550 source=autoCalibrated result=shrinkPending
+[2026-05-14T16:31:04.682957] profile.update: side=right view=sideRight result=shrinkPending samples=2 min=110.8 max=156.7
+[2026-05-14T16:31:04.682776] curl.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=142.46 peak=127.46 peakExit=142.46 end=157.46
+[2026-05-14T16:31:02.505328] curl.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=146.77 peak=127.54 peakExit=142.54 end=157.54
+[2026-05-14T16:31:01.972845] rep.side_metrics: rep=2 side=right view=sideRight lean_deg=1.18 shoulder_drift_ratio=0.0417 elbow_drift_ratio=0.0790 elbow_drift_signed=0.0790 back_lean_deg=0.13 shrug_ratio=0.0409 elbow_rise_ratio=0.0588 rep_quality=1.000 concentric_ms=560 source=autoCalibrated
+[2026-05-14T16:31:01.972798] rep.arm_resolved: rep=2 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.99 right_conf=3.00 pose_facing=right arm_match=true
+[2026-05-14T16:31:01.972735] rep.extremes: rep=2 side=right view=sideRight min=114.2 max=157.1 rom=42.9 min_at_peak=128.1 concentric_ms=560 source=autoCalibrated result=applied
+[2026-05-14T16:31:01.972672] profile.update: side=right view=sideRight result=applied samples=2 min=110.8 max=156.7
+[2026-05-14T16:31:01.972476] curl.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=146.77 peak=127.54 peakExit=142.54 end=157.54
+[2026-05-14T16:30:57.772219] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=162.00 peak=128.40 peakExit=143.40 end=148.40
+[2026-05-14T16:30:57.225151] rep.side_metrics: rep=1 side=right view=sideRight lean_deg=1.67 shoulder_drift_ratio=0.0571 elbow_drift_ratio=0.0504 elbow_drift_signed=0.0504 back_lean_deg=1.33 shrug_ratio=0.0563 elbow_rise_ratio=0.0546 rep_quality=0.850 concentric_ms=1745 source=global
+[2026-05-14T16:30:57.224437] rep.arm_resolved: rep=1 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.99 right_conf=3.00 pose_facing=right arm_match=true
+[2026-05-14T16:30:57.224340] rep.extremes: rep=1 side=right view=sideRight min=110.8 max=156.4 rom=45.6 min_at_peak=128.4 concentric_ms=1745 source=global result=initialized
+[2026-05-14T16:30:57.224298] profile.update: side=right view=sideRight result=initialized samples=1 min=110.8 max=156.4
+[2026-05-14T16:30:57.223849] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=162.00 peak=128.40 peakExit=143.40 end=148.40
+[2026-05-14T16:30:52.735225] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=162.00 peak=128.40 peakExit=143.40 end=148.40
+[2026-05-14T16:30:23.232026] preferences.feedback_sensitivity_changed: high

@@ -345,6 +345,12 @@ class WorkoutViewModel extends ChangeNotifier {
   // ACTIVE.
   DateTime? _absenceStart;
   DateTime? _activeStart;
+
+  /// Wall-clock moment the active phase began. UI uses this to render
+  /// session elapsed time in the live HUD. Null until the countdown
+  /// completes and the engine transitions to [WorkoutPhase.active].
+  DateTime? get activeStartedAt => _activeStart;
+
   final Map<FormError, DateTime> _lastFeedbackTime = {};
   final Map<FormError, int> _formErrorCounts = {};
 
@@ -722,12 +728,14 @@ class WorkoutViewModel extends ChangeNotifier {
         onCurlRepCommit: _handleCurlRepCommit,
         onCurlViewFlipped: _handleCurlViewFlipped,
         curlHistoricalConcentricDurations: historical,
-        curlFormThresholds: FormThresholds.forSensitivity(_feedbackSensitivity),
+        // Form-audit thresholds are fixed (Sensitivity vs Form Audit doctrine,
+        // .agent_brain/SKILLS.md, 2026-05-14). The user's `_feedbackSensitivity`
+        // affects ROM gates only — form audit always runs at the biomechanical
+        // bar regardless of tier.
+        curlFormThresholds: FormThresholds.medium,
         squatVariant: _squatVariant,
         squatLongFemurLifter: _squatLongFemurLifter,
-        squatFormThresholds: SquatFormThresholds.forSensitivity(
-          _feedbackSensitivity,
-        ),
+        squatFormThresholds: SquatFormThresholds.defaults,
         // Cold-start fallback for the strategy's `_romThresholds` field —
         // used when the host's provider returns nothing or isn't wired.
         // Tier 3 of the resolver lives in `_resolveSquatThresholds`; the

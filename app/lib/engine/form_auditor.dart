@@ -137,10 +137,10 @@ class FormAuditor {
   ///      sensitivity has an effect — see project invariant in
   ///      rom_thresholds.dart §_applyRomSensitivity comment).
   ///
-  /// Form-error thresholds always use `FormThresholds.forSensitivity(sensitivity)`
-  /// — they're not personalized by tier in the codebase, only by sensitivity.
-  /// Using the user's session sensitivity (not always-high) keeps the audit
-  /// consistent with what the live FSM was doing.
+  /// Form-error thresholds use `FormThresholds.medium` — a fixed biomechanical
+  /// bar, NOT tier-tuned (Sensitivity vs Form Audit doctrine, 2026-05-14).
+  /// The audit grades against the same form gates the live FSM saw, which
+  /// after 2026-05-14 are also tier-independent.
   ///
   /// Inputs:
   ///   * [curlRepRecords] — for peak depth + start extension grades.
@@ -175,10 +175,11 @@ class FormAuditor {
       );
     }
 
-    // Form-error thresholds use the user's session sensitivity. Resolved
-    // once per session, not per rep — the live FSM doesn't change form
-    // thresholds mid-session either.
-    final strictForm = FormThresholds.forSensitivity(sensitivity);
+    // Form-error thresholds are fixed (Sensitivity vs Form Audit doctrine,
+    // 2026-05-14). Resolved once per session for legibility — same value
+    // regardless of `sensitivity`, which still drives ROM tier resolution
+    // below.
+    const strictForm = FormThresholds.medium;
     // Cold-start fallback ROM gates — used only for reps that have no
     // calibrated bucket and no auto-cal snapshot to fall back on.
     final coldStartRom = RomThresholds.global(view, sensitivity);
@@ -322,9 +323,10 @@ class FormAuditor {
   ///   3. **Cold-start** — `SquatRomThresholdSet.forSensitivity(sensitivity)`,
   ///      modified by the user's session sensitivity. Tier 3.
   ///
-  /// Form-error thresholds (lean / knee shift / heel lift) use the user's
-  /// **session sensitivity** via `SquatFormThresholds.forSensitivity(sensitivity)`
-  /// — matches [auditCurl]'s 2026-05-13 update. NOT always-high.
+  /// Form-error thresholds (lean / knee shift / heel lift) are FIXED — they
+  /// use [SquatFormThresholds.defaults], NOT a tier-keyed lookup
+  /// (Sensitivity vs Form Audit doctrine, 2026-05-14). The audit grades
+  /// against the same form gates the live FSM saw.
   ///
   /// Depth grading: the per-rep `minKneeAngle` (schema v9) is compared to the
   /// resolved bar's `bottomAngle` — a real angle comparison, replacing the
@@ -380,11 +382,9 @@ class FormAuditor {
       );
     }
 
-    // Form-error thresholds: session sensitivity, NOT always-high. Mirrors
-    // auditCurl's 2026-05-13 update — the audit re-applies what the FSM
-    // would have done with the session's sensitivity, not an artificially
-    // stricter bar the user never opted into.
-    final strictForm = SquatFormThresholds.forSensitivity(sensitivity);
+    // Form-error thresholds: fixed (Sensitivity vs Form Audit doctrine,
+    // 2026-05-14). `sensitivity` still drives ROM tier resolution below.
+    const strictForm = SquatFormThresholds.defaults;
     final leanGate = strictForm.leanWarnFor(
       variant,
       longFemur: longFemurLifter,

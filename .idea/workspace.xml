@@ -4,33 +4,21 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="git commit -m &quot;Session Complete unification, demo mode, push-up overhaul, TTS verbosity&quot;">
+    <list default="true" id="5127d7d5-479a-4e13-862e-5315c46b8236" name="Changes" comment="feat: uniform sensitivity post-pass at every threshold tier&#10;&#10;  FeedbackSensitivity now applies at every ROM resolution tier (calibrated,&#10;  auto-calibrated, cold-start) for all three exercises plus the post-session&#10;  Form Audit. Pre-2026-05-14 sensitivity only modified Tier-3 cold-start;&#10;  the toggle felt dead once calibration or auto-cal engaged.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/GLOSSARY.md" beforeDir="false" afterPath="$PROJECT_DIR$/GLOSSARY.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/IOS_RUN_GUIDE.md" beforeDir="false" afterPath="$PROJECT_DIR$/IOS_RUN_GUIDE.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/core/constants.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/constants.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/core/curl_rom_defaults.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/curl_rom_defaults.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/core/push_up_rom_defaults.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/push_up_rom_defaults.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/core/rom_thresholds.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/rom_thresholds.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/core/squat_rom_defaults.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/squat_rom_defaults.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/core/types.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/types.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/form_thresholds.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/form_thresholds.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/squat_form_thresholds.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/squat_form_thresholds.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/engine/form_auditor.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/form_auditor.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/engine/push_up/push_up_rom_profile.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/push_up/push_up_rom_profile.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/calibration_overlay.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/calibration_overlay.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/view_models/session_summary_view_model.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/view_models/session_summary_view_model.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/widgets/summary/summary_stats_grid.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/summary/summary_stats_grid.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/core/curl_rom_defaults_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/core/curl_rom_defaults_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/core/push_up_rom_defaults_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/core/push_up_rom_defaults_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/core/rom_thresholds_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/core/rom_thresholds_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/core/squat_rom_thresholds_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/core/squat_rom_thresholds_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/core/form_thresholds_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/core/form_thresholds_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/core/squat_form_thresholds_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/core/squat_form_thresholds_test.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/test/engine/form_auditor_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/form_auditor_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/engine/squat/squat_strategy_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/squat/squat_strategy_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/view_models/workout_view_model_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/view_models/workout_view_model_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_pushup_thresholds_from_telemetry.py" beforeDir="false" afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_pushup_thresholds_from_telemetry.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_thresholds_from_telemetry.py" beforeDir="false" afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_thresholds_from_telemetry.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tools/dataset_analysis/tests/test_derive_pushup.py" beforeDir="false" afterPath="$PROJECT_DIR$/tools/dataset_analysis/tests/test_derive_pushup.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -334,7 +322,15 @@
       <option name="project" value="LOCAL" />
       <updated>1778703036172</updated>
     </task>
-    <option name="localTasksCounter" value="27" />
+    <task id="LOCAL-00027" summary="feat: uniform sensitivity post-pass at every threshold tier&#10;&#10;  FeedbackSensitivity now applies at every ROM resolution tier (calibrated,&#10;  auto-calibrated, cold-start) for all three exercises plus the post-session&#10;  Form Audit. Pre-2026-05-14 sensitivity only modified Tier-3 cold-start;&#10;  the toggle felt dead once calibration or auto-cal engaged.">
+      <option name="closed" value="true" />
+      <created>1778722382795</created>
+      <option name="number" value="00027" />
+      <option name="presentableId" value="LOCAL-00027" />
+      <option name="project" value="LOCAL" />
+      <updated>1778722382795</updated>
+    </task>
+    <option name="localTasksCounter" value="28" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -373,7 +369,8 @@
     <MESSAGE value="BIG UPDATE ON DESIGN" />
     <MESSAGE value="Squat pipeline overhaul Part 1: High-sensitivity ROM tuple + schema v9 (min/max knee angle)" />
     <MESSAGE value="git commit -m &quot;Session Complete unification, demo mode, push-up overhaul, TTS verbosity&quot;" />
-    <option name="LAST_COMMIT_MESSAGE" value="git commit -m &quot;Session Complete unification, demo mode, push-up overhaul, TTS verbosity&quot;" />
+    <MESSAGE value="feat: uniform sensitivity post-pass at every threshold tier&#10;&#10;  FeedbackSensitivity now applies at every ROM resolution tier (calibrated,&#10;  auto-calibrated, cold-start) for all three exercises plus the post-session&#10;  Form Audit. Pre-2026-05-14 sensitivity only modified Tier-3 cold-start;&#10;  the toggle felt dead once calibration or auto-cal engaged." />
+    <option name="LAST_COMMIT_MESSAGE" value="feat: uniform sensitivity post-pass at every threshold tier&#10;&#10;  FeedbackSensitivity now applies at every ROM resolution tier (calibrated,&#10;  auto-calibrated, cold-start) for all three exercises plus the post-session&#10;  Form Audit. Pre-2026-05-14 sensitivity only modified Tier-3 cold-start;&#10;  the toggle felt dead once calibration or auto-cal engaged." />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

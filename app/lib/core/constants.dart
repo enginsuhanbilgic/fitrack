@@ -347,22 +347,6 @@ const double kSquatStartAngleHigh = 165.0;
 const double kSquatBottomAngleHigh = 88.0;
 const double kSquatEndAngleHigh = 163.0;
 
-// ── Squat form thresholds — High sensitivity (research, 2026-05-13) ─
-/// Tightened form-error thresholds for `FeedbackSensitivity.high`. Citations:
-///   - 42° BW lean: Straub & Powers 2024 base (40°) + 2° noise margin.
-///   - 48° HBBS lean: Glassbrook 2017 + Straub & Powers synthesis.
-///   - 0.32 knee-shift: deep-research 0.35 minus 0.03 strictness buffer.
-///   - 0.025 heel-lift: Macrum 2012 "2.5% of leg length" exact value.
-///
-/// Foundation PR: these constants are defined but not yet consumed by
-/// `SquatFormThresholds.forSensitivity(high)` — that method continues to
-/// return defaults + additive deltas. A later PR re-points `forSensitivity`
-/// at these values once telemetry-derived squat thresholds land.
-const double kSquatLeanWarnDegBodyweightHigh = 42.0;
-const double kSquatLeanWarnDegHBBSHigh = 48.0;
-const double kSquatKneeShiftWarnRatioHigh = 0.32;
-const double kSquatHeelLiftWarnRatioHigh = 0.025;
-
 // ── Squat personal calibration ──────────────────────────
 /// Minimum reps required for squat personal calibration to commit. Mirrors
 /// [kCalibrationMinReps] (curl) and lives as a separate constant so a future

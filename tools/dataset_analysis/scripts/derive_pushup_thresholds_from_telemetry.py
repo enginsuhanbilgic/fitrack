@@ -1,6 +1,7 @@
 """Derive push-up ROM FSM thresholds from FiTrack debug-session telemetry.
 
-Push-Up Telemetry Threshold Tuning (2026-05-13) — Phase 2.
+Push-Up Telemetry Threshold Tuning (2026-05-13 Phase 2) +
+Unified Pipeline rewrite (2026-05-14 PR B).
 
 INPUT
     A plain-text paste of TelemetryLog entries copied via the Diagnostics
@@ -17,26 +18,38 @@ INPUT
     below in lock-step.
 
 WHAT IT EMITS
-    A paste-ready Dart ``static const PushUpRomThresholdSet`` block per
-    ``(P_BOTTOM, P_START)`` combination from the percentile sweep, mirroring
-    the shape of [PushUpRomDefaults._high] / [PushUpRomDefaults._medium].
-    Use the recommended (P_BOTTOM=10, P_START=90) block as the cold-start
-    medium-sensitivity default; the tighter P_BOTTOM=15 / P_START=85 row
-    feeds the `_high` tier, the looser P_BOTTOM=5 / P_START=95 row feeds a
-    future `_low` tier.
+    One paste-ready Dart ``static const PushUpRomThresholdSet`` block per
+    sensitivity tier, mirroring the shape of [PushUpRomDefaults.anchor]
+    (High) and the Medium tuple derived via
+    [PushUpRomThresholdSet.applySensitivity]. Tier names come from
+    `scripts.sensitivity.TIERS` — the Dart `FeedbackSensitivity` enum is
+    strictly two-tier (high, medium); see
+    `app/test/core/feedback_sensitivity_test.dart`.
 
-METHODOLOGY
-    * Harrell-Davis percentiles for each gate
-        - bottomAngle  = P_BOTTOM of min_elbow (deeper than (100 - P) % of reps)
-        - startAngle   = P_START  of max_elbow (more extended than (100 - P) %)
-        - endAngle     = P50      of max_elbow (typical return-to-extension)
-        - shallowMax   = P_SHALLOW of min_elbow (shallow gate sits above bottom)
-    * MAD outlier rejection (3.5 × MAD) per-dimension — a rep with a noisy
-      min_elbow can still contribute a clean max_elbow.
-    * BCa 95 % bootstrap CI (1 000 resamples) on each percentile.
-    * Design-effect (ICC) correction using session as cluster.
-    * FSM invariant: ``startAngle > endAngle > bottomAngle``. The output
-      block is flagged with ⚠ if violated.
+METHODOLOGY  (2026-05-14 PR B — unified pipeline)
+    Pre-PR-B: percentile sweep — bottom = P10 or P15 of min_elbow, start =
+    P85 or P90 of max_elbow, with a fixed shallow gate at P25 that did not
+    vary by tier. The sweep was statistically weak at FiTrack's 5–12 reps
+    per session, where one rep crossing a boundary could swing the result
+    by several degrees.
+
+    Post-PR-B: median anchor + per-tier additive tolerance — matches the
+    curl pipeline shape and the doctrine in `.agent_brain/SKILLS.md`
+    "Threshold Derivation Pipeline":
+      * MAD outlier rejection (3.5 × MAD) per-dimension.
+      * `bottom_point  = median_anchor(min_elbow)` (bootstrapped P50)
+      * `start_point   = median_anchor(max_elbow)` (bootstrapped P50)
+      * For each tier (high, medium):
+          - `bottom  = bottom_point + bottom_tolerance`   (looser = shallower)
+          - `start   = start_point  - start_tolerance`    (looser = less extension required)
+          - `shallow = bottom_point + shallow_tolerance`  (looser = stricter shallow detection)
+          - `end     = start - FIXED_END_GAP`             (mirrors curl's fixed end gap)
+      * `enforce_ordering` clamps the four-tuple so start > end > shallow > bottom.
+      * BCa 95 % bootstrap CI (1 000 resamples) on each anchor.
+      * Design-effect (ICC) correction using session as cluster.
+
+    Adding a new tier = adding a row to `PUSHUP_SENSITIVITIES`. Adding a
+    new exercise = repeating this pattern with its own SENSITIVITIES dict.
 
 AUTO-SAVE
     When invoked with a file path the report is auto-tee'd to
@@ -59,34 +72,34 @@ USAGE
 
     # Stdin pipe → terminal only.
     pbpaste | python -m scripts.derive_pushup_thresholds_from_telemetry
-
-WHY A SEPARATE SCRIPT
-    Push-up ROM thresholds derive from a different signal (elbow angle)
-    than squat (knee angle), and shipping a single multi-exercise CLI
-    would force every push-up tuning run to disambiguate via flags. The
-    statistics helpers (`hd_percentile`, `bca_ci`, `design_effect`) come
-    from the curl script so a fix to the math lands in one place.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
-import io
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-# Reuse the curl script's statistics — single source of truth keeps any
-# bug fix (e.g. BCa numerics) in one place across all three exercises.
-from scripts.derive_thresholds_from_telemetry import (
+# Shared pipeline modules. PR B (2026-05-14): the math, the tier names, the
+# anchor functions, and the invariant clamp all live in dedicated modules
+# so every exercise's script reads from the same source of truth. The
+# `scripts.derive_thresholds_from_telemetry` import is kept ONLY for the
+# `design_effect` re-export (which still lives there under
+# `scripts.stats.design_effect` via the curl script's transitive imports).
+from scripts.anchors import median_anchor
+from scripts.invariants import enforce_ordering
+from scripts.sensitivity import TIERS, TIER_SUFFIX
+from scripts.stats import (
     BOOTSTRAP_RESAMPLES,
-    MAD_REJECTION_THRESHOLD,
+    MAD_REJECTION_THRESHOLD,  # noqa: F401 — re-exported for the test suite
     bca_ci,
     design_effect,
     hd_percentile,
+    mad_reject,
 )
 
 # ---------------------------------------------------------------------------
@@ -104,25 +117,31 @@ _DEFAULT_OUT_DIR = (
 # session, and pooling across sessions covers thinner data.
 MIN_REPS_REQUIRED = 5
 
-# Percentile sweep — emit one block per (P_BOTTOM, P_START) pair so the
-# reader can pick the row that maps to the Dart sensitivity tier they want.
-# Wider spread (P5/P95) = looser gates = lower sensitivity. Tighter spread
-# (P15/P85) = stricter gates = higher sensitivity. The plan's tier table:
-#   high   → P15 / P85   (strictest)
-#   medium → P10 / P90   (recommended cold-start default)
-#   low    → P5  / P95   (most permissive — future Dart tier)
-P_BOTTOM_SWEEP = (5.0, 10.0, 15.0)
-P_START_SWEEP = (85.0, 90.0, 95.0)
+# Fixed gap between start and end gates. Mirrors curl's `kProfileEndTolerance`
+# (start - 20°). End-of-rep extension is a fraction shy of starting
+# extension because the user pauses briefly at the top — a tier-independent
+# biomechanical fact, not a sensitivity dial.
+FIXED_END_GAP = 2.0
 
-# Fixed picks — same across all tiers.
-P_END_FIXED = 50.0
-# Shallow gate sits above the bottom: must be deeper than P_BOTTOM (so a
-# rep that reverses above this still counts as "made an attempt") but
-# above a representative depth. P25 of min_elbow is the medium pick;
-# the Dart layer's sensitivity tiering uses P30 / P25 / P20 for
-# high / medium / low. The script reports P25 here; producing the full
-# triple is a one-line extension when the Dart side actually consumes it.
-P_SHALLOW = 25.0
+# Per-tier tolerances for push-up ROM gates.
+#
+# **PLACEHOLDER values — telemetry validation pending** (plan §6.2). The
+# numbers below were chosen to reproduce the current
+# `app/lib/core/push_up_rom_defaults.dart` constants under a *typical*
+# user (median elbow ≈ 90° bottom / 167° start). They are NOT derived
+# from telemetry; the first push-up session captured under the new
+# always-on `pushup.rep` logging line replaces them via a derivation run.
+#
+# Reasoning for the relative tier gap (the part that IS doctrine-bound):
+# - `start_tolerance` tier gap 5°: matches `_mediumLooseness.dStart = -5`.
+# - `bottom_tolerance` tier gap 5°: matches `_mediumLooseness.dBottom = +5`.
+# - `shallow_tolerance` tier gap 5°: matches `_mediumLooseness.dShallow = +5`.
+# All preserved bit-for-bit so PR B's refactor changes the *derivation
+# math* without changing the *Dart constants* in flight.
+PUSHUP_SENSITIVITIES: dict[str, dict[str, float]] = {
+    "high":   {"bottom_tolerance": -5.0, "start_tolerance":  2.0, "shallow_tolerance": 35.0},
+    "medium": {"bottom_tolerance":  0.0, "start_tolerance":  7.0, "shallow_tolerance": 40.0},
+}
 
 
 # Mirrors derive_thresholds_from_telemetry's tee implementation.
@@ -195,33 +214,13 @@ def parse_pushup_rep_lines(text: str) -> list[PushUpRepRecord]:
 
 
 # ---------------------------------------------------------------------------
-# Statistics — wraps the curl script's reusables with push-up semantics
+# Statistics — `_mad_reject` kept as a back-compat alias for the test suite
 # ---------------------------------------------------------------------------
 
-def _median(values: list[float]) -> float:
-    s = sorted(values)
-    n = len(s)
-    mid = n // 2
-    return s[mid] if n % 2 == 1 else (s[mid - 1] + s[mid]) / 2.0
-
-
-def _mad(values: list[float]) -> float:
-    med = _median(values)
-    return 1.4826 * _median([abs(v - med) for v in values])
-
-
-def _mad_reject(values: list[float]) -> list[float]:
-    """Return values minus outliers (> MAD_REJECTION_THRESHOLD × MAD)."""
-    if len(values) < 4:
-        return values[:]
-    med = _median(values)
-    mad = _mad(values)
-    if mad == 0:
-        return values[:]
-    return [
-        v for v in values
-        if abs(v - med) / mad <= MAD_REJECTION_THRESHOLD
-    ]
+# Pre-PR-B test files import `_mad_reject` directly. Aliasing to the shared
+# `mad_reject` keeps those tests passing without a churn-only rename in
+# this PR.
+_mad_reject = mad_reject
 
 
 # ---------------------------------------------------------------------------
@@ -230,8 +229,13 @@ def _mad_reject(values: list[float]) -> list[float]:
 
 @dataclass
 class DerivedPushUpRom:
-    p_bottom: float
-    p_start: float
+    """One tier's derivation result. Mirrors the shape used by the
+    pre-PR-B percentile sweep (same dataclass surface, same field names)
+    so the renderer didn't need a rewrite — only the numbers reaching it
+    changed.
+    """
+
+    tier: str   # "high" | "medium" — from `scripts.sensitivity.TIERS`
 
     n_reps: int
     n_kept_min: int
@@ -240,15 +244,20 @@ class DerivedPushUpRom:
     icc_min: float
     icc_max: float
 
+    # Final FSM gate values for this tier, with tolerances applied and
+    # invariant clamps enforced.
     start_angle: float
     bottom_angle: float
     end_angle: float
     shallow_rep_max_angle: float
 
-    start_ci: tuple[float, float]
+    # Anchors (point estimates before tolerance) — useful for the report.
+    bottom_anchor: float
+    start_anchor: float
+
+    # BCa 95 % CIs on the anchors (not the gates).
     bottom_ci: tuple[float, float]
-    end_ci: tuple[float, float]
-    shallow_ci: tuple[float, float]
+    start_ci: tuple[float, float]
 
     invariants_ok: bool
     violations: list[str]
@@ -256,12 +265,21 @@ class DerivedPushUpRom:
 
 def derive_pushup_thresholds(
     reps: list[PushUpRepRecord],
-    p_bottom: float,
-    p_start: float,
-) -> Optional[DerivedPushUpRom]:
-    """Derive a PushUpRomThresholdSet from ``reps`` at the given percentile
-    pair. Returns None when either dimension has fewer than
-    ``MIN_REPS_REQUIRED`` kept samples.
+) -> list[DerivedPushUpRom]:
+    """Derive a [PushUpRomThresholdSet] tuple per tier.
+
+    Returns one entry per tier in `TIERS` (currently `("high", "medium")`).
+    Returns an empty list when either dimension has fewer than
+    `MIN_REPS_REQUIRED` kept samples — same floor the squat script applies.
+
+    Pipeline (matches `.agent_brain/SKILLS.md` "Threshold Derivation Pipeline"):
+        1. MAD-reject min_elbow and max_elbow rep streams independently.
+        2. bottom_point = median_anchor(clean_min) — bootstrapped P50.
+        3. start_point  = median_anchor(clean_max) — bootstrapped P50.
+        4. For each tier in `TIERS`, apply per-tier tolerances from
+           `PUSHUP_SENSITIVITIES`.
+        5. `enforce_ordering` clamps the four-tuple to start > end >
+           shallow > bottom with a 1° minimum gap.
 
     Each dimension (min_elbow, max_elbow) is MAD-filtered independently —
     a rep with a clean min and a noisy max contributes its min and is
@@ -269,19 +287,19 @@ def derive_pushup_thresholds(
     per-dimension acceptance policy.
     """
     if not reps:
-        return None
+        return []
 
     min_vals = [r.min_elbow for r in reps if r.min_elbow is not None]
     max_vals = [r.max_elbow for r in reps if r.max_elbow is not None]
 
     if len(min_vals) < MIN_REPS_REQUIRED or len(max_vals) < MIN_REPS_REQUIRED:
-        return None
+        return []
 
-    kept_min = _mad_reject(min_vals)
-    kept_max = _mad_reject(max_vals)
+    kept_min = mad_reject(min_vals, threshold=MAD_REJECTION_THRESHOLD)
+    kept_max = mad_reject(max_vals, threshold=MAD_REJECTION_THRESHOLD)
 
     if len(kept_min) < MIN_REPS_REQUIRED or len(kept_max) < MIN_REPS_REQUIRED:
-        return None
+        return []
 
     # Group by session for ICC — design-effect correction shrinks the
     # effective n when reps within a session are correlated.
@@ -295,96 +313,86 @@ def derive_pushup_thresholds(
     _, icc_min, _ = design_effect(by_session_min)
     _, icc_max, _ = design_effect(by_session_max)
 
-    # Point estimates + BCa CIs.
-    def stat_bottom(vs: list[float]) -> float:
-        return hd_percentile(vs, p_bottom)
+    # Anchors + CIs. `median_anchor` returns just the point estimate;
+    # `bca_ci` gives us the CI bounds for the same bootstrapped P50.
+    def _p50(vs: list[float]) -> float:
+        return hd_percentile(vs, 50.0)
 
-    def stat_start(vs: list[float]) -> float:
-        return hd_percentile(vs, p_start)
-
-    def stat_end(vs: list[float]) -> float:
-        return hd_percentile(vs, P_END_FIXED)
-
-    def stat_shallow(vs: list[float]) -> float:
-        return hd_percentile(vs, P_SHALLOW)
-
-    b_lo, b_hi, bottom = bca_ci(kept_min, stat_bottom, n_boot=BOOTSTRAP_RESAMPLES)
-    s_lo, s_hi, start = bca_ci(kept_max, stat_start, n_boot=BOOTSTRAP_RESAMPLES)
-    e_lo, e_hi, end = bca_ci(kept_max, stat_end, n_boot=BOOTSTRAP_RESAMPLES)
-    sh_lo, sh_hi, shallow = bca_ci(
-        kept_min, stat_shallow, n_boot=BOOTSTRAP_RESAMPLES
+    b_lo, b_hi, bottom_point = bca_ci(
+        kept_min, _p50, n_boot=BOOTSTRAP_RESAMPLES,
     )
-
-    violations: list[str] = []
-    if not (start > end):
-        violations.append(
-            f"startAngle ({start:.1f}°) must be > endAngle ({end:.1f}°)"
-        )
-    if not (end > bottom):
-        violations.append(
-            f"endAngle ({end:.1f}°) must be > bottomAngle ({bottom:.1f}°)"
-        )
+    s_lo, s_hi, start_point = bca_ci(
+        kept_max, _p50, n_boot=BOOTSTRAP_RESAMPLES,
+    )
+    # Sanity: bca_ci's point estimate is the unbootstrapped `_p50` applied
+    # to the kept sample, which is exactly what `median_anchor` returns —
+    # this is the doctrine link.
+    assert abs(bottom_point - median_anchor(kept_min)) < 1e-9
+    assert abs(start_point - median_anchor(kept_max)) < 1e-9
 
     n_sessions = len({r.session_idx for r in reps})
+    n_reps = len(reps)
 
-    return DerivedPushUpRom(
-        p_bottom=p_bottom,
-        p_start=p_start,
-        n_reps=len(reps),
-        n_kept_min=len(kept_min),
-        n_kept_max=len(kept_max),
-        n_sessions=n_sessions,
-        icc_min=icc_min,
-        icc_max=icc_max,
-        start_angle=start,
-        bottom_angle=bottom,
-        end_angle=end,
-        shallow_rep_max_angle=shallow,
-        start_ci=(s_lo, s_hi),
-        bottom_ci=(b_lo, b_hi),
-        end_ci=(e_lo, e_hi),
-        shallow_ci=(sh_lo, sh_hi),
-        invariants_ok=len(violations) == 0,
-        violations=violations,
-    )
+    results: list[DerivedPushUpRom] = []
+    for tier in TIERS:
+        tols = PUSHUP_SENSITIVITIES[tier]
+        bottom = bottom_point + tols["bottom_tolerance"]
+        start = start_point - tols["start_tolerance"]
+        shallow = bottom_point + tols["shallow_tolerance"]
+        end = start - FIXED_END_GAP
+
+        clamped, violations = enforce_ordering(
+            {"start": start, "end": end, "shallow": shallow, "bottom": bottom},
+            order=["start", "end", "shallow", "bottom"],
+            min_gap=1.0,
+        )
+
+        results.append(
+            DerivedPushUpRom(
+                tier=tier,
+                n_reps=n_reps,
+                n_kept_min=len(kept_min),
+                n_kept_max=len(kept_max),
+                n_sessions=n_sessions,
+                icc_min=icc_min,
+                icc_max=icc_max,
+                start_angle=clamped["start"],
+                bottom_angle=clamped["bottom"],
+                end_angle=clamped["end"],
+                shallow_rep_max_angle=clamped["shallow"],
+                bottom_anchor=bottom_point,
+                start_anchor=start_point,
+                bottom_ci=(b_lo, b_hi),
+                start_ci=(s_lo, s_hi),
+                invariants_ok=len(violations) == 0,
+                violations=violations,
+            )
+        )
+
+    return results
 
 
 # ---------------------------------------------------------------------------
 # Output formatting
 # ---------------------------------------------------------------------------
 
-# Map sweep rows to the Dart sensitivity tier they feed. Single source of
-# truth — the renderer reads this to label each block.
-_TIER_BY_SWEEP_KEY: dict[tuple[float, float], str] = {
-    (15.0, 85.0): "high",
-    (10.0, 90.0): "medium (recommended)",
-    (5.0, 95.0): "low",
-}
-
-
-def _tier_label(p_bottom: float, p_start: float) -> str:
-    return _TIER_BY_SWEEP_KEY.get((p_bottom, p_start), "custom")
-
-
 def dart_snippet(d: DerivedPushUpRom) -> str:
     """Emit a paste-ready Dart PushUpRomThresholdSet block."""
     inv = "" if d.invariants_ok else "  // ⚠ INVARIANT VIOLATION"
-    tier = _tier_label(d.p_bottom, d.p_start)
+    suffix = TIER_SUFFIX.get(d.tier, d.tier.capitalize())
     lines = [
-        f"// P_BOTTOM={d.p_bottom:.0f}, P_START={d.p_start:.0f} — tier: {tier}",
+        f"// tier: {d.tier} ({suffix})",
         f"// reps: {d.n_reps} raw, kept_min={d.n_kept_min} "
         f"kept_max={d.n_kept_max}, {d.n_sessions} session(s)",
         f"// ICC_min={d.icc_min:.3f}  ICC_max={d.icc_max:.3f}",
-        f"static const PushUpRomThresholdSet _derived = "
+        f"// bottom_anchor={d.bottom_anchor:.1f}° "
+        f"start_anchor={d.start_anchor:.1f}°  (median + per-tier tolerance)",
+        f"static const PushUpRomThresholdSet _{d.tier} = "
         f"PushUpRomThresholdSet({inv}",
-        f"  startAngle: {d.start_angle:.1f},  "
-        f"// [CI: {d.start_ci[0]:.1f}° – {d.start_ci[1]:.1f}°]",
-        f"  bottomAngle: {d.bottom_angle:.1f},  "
-        f"// [CI: {d.bottom_ci[0]:.1f}° – {d.bottom_ci[1]:.1f}°]",
-        f"  endAngle: {d.end_angle:.1f},  "
-        f"// [CI: {d.end_ci[0]:.1f}° – {d.end_ci[1]:.1f}°]",
-        f"  shallowRepMaxAngle: {d.shallow_rep_max_angle:.1f},  "
-        f"// [CI: {d.shallow_ci[0]:.1f}° – {d.shallow_ci[1]:.1f}°]",
+        f"  startAngle: {d.start_angle:.1f},",
+        f"  bottomAngle: {d.bottom_angle:.1f},",
+        f"  endAngle: {d.end_angle:.1f},",
+        f"  shallowRepMaxAngle: {d.shallow_rep_max_angle:.1f},",
         ");",
     ]
     return "\n".join(lines)
@@ -392,27 +400,25 @@ def dart_snippet(d: DerivedPushUpRom) -> str:
 
 def print_report(d: DerivedPushUpRom) -> None:
     mark = "✅" if d.invariants_ok else "❌"
-    tier = _tier_label(d.p_bottom, d.p_start)
     print(f"\n{'=' * 60}")
-    print(f"  {mark}  P_BOTTOM={d.p_bottom:.0f}  P_START={d.p_start:.0f}  "
-          f"(tier: {tier})")
+    print(f"  {mark}  tier: {d.tier}")
     print(f"  reps: {d.n_reps} raw → kept_min={d.n_kept_min} "
           f"kept_max={d.n_kept_max}")
     print(f"  sessions: {d.n_sessions}   "
           f"ICC_min={d.icc_min:.3f}   ICC_max={d.icc_max:.3f}")
     print()
-    print(f"  startAngle    (P{d.p_start:.0f} of max_elbow) = "
-          f"{d.start_angle:>6.1f}°  "
-          f"CI [{d.start_ci[0]:.1f}°, {d.start_ci[1]:.1f}°]")
-    print(f"  endAngle      (P{P_END_FIXED:.0f} of max_elbow) = "
-          f"{d.end_angle:>6.1f}°  "
-          f"CI [{d.end_ci[0]:.1f}°, {d.end_ci[1]:.1f}°]")
-    print(f"  shallowRepMax (P{P_SHALLOW:.0f} of min_elbow) = "
-          f"{d.shallow_rep_max_angle:>6.1f}°  "
-          f"CI [{d.shallow_ci[0]:.1f}°, {d.shallow_ci[1]:.1f}°]")
-    print(f"  bottomAngle   (P{d.p_bottom:.0f} of min_elbow) = "
-          f"{d.bottom_angle:>6.1f}°  "
+    print(f"  bottom_anchor (median of min_elbow) = "
+          f"{d.bottom_anchor:>6.1f}°  "
           f"CI [{d.bottom_ci[0]:.1f}°, {d.bottom_ci[1]:.1f}°]")
+    print(f"  start_anchor  (median of max_elbow) = "
+          f"{d.start_anchor:>6.1f}°  "
+          f"CI [{d.start_ci[0]:.1f}°, {d.start_ci[1]:.1f}°]")
+    print()
+    print(f"  startAngle         = {d.start_angle:>6.1f}°")
+    print(f"  endAngle           = {d.end_angle:>6.1f}°  "
+          f"(= start - {FIXED_END_GAP:.0f}°)")
+    print(f"  shallowRepMaxAngle = {d.shallow_rep_max_angle:>6.1f}°")
+    print(f"  bottomAngle        = {d.bottom_angle:>6.1f}°")
     print()
     if d.violations:
         print("  ⚠  INVARIANT VIOLATIONS:")
@@ -439,30 +445,21 @@ def _run_analysis(text: str, _args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
 
-    any_emitted = False
-    any_failed = False
-    for p_bottom in P_BOTTOM_SWEEP:
-        for p_start in P_START_SWEEP:
-            # Pair only the tier rows (skip the cross-product cells). The
-            # cross-product would emit 9 blocks; only the three diagonal
-            # tier rows have a Dart consumer.
-            if (p_bottom, p_start) not in _TIER_BY_SWEEP_KEY:
-                continue
-            result = derive_pushup_thresholds(reps, p_bottom, p_start)
-            if result is None:
-                continue
-            any_emitted = True
-            print_report(result)
-            if not result.invariants_ok:
-                any_failed = True
-
-    if not any_emitted:
+    results = derive_pushup_thresholds(reps)
+    if not results:
         print(
-            f"\n⚠  not enough reps in any sweep cell "
+            f"\n⚠  not enough reps to derive "
             f"(need ≥{MIN_REPS_REQUIRED} per dimension after MAD).",
             file=sys.stderr,
         )
         return 1
+
+    any_failed = False
+    for r in results:
+        print_report(r)
+        if not r.invariants_ok:
+            any_failed = True
+
     return 1 if any_failed else 0
 
 
@@ -516,34 +513,22 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         return 2
 
-    # Stdin: terminal output only — preserves the "quick experiment" workflow.
-    out_path: Optional[Path] = None
+    # Auto-save discipline: file input ⇒ tee to derived/<stem>_pushup_thresholds.txt
+    # unless --no-save. Stdin input never auto-saves (the quick-experiment path).
     if args.telemetry_file and not args.no_save:
-        in_stem = Path(args.telemetry_file).stem
-        out_path = Path(args.out_dir) / f"{in_stem}_pushup_thresholds.txt"
-        try:
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            print(
-                f"warning: could not create output dir {out_path.parent}: {e}",
-                file=sys.stderr,
-            )
-            out_path = None
-
-    if out_path is not None:
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(_Tee(sys.stdout, buf)):
-            exit_code = _run_analysis(text, args)
-        try:
-            out_path.write_text(buf.getvalue(), encoding="utf-8")
-            print(f"\n→ saved derived report: {out_path}", file=sys.stderr)
-        except OSError as e:
-            print(f"warning: could not write {out_path}: {e}",
-                  file=sys.stderr)
-        return exit_code
+        out_dir = Path(args.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stem = Path(args.telemetry_file).stem
+        out_path = out_dir / f"{stem}_pushup_thresholds.txt"
+        with open(out_path, "w", encoding="utf-8") as f:
+            tee = _Tee(sys.stdout, f)
+            with contextlib.redirect_stdout(tee):
+                rc = _run_analysis(text, args)
+        print(f"\n📝  saved to {out_path}")
+        return rc
 
     return _run_analysis(text, args)
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

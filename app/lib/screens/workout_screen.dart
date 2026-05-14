@@ -591,10 +591,9 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             ),
           ),
 
-        // ── ACTIVE — AI coach toast ──────────────────────────────────────────
-        if (phase == WorkoutPhase.active) const _CoachToast(),
-
         // ── ACTIVE — rep counter + bottom stats HUD ──────────────────────────
+        // (Coach tips are now folded into _MinimalHud's bottom guidance row,
+        // priority-gated behind form errors.)
         if (phase == WorkoutPhase.active)
           Positioned.fill(
             child: Selector<WorkoutViewModel, RepSnapshot>(
@@ -1330,195 +1329,52 @@ class _GlassPill extends StatelessWidget {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Coach Toast — card-ai style with backdrop blur, cyan icon holder.
+// Coach tips — rotating educational lines surfaced in the live HUD's bottom
+// guidance row when no FormError is active. Lifted from the retired
+// _CoachToast widget so _MinimalHud can own the rotation timer directly.
 // ──────────────────────────────────────────────────────────────────────────────
 
-class _CoachToast extends StatefulWidget {
-  const _CoachToast();
+typedef _CoachTip = ({IconData icon, String label, String text});
 
-  @override
-  State<_CoachToast> createState() => _CoachToastState();
-}
-
-class _CoachToastState extends State<_CoachToast>
-    with SingleTickerProviderStateMixin {
-  static const _tips = [
-    (
-      icon: Icons.speed,
-      label: 'Tempo',
-      text:
-          'Slow down on the eccentric phase. Control the weight down for 3 seconds.',
-    ),
-    (
-      icon: Icons.straighten,
-      label: 'Form',
-      text: 'Keep elbows tucked at your sides. Avoid swinging at the shoulder.',
-    ),
-    (
-      icon: Icons.air,
-      label: 'Breath',
-      text: 'Exhale on the contraction. Strong breath stabilizes the core.',
-    ),
-    (
-      icon: Icons.timer_outlined,
-      label: 'Pace',
-      text: 'Hold this output. Two more clean reps will close the working set.',
-    ),
-    (
-      icon: Icons.bolt,
-      label: 'Power',
-      text:
-          'Drive the concentric phase. Explosive intent recruits more fibers.',
-    ),
-  ];
-
-  int _index = 0;
-  Timer? _timer;
-  late final AnimationController _slideCtrl;
-  late final Animation<Offset> _slideAnim;
-  late final Animation<double> _fadeAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _slideCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 350),
-    );
-    _slideAnim = Tween<Offset>(
-      begin: const Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOutCubic));
-    _fadeAnim = CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut);
-    _slideCtrl.forward();
-    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (!mounted) return;
-      _slideCtrl.reset();
-      setState(() => _index = (_index + 1) % _tips.length);
-      _slideCtrl.forward();
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _slideCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final tip = _tips[_index];
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    final bottomPad = MediaQuery.paddingOf(context).bottom;
-    final cyanColor = isLight
-        ? const Color(0xFF007A85)
-        : const Color(0xFF00EEFC);
-
-    return Positioned(
-      left: 16,
-      right: 16,
-      bottom: bottomPad + 172,
-      child: FadeTransition(
-        opacity: _fadeAnim,
-        child: SlideTransition(
-          position: _slideAnim,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-              child: Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: isLight
-                      ? const Color(0xDEF4F2EC)
-                      : const Color(0xD9141414),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border(
-                    left: BorderSide(color: cyanColor, width: 3),
-                    top: BorderSide(
-                      color: isLight
-                          ? const Color(0x22D8D6CD)
-                          : const Color(0x222D2D30),
-                    ),
-                    right: BorderSide(
-                      color: isLight
-                          ? const Color(0x22D8D6CD)
-                          : const Color(0x222D2D30),
-                    ),
-                    bottom: BorderSide(
-                      color: isLight
-                          ? const Color(0x22D8D6CD)
-                          : const Color(0x222D2D30),
-                    ),
-                  ),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 32×32 icon holder with cyan tint
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: isLight
-                            ? const Color(0x1F007A85)
-                            : const Color(0x1F00EEFC),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(tip.icon, color: cyanColor, size: 16),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'COACH · ${tip.label.toUpperCase()}',
-                            style: TextStyle(
-                              color: cyanColor,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0,
-                              height: 1,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            tip.text,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: isLight
-                                  ? const Color(0xFF1A1C14)
-                                  : const Color(0xFFE5E2E1),
-                              fontSize: 13,
-                              height: 1.45,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
+const List<_CoachTip> _kCoachTips = [
+  (
+    icon: Icons.speed,
+    label: 'Tempo',
+    text:
+        'Slow down on the eccentric phase. Control the weight down for 3 seconds.',
+  ),
+  (
+    icon: Icons.straighten,
+    label: 'Form',
+    text: 'Keep elbows tucked at your sides. Avoid swinging at the shoulder.',
+  ),
+  (
+    icon: Icons.air,
+    label: 'Breath',
+    text: 'Exhale on the contraction. Strong breath stabilizes the core.',
+  ),
+  (
+    icon: Icons.timer_outlined,
+    label: 'Pace',
+    text: 'Hold this output. Two more clean reps will close the working set.',
+  ),
+  (
+    icon: Icons.bolt,
+    label: 'Power',
+    text: 'Drive the concentric phase. Explosive intent recruits more fibers.',
+  ),
+];
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Minimal HUD — rep counter at 38% height + glassmorphic bottom stats card.
 // ──────────────────────────────────────────────────────────────────────────────
 
-class _MinimalHud extends StatelessWidget {
+class _MinimalHud extends StatefulWidget {
   final RepSnapshot snapshot;
   const _MinimalHud({required this.snapshot});
 
   static const int _targetReps = 12;
+  static const int _secsPerTipRotation = 4;
 
   static String _formErrorLabel(FormError e) {
     if (e == FormError.pushUpShortRom) return 'Go lower';
@@ -1532,11 +1388,64 @@ class _MinimalHud extends StatelessWidget {
   }
 
   @override
+  State<_MinimalHud> createState() => _MinimalHudState();
+}
+
+class _MinimalHudState extends State<_MinimalHud> {
+  Timer? _tick;
+  DateTime? _startedAt;
+  int _elapsedSeconds = 0;
+  int _tipIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _startedAt =
+        context.read<WorkoutViewModel>().activeStartedAt ?? DateTime.now();
+    _recomputeElapsed();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        _recomputeElapsed();
+        if (_elapsedSeconds > 0 &&
+            _elapsedSeconds % _MinimalHud._secsPerTipRotation == 0) {
+          _tipIndex = (_tipIndex + 1) % _kCoachTips.length;
+        }
+      });
+    });
+  }
+
+  void _recomputeElapsed() {
+    final from = _startedAt ?? DateTime.now();
+    final diff = DateTime.now().difference(from).inSeconds;
+    _elapsedSeconds = diff < 0 ? 0 : diff;
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  String _formatTime(int seconds) {
+    final m = (seconds ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  String _formatTempo(int reps, int elapsedSeconds) {
+    if (reps <= 0 || elapsedSeconds <= 0) return '—';
+    final avg = elapsedSeconds / reps;
+    return '${avg.toStringAsFixed(1)} s';
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final snapshot = widget.snapshot;
     final ft = FiTrackColors.of(context);
     final isLight = Theme.of(context).brightness == Brightness.light;
     final errors = snapshot.formErrors;
-    final progress = (snapshot.reps / _targetReps).clamp(0.0, 1.0);
+    final progress = (snapshot.reps / _MinimalHud._targetReps).clamp(0.0, 1.0);
     final size = MediaQuery.sizeOf(context);
     final bottomPad = MediaQuery.paddingOf(context).bottom;
     final repFontSize = size.height < 700 ? 70.0 : 84.0;
@@ -1566,7 +1475,7 @@ class _MinimalHud extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.baseline,
                   textBaseline: TextBaseline.alphabetic,
                   children: [
-                    // The rep number — unchanged per spec (body frame + counter)
+                    // The rep number — sole rep readout on screen.
                     Text(
                       '${snapshot.reps}',
                       style: TextStyle(
@@ -1584,7 +1493,7 @@ class _MinimalHud extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '/$_targetReps',
+                      '/${_MinimalHud._targetReps}',
                       style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
@@ -1625,14 +1534,19 @@ class _MinimalHud extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Stats row: Tempo · Time · Set
-                    _StatsRow(snapshot: snapshot, isLight: isLight, ft: ft),
+                    // Two-cell stats row: TEMPO · TIME
+                    _StatsRow(
+                      tempoLabel: _formatTempo(snapshot.reps, _elapsedSeconds),
+                      timeLabel: _formatTime(_elapsedSeconds),
+                      isLight: isLight,
+                      ft: ft,
+                    ),
                     const SizedBox(height: 12),
                     // Progress label row
                     Row(
                       children: [
                         Text(
-                          'SET PROGRESS',
+                          'REP PROGRESS',
                           style: TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
@@ -1661,7 +1575,8 @@ class _MinimalHud extends StatelessWidget {
                           ? const Color(0xFFECEBE4)
                           : const Color(0xFF2A2A2A),
                     ),
-                    // Form error row
+                    // Unified guidance row: red form-error wins; otherwise
+                    // rotating cyan coach tip; otherwise row hides.
                     if (errors.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       Row(
@@ -1674,7 +1589,7 @@ class _MinimalHud extends StatelessWidget {
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              _formErrorLabel(errors.first),
+                              _MinimalHud._formErrorLabel(errors.first),
                               style: TextStyle(
                                 color: ft.red,
                                 fontSize: 12,
@@ -1685,6 +1600,12 @@ class _MinimalHud extends StatelessWidget {
                             ),
                           ),
                         ],
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 10),
+                      _CoachGuidanceRow(
+                        tip: _kCoachTips[_tipIndex],
+                        isLight: isLight,
                       ),
                     ],
                   ],
@@ -1698,14 +1619,17 @@ class _MinimalHud extends StatelessWidget {
   }
 }
 
-/// Three-stat row: Set Progress % · Elapsed time placeholder · Set count.
+/// Two-cell stats row inside the bottom HUD card. TEMPO is the running
+/// average seconds-per-rep; TIME is the live session elapsed clock.
 class _StatsRow extends StatelessWidget {
-  final RepSnapshot snapshot;
+  final String tempoLabel;
+  final String timeLabel;
   final bool isLight;
   final FiTrackColors ft;
 
   const _StatsRow({
-    required this.snapshot,
+    required this.tempoLabel,
+    required this.timeLabel,
     required this.isLight,
     required this.ft,
   });
@@ -1718,9 +1642,9 @@ class _StatsRow extends StatelessWidget {
 
     return Row(
       children: [
-        _StatCell(label: 'REPS', value: '${snapshot.reps}', ft: ft),
+        _StatCell(label: 'TEMPO', value: tempoLabel, ft: ft),
         _VertDivider(color: dividerColor),
-        _StatCell(label: 'TARGET', value: '12', ft: ft),
+        _StatCell(label: 'TIME', value: timeLabel, ft: ft),
       ],
     );
   }
@@ -1784,6 +1708,58 @@ class _VertDivider extends StatelessWidget {
       height: 32,
       color: color,
       margin: const EdgeInsets.symmetric(horizontal: 8),
+    );
+  }
+}
+
+/// Cyan coach line shown inside the bottom card's guidance row whenever
+/// [RepSnapshot.formErrors] is empty. Replaces the floating _CoachToast.
+class _CoachGuidanceRow extends StatelessWidget {
+  final _CoachTip tip;
+  final bool isLight;
+
+  const _CoachGuidanceRow({required this.tip, required this.isLight});
+
+  @override
+  Widget build(BuildContext context) {
+    final cyanColor = isLight
+        ? const Color(0xFF007A85)
+        : const Color(0xFF00EEFC);
+    final bodyColor = isLight
+        ? const Color(0xFF1A1C14)
+        : const Color(0xFFE5E2E1);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(tip.icon, color: cyanColor, size: 14),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'COACH · ${tip.label.toUpperCase()}',
+                style: TextStyle(
+                  color: cyanColor,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                tip.text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: bodyColor, fontSize: 12, height: 1.35),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

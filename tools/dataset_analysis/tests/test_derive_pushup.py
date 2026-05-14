@@ -140,43 +140,51 @@ def test_parse_without_session_marker_uses_single_cluster():
 # Derivation tests
 # ---------------------------------------------------------------------------
 
-def test_derive_returns_none_for_insufficient_reps():
+def test_derive_returns_empty_for_insufficient_reps():
+    """Pre-PR-B this returned `None`; post-PR-B the derivation returns a
+    list (one entry per tier) and signals failure with an empty list."""
     text = _build_telemetry(n_reps=4)
     reps = parse_pushup_rep_lines(text)
-    assert derive_pushup_thresholds(reps, 10.0, 90.0) is None
+    assert derive_pushup_thresholds(reps) == []
 
 
-def test_derive_returns_result_for_valid_fixture():
+def test_derive_returns_one_block_per_tier():
     text = _build_telemetry(n_reps=20)
     reps = parse_pushup_rep_lines(text)
-    d = derive_pushup_thresholds(reps, 10.0, 90.0)
-    assert d is not None
-    assert d.n_reps == 20
-    assert d.n_kept_min >= MIN_REPS_REQUIRED
-    assert d.n_kept_max >= MIN_REPS_REQUIRED
+    results = derive_pushup_thresholds(reps)
+    # PR B unified pipeline: one block per tier in `TIERS`. With the
+    # current two-tier rule, that's two blocks (high, medium).
+    assert len(results) == 2
+    tiers = [d.tier for d in results]
+    assert tiers == ["high", "medium"]
+    for d in results:
+        assert d.n_reps == 20
+        assert d.n_kept_min >= MIN_REPS_REQUIRED
+        assert d.n_kept_max >= MIN_REPS_REQUIRED
 
 
 def test_derive_satisfies_fsm_invariant():
     text = _build_telemetry(n_reps=20)
     reps = parse_pushup_rep_lines(text)
-    d = derive_pushup_thresholds(reps, 10.0, 90.0)
-    assert d is not None
-    # CORE INVARIANT — also asserted in the Dart PushUpRomThresholdSet's
-    # FSM: startAngle > endAngle > bottomAngle.
-    assert d.start_angle > d.end_angle, (
-        f"start={d.start_angle} end={d.end_angle}"
-    )
-    assert d.end_angle > d.bottom_angle, (
-        f"end={d.end_angle} bottom={d.bottom_angle}"
-    )
-    # Shallow gate sits at-or-above the bottom — it's "minimum depth to
-    # count as a shallow attempt" (deeper than bottom is the rep-counted
-    # path).
-    assert d.shallow_rep_max_angle >= d.bottom_angle, (
-        f"shallow={d.shallow_rep_max_angle} bottom={d.bottom_angle}"
-    )
-    assert d.invariants_ok
-    assert d.violations == []
+    results = derive_pushup_thresholds(reps)
+    assert results
+    for d in results:
+        # CORE INVARIANT — also asserted in the Dart PushUpRomThresholdSet's
+        # FSM: startAngle > endAngle > bottomAngle.
+        assert d.start_angle > d.end_angle, (
+            f"{d.tier}: start={d.start_angle} end={d.end_angle}"
+        )
+        assert d.end_angle > d.bottom_angle, (
+            f"{d.tier}: end={d.end_angle} bottom={d.bottom_angle}"
+        )
+        # Shallow gate sits at-or-above the bottom — it's "minimum depth to
+        # count as a shallow attempt" (deeper than bottom is the rep-counted
+        # path).
+        assert d.shallow_rep_max_angle >= d.bottom_angle, (
+            f"{d.tier}: shallow={d.shallow_rep_max_angle} bottom={d.bottom_angle}"
+        )
+        assert d.invariants_ok, f"{d.tier}: {d.violations}"
+        assert d.violations == []
 
 
 def test_derive_per_dimension_mad_rejection():
@@ -192,13 +200,15 @@ def test_derive_per_dimension_mad_rejection():
 
 def test_derive_flags_invariant_violation():
     # Inverted geometry — `max_elbow` is systematically SHALLOWER (lower
-    # angle) than `min_elbow`. The derived `start` = P90(max) will land
-    # below the derived `bottom` = P10(min), breaking
-    # ``startAngle > endAngle > bottomAngle``.
+    # angle) than `min_elbow`. Under the PR-B median anchor:
+    #   start_anchor = median(max_elbow) ≈ 82°
+    #   bottom_anchor = median(min_elbow) ≈ 152°
+    # With high-tier tolerances (start_tolerance=2, bottom_tolerance=-5):
+    #   start = 82 - 2 = 80
+    #   bottom = 152 - 5 = 147   → start < bottom, invariant broken.
+    # `enforce_ordering` records the violation and clamps the values.
     lines = ["[t] curl_debug.session_start: ts=foo"]
     for i in range(10):
-        # min_elbow ∈ [150, 155]  →  bottom = P10 ≈ 150
-        # max_elbow ∈ [80,  85]   →  start  = P90 ≈ 85  (well below bottom)
         min_elbow = 150.0 + (i % 5) * 1.0
         max_elbow = 80.0 + (i % 5) * 1.0
         lines.append(
@@ -207,10 +217,11 @@ def test_derive_flags_invariant_violation():
         )
     text = "\n".join(lines) + "\n"
     reps = parse_pushup_rep_lines(text)
-    d = derive_pushup_thresholds(reps, 10.0, 90.0)
-    assert d is not None
-    assert d.invariants_ok is False
-    assert len(d.violations) >= 1
+    results = derive_pushup_thresholds(reps)
+    assert results
+    # At least one tier flags violations under inverted geometry.
+    assert any(not d.invariants_ok for d in results)
+    assert any(len(d.violations) >= 1 for d in results)
 
 
 # ---------------------------------------------------------------------------
@@ -257,9 +268,12 @@ def test_cli_emits_parseable_dart_block(tmp_path: Path):
     assert shallow >= bottom
 
 
-def test_cli_emits_three_tier_blocks(tmp_path: Path):
-    # The sweep emits one block per tier (high / medium / low). On the
-    # 20-rep clean fixture all three should derive successfully.
+def test_cli_emits_two_tier_blocks(tmp_path: Path):
+    """PR A two-tier rule + PR B unified pipeline: the CLI emits one
+    PushUpRomThresholdSet block per tier in `TIERS` — two blocks (high,
+    medium). Pre-PR-A the sweep also emitted a "low" block; the Dart
+    FeedbackSensitivity enum has no `low` value, so that row is removed.
+    """
     text = _build_telemetry(n_reps=20)
     fixture = tmp_path / "session.txt"
     fixture.write_text(text)
@@ -270,10 +284,11 @@ def test_cli_emits_three_tier_blocks(tmp_path: Path):
 
     output = buf.getvalue()
     assert exit_code == 0
-    assert output.count("static const PushUpRomThresholdSet") == 3
+    assert output.count("static const PushUpRomThresholdSet") == 2
     assert "tier: high" in output
     assert "tier: medium" in output
-    assert "tier: low" in output
+    # The two-tier rule (PR A) — `low` is forbidden.
+    assert "tier: low" not in output
 
 
 def test_cli_exits_nonzero_when_no_pushup_reps(

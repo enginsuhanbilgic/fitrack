@@ -9,6 +9,14 @@
 /// (`docs/squat/SQUAT_MASTER_SPEC.md`) which synthesizes two independent
 /// deep-research reports.
 ///
+/// **NOT tier-dependent** (Sensitivity vs Form Audit doctrine, 2026-05-14).
+/// Pre-2026-05-14 a `SquatFormThresholds.forSensitivity(FeedbackSensitivity)`
+/// factory tightened gates on `high` (lean −3°, knee-shift −0.03, heel-lift
+/// −0.005) — that produced a safety inversion where users on the *gentler*
+/// tier got *weaker* form warnings. The factory is removed; callers use
+/// [SquatFormThresholds.defaults] (the canonical fixed instance, sourced
+/// from [SquatFormAuditDefaults]).
+///
 /// STATUS LEGEND
 /// ─────────────
 ///   ✅ literature-anchored, safe to ship as v1
@@ -44,16 +52,16 @@
 /// ═══════════════════════════════════════════════════════════════════
 library;
 
-import 'constants.dart';
+import 'squat_form_audit_defaults.dart';
 import 'types.dart';
 
 /// Injectable form-error thresholds for [SquatFormAnalyzer].
 ///
 /// Mirrors [FormThresholds] for biceps curl. Decouples [SquatFormAnalyzer]
-/// from global k* constants so tests and future sensitivity variants can
-/// inject different values without recompiling. The numeric values live in
-/// `constants.dart` (the project's single source of truth); this class adds
-/// the per-variant switch + literature provenance.
+/// from global k* constants so tests can inject different values for
+/// boundary-condition assertions. The numeric values live in
+/// [SquatFormAuditDefaults] (the doctrine-anchored source of truth);
+/// this class adds the variant + long-femur dispatch.
 class SquatFormThresholds {
   const SquatFormThresholds({
     required this.leanWarnDegBodyweight,
@@ -69,37 +77,16 @@ class SquatFormThresholds {
   final double kneeShiftWarnRatio;
   final double heelLiftWarnRatio;
 
-  /// Matches the current hard-coded constants exactly.
-  /// Default for all callers until a squat sensitivity dial is introduced.
+  /// Canonical fixed instance. Sourced from [SquatFormAuditDefaults] so the
+  /// values have one home (the defaults file) and one consumer surface (this
+  /// class). The single API replaces the deleted `forSensitivity` factory.
   static const SquatFormThresholds defaults = SquatFormThresholds(
-    leanWarnDegBodyweight: kSquatLeanWarnDegBodyweight,
-    leanWarnDegHBBS: kSquatLeanWarnDegHBBS,
-    longFemurLeanBoost: kSquatLongFemurLeanBoost,
-    kneeShiftWarnRatio: kSquatKneeShiftWarnRatio,
-    heelLiftWarnRatio: kSquatHeelLiftWarnRatio,
+    leanWarnDegBodyweight: SquatFormAuditDefaults.leanWarnDegBodyweight,
+    leanWarnDegHBBS: SquatFormAuditDefaults.leanWarnDegHBBS,
+    longFemurLeanBoost: SquatFormAuditDefaults.longFemurLeanBoost,
+    kneeShiftWarnRatio: SquatFormAuditDefaults.kneeShiftWarnRatio,
+    heelLiftWarnRatio: SquatFormAuditDefaults.heelLiftWarnRatio,
   );
-
-  /// Builds thresholds for a given [FeedbackSensitivity] level.
-  ///
-  /// Additive deltas per metric (not a uniform multiplier) because lean (°),
-  /// knee-shift (ratio ~0.30), and heel-lift (ratio ~0.03) live on incompatible
-  /// scales. Deltas mirror the Python script's SQUAT_SENSITIVITIES block:
-  ///   high   — lean −3°, shift −0.03, lift −0.005  (tighter gates)
-  ///   medium — no delta                              (== defaults)
-  ///   low    — lean +8°, shift +0.08, lift +0.012   (more permissive)
-  factory SquatFormThresholds.forSensitivity(FeedbackSensitivity s) {
-    final (leanDelta, shiftDelta, liftDelta) = switch (s) {
-      FeedbackSensitivity.high => (-3.0, -0.03, -0.005),
-      FeedbackSensitivity.medium => (0.0, 0.0, 0.0),
-    };
-    return SquatFormThresholds(
-      leanWarnDegBodyweight: kSquatLeanWarnDegBodyweight + leanDelta,
-      leanWarnDegHBBS: kSquatLeanWarnDegHBBS + leanDelta,
-      longFemurLeanBoost: kSquatLongFemurLeanBoost,
-      kneeShiftWarnRatio: kSquatKneeShiftWarnRatio + shiftDelta,
-      heelLiftWarnRatio: kSquatHeelLiftWarnRatio + liftDelta,
-    );
-  }
 
   /// Effective lean threshold for a given variant + long-femur flag.
   double leanWarnFor(SquatVariant variant, {bool longFemur = false}) {
