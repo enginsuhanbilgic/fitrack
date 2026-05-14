@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
@@ -739,8 +740,14 @@ class WorkoutViewModel extends ChangeNotifier {
         onSquatRepCommit: _handleSquatRepCommit,
         onSquatLongFemurDetected: _handleSquatLongFemurDetected,
         squatPersistedFemurTorsoRatio: _squatProfile?.bucket?.femurTorsoRatio,
+        // Push-up uses a binary calibrated/cold-start choice (no auto-cal
+        // tier today). Either branch is High-anchored; the post-pass derives
+        // Medium. Mirrors the resolver shape in `_resolveThresholds` (curl)
+        // and `_resolveSquatThresholds` so push-up participates in the same
+        // uniform-sensitivity contract.
         pushUpThresholds:
-            _pushUpProfile?.thresholds ?? PushUpRomThresholds.defaults,
+            (_pushUpProfile?.thresholds ?? PushUpRomThresholds.defaults)
+                .applySensitivity(_feedbackSensitivity),
         onPushUpRepCommit: _handlePushUpRepCommit,
       );
       if ((exercise.isCurl ||
@@ -773,25 +780,69 @@ class WorkoutViewModel extends ChangeNotifier {
     // calibrated-bucket path and the auto-cal path; nothing else.
     if (diagnosticDisableAutoCalibration) {
       // Intentionally no sensitivity — debug sessions collect baseline data
-      // against the unmodified global thresholds the Python script was
-      // calibrated with. Applying sensitivity would make the measurements
-      // circular.
-      return RomThresholds.global(view);
+      // against the unmodified Medium-baseline globals the Python script was
+      // calibrated against. Applying sensitivity would make the measurements
+      // circular. See `RomThresholds.globalUnmodified`.
+      final t = RomThresholds.globalUnmodified(view);
+      _logCurlThresholdsResolved(
+        tier: 3,
+        source: 'global',
+        thresholds: t,
+        extra: 'diagnostic=true',
+      );
+      return t;
     }
     final profile = _profile;
     if (profile != null && view != CurlCameraView.unknown) {
       final bucket = profile.bucketFor(side, view);
       if (bucket != null && bucket.sampleCount >= kCalibrationMinReps) {
-        return RomThresholds.fromBucket(
+        final warmup = repInSet < kProfileWarmupReps;
+        final t = RomThresholds.fromBucket(
           bucket,
-          warmup: repInSet < kProfileWarmupReps,
+          warmup: warmup,
+        ).applySensitivity(_feedbackSensitivity);
+        _logCurlThresholdsResolved(
+          tier: 1,
+          source: warmup ? 'warmup' : 'calibrated',
+          thresholds: t,
+          extra: 'samples=${bucket.sampleCount}',
         );
+        return t;
       }
     }
     final auto = _autoCalibrator.currentThresholds;
-    if (auto != null) return auto;
-    // Cold-start path: sensitivity applies here only.
-    return RomThresholds.global(view, _feedbackSensitivity);
+    if (auto != null) {
+      final t = auto.applySensitivity(_feedbackSensitivity);
+      _logCurlThresholdsResolved(
+        tier: 2,
+        source: 'autoCalibrated',
+        thresholds: t,
+      );
+      return t;
+    }
+    // Cold-start path. Sensitivity is applied inside `RomThresholds.global`
+    // (the three-tier resolver uses tier-specific looseness deltas).
+    final t = RomThresholds.global(view, _feedbackSensitivity);
+    _logCurlThresholdsResolved(tier: 3, source: 'global', thresholds: t);
+    return t;
+  }
+
+  void _logCurlThresholdsResolved({
+    required int tier,
+    required String source,
+    required RomThresholds thresholds,
+    String? extra,
+  }) {
+    TelemetryLog.instance.log(
+      'curl.thresholds_resolved',
+      'tier=$tier source=$source '
+          'sensitivity=${_feedbackSensitivity.name} '
+          'start=${thresholds.startAngle.toStringAsFixed(2)} '
+          'peak=${thresholds.peakAngle.toStringAsFixed(2)} '
+          'peakExit=${thresholds.peakExitAngle.toStringAsFixed(2)} '
+          'end=${thresholds.endAngle.toStringAsFixed(2)}'
+          '${extra != null ? ' $extra' : ''}',
+    );
   }
 
   /// Engine-callback: a view flip just committed at FSM idle. Surface a
@@ -1284,13 +1335,15 @@ class WorkoutViewModel extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    _calibrationDetector = RepBoundaryDetector();
-    _calibrationSub = _calibrationDetector!.extremes.listen(_onCalibrationRep);
-    TelemetryLog.instance.log('calibration.start', 'phase entered');
-    _tts.speak(
-      'Curl through your full natural range, $kCalibrationMinReps times.',
+    // Curl: defer detector arming + timeout until the user picks Left/Right
+    // in the side-pick panel. The overlay renders the picker when
+    // `calibrationChosenSide == null`; `pickCalibrationSide()` then arms
+    // the detector and starts the timeout. This lets the user read the
+    // prompt without the timeout already eating into their session.
+    TelemetryLog.instance.log(
+      'calibration.start',
+      'phase entered awaiting_side_pick=true',
     );
-    _startCalibrationTimeout();
     notifyListeners();
   }
 
@@ -1348,6 +1401,14 @@ class WorkoutViewModel extends ChangeNotifier {
   void _completeCalibration() {
     _calibrationTimeoutTimer?.cancel();
     final lockedView = _detectedCurlView;
+    final chosenSide = _calibrationChosenSide;
+    if (chosenSide == null) {
+      // Defensive: detector should never emit before pickCalibrationSide()
+      // runs (the detector isn't created until then). If we ever get here
+      // it's a bug — fail loudly rather than guess a side.
+      _failCalibration('Calibration completed before a side was picked.');
+      return;
+    }
     final avgMin =
         _calibrationCollected.map((r) => r.minAngle).reduce((a, b) => a + b) /
         _calibrationCollected.length;
@@ -1364,27 +1425,35 @@ class WorkoutViewModel extends ChangeNotifier {
     }
 
     final profile = _profile ?? CurlRomProfile();
-    // Front view: seed both side buckets symmetrically. Side view: the bucket
-    // matching the locked side. Unknown: defer — bucket attribution happens
-    // at workout time once view detector locks.
-    final sidesToSeed = switch (lockedView) {
-      CurlCameraView.front => const [ProfileSide.left, ProfileSide.right],
-      CurlCameraView.sideLeft => const [ProfileSide.left],
-      CurlCameraView.sideRight => const [ProfileSide.right],
-      CurlCameraView.unknown => const <ProfileSide>[],
-    };
-    for (final s in sidesToSeed) {
-      final b = profile.bucketOrEmpty(s, lockedView);
-      for (final rep in _calibrationCollected) {
-        b.applyRep(rep.minAngle, rep.maxAngle);
-      }
-      profile.upsertBucket(b);
+    // Single chosen-side flow: build (or extend) the bucket for
+    // `(chosenSide, lockedView)` from collected reps, then — on the first
+    // pass only and only if it wouldn't overwrite an already-calibrated
+    // opposite-side bucket — duplicate it to the other side so both arms
+    // resolve to calibrated thresholds in workouts (Global Calibration).
+    final chosenBucket = profile.bucketOrEmpty(chosenSide, lockedView);
+    for (final rep in _calibrationCollected) {
+      chosenBucket.applyRep(rep.minAngle, rep.maxAngle);
     }
+    profile.upsertBucket(chosenBucket);
+
+    var duplicatedToOther = false;
+    if (!_calibrationSecondPassActive &&
+        _shouldDuplicateToOtherSide(chosenSide, lockedView)) {
+      final otherSide = chosenSide == ProfileSide.left
+          ? ProfileSide.right
+          : ProfileSide.left;
+      final clone = _cloneBucketForOtherSide(chosenBucket, otherSide);
+      profile.upsertBucket(clone);
+      duplicatedToOther = true;
+    }
+
     _profile = profile;
     _profileDirty = true;
     TelemetryLog.instance.log(
       'calibration.complete',
-      'view=${lockedView.name} sides=${sidesToSeed.length} '
+      'view=${lockedView.name} side=${chosenSide.name} '
+          'pass=${_calibrationSecondPassActive ? "second" : "first"} '
+          'duplicated_to_other=$duplicatedToOther '
           'avgMin=${avgMin.toStringAsFixed(1)} '
           'avgMax=${avgMax.toStringAsFixed(1)}',
     );
@@ -1396,13 +1465,26 @@ class WorkoutViewModel extends ChangeNotifier {
       CurlCameraView.sideRight => 'Right-side view',
       CurlCameraView.unknown => 'Detected view',
     };
-    final sidesLabel = sidesToSeed.length == 2
-        ? 'Left and Right arms'
-        : (sidesToSeed.contains(ProfileSide.left) ? 'Left arm' : 'Right arm');
+    final sidesLabel = duplicatedToOther
+        ? '${chosenSide == ProfileSide.left ? "Left" : "Right"} arm '
+              '(applied to both)'
+        : '${chosenSide == ProfileSide.left ? "Left" : "Right"} arm';
     _calibrationSummary = CalibrationSummary(
       viewLabel: viewLabel,
       sidesLabel: sidesLabel,
     );
+
+    if (!_calibrationSecondPassActive) {
+      // First pass — offer the optional second-side calibration. The host
+      // renders an explicit Yes/No card; the legacy 2 s auto-dismiss is
+      // moved into `declineSecondSideCalibration()`.
+      _calibrationOfferSecondSide = true;
+      notifyListeners();
+      return;
+    }
+
+    // Second pass: the user already opted in for the other side, so the
+    // legacy 2 s auto-dismiss exit fires.
     notifyListeners();
     Timer(const Duration(seconds: 2), () {
       _calibrationSummary = null;
@@ -1515,12 +1597,135 @@ class WorkoutViewModel extends ChangeNotifier {
 
   void retryCalibration() {
     _disposeCalibrationResources();
+    _calibrationChosenSide = null;
+    _calibrationOfferSecondSide = false;
+    _calibrationSecondPassActive = false;
     _enterCalibration();
   }
 
   void skipCalibration() {
     TelemetryLog.instance.log('calibration.skipped', 'user opted out');
     _exitCalibration(toPhase: WorkoutPhase.setupCheck);
+  }
+
+  // ── Curl side-pick contract (Global Calibration) ─────────
+  //
+  // Calibration for biceps curl is an explicit two-step contract:
+  //
+  //   1. User taps Left or Right at the start of calibration. Until that
+  //      tap, no detector is armed and the timeout is not running — only
+  //      the side-pick panel is shown.
+  //   2. After the chosen side completes, we offer "calibrate the other
+  //      side too?" via [calibrationOfferSecondSide]. Saying No keeps the
+  //      duplicated bucket from pass 1; saying Yes starts a second pass
+  //      ([_calibrationSecondPassActive]) that overwrites only the
+  //      opposite-side bucket.
+  //
+  // The duplicate-at-save approach keeps the engine resolver
+  // (`_resolveThresholds`) free of fallback logic — both side-keys hold
+  // a real bucket after pass 1, and `ThresholdSource.calibrated` flows
+  // through diagnostics/telemetry uniformly.
+  ProfileSide? _calibrationChosenSide;
+  bool _calibrationOfferSecondSide = false;
+  bool _calibrationSecondPassActive = false;
+
+  ProfileSide? get calibrationChosenSide => _calibrationChosenSide;
+  bool get calibrationOfferSecondSide => _calibrationOfferSecondSide;
+
+  /// Called when the user taps Left or Right in the side-pick panel.
+  /// Arms the [RepBoundaryDetector] and starts the calibration timeout —
+  /// both are deferred until this point so the user can take their time
+  /// reading the prompt without the countdown ticking.
+  void pickCalibrationSide(ProfileSide side) {
+    if (!exercise.isCurl) return;
+    if (_phase != WorkoutPhase.calibration) return;
+    if (_calibrationChosenSide != null) return; // idempotent
+    _calibrationChosenSide = side;
+    _calibrationDetector = RepBoundaryDetector();
+    _calibrationSub = _calibrationDetector!.extremes.listen(_onCalibrationRep);
+    TelemetryLog.instance.log(
+      'calibration.side_picked',
+      'side=${side.name} pass=first',
+    );
+    _tts.speak(
+      'Curl through your full natural range, $kCalibrationMinReps times.',
+    );
+    _startCalibrationTimeout();
+    notifyListeners();
+  }
+
+  /// User accepted the optional "calibrate the other side too?" prompt.
+  /// Re-arms detector + timeout for a second pass that will replace ONLY
+  /// the opposite-side bucket.
+  void acceptSecondSideCalibration() {
+    final picked = _calibrationChosenSide;
+    if (picked == null) return;
+    if (!_calibrationOfferSecondSide) return;
+    final other = picked == ProfileSide.left
+        ? ProfileSide.right
+        : ProfileSide.left;
+    _calibrationOfferSecondSide = false;
+    _calibrationSecondPassActive = true;
+    _calibrationChosenSide = other;
+    _calibrationCollected.clear();
+    _calibrationReps = 0;
+    _calibrationCurrentAngle = null;
+    _calibrationError = null;
+    _calibrationSecondsRemaining = kCalibrationTimeoutSec;
+    _disposeCalibrationResources();
+    _calibrationDetector = RepBoundaryDetector();
+    _calibrationSub = _calibrationDetector!.extremes.listen(_onCalibrationRep);
+    TelemetryLog.instance.log(
+      'calibration.side_picked',
+      'side=${other.name} pass=second',
+    );
+    _tts.speak('Now the other arm — $kCalibrationMinReps reps.');
+    _startCalibrationTimeout();
+    notifyListeners();
+  }
+
+  /// User declined the "other side?" prompt. Runs the original
+  /// post-summary exit path (the 2 s timer behavior was relocated here
+  /// from `_completeCalibration`).
+  void declineSecondSideCalibration() {
+    _calibrationOfferSecondSide = false;
+    _calibrationSummary = null;
+    TelemetryLog.instance.log(
+      'calibration.second_side_declined',
+      'side=${_calibrationChosenSide?.name ?? "unknown"}',
+    );
+    if (forceCalibration) {
+      _disposeCalibrationResources();
+      _shouldExitAfterCalibration = true;
+      notifyListeners();
+      return;
+    }
+    _exitCalibration(toPhase: WorkoutPhase.setupCheck);
+  }
+
+  /// True iff duplicating the just-saved bucket into the opposite side
+  /// would not overwrite an already-calibrated bucket. Protects a prior
+  /// dedicated calibration of the opposite side from being silently
+  /// replaced when the user later recalibrates only one side.
+  bool _shouldDuplicateToOtherSide(ProfileSide chosen, CurlCameraView view) {
+    final profile = _profile;
+    if (profile == null) return true;
+    final other = chosen == ProfileSide.left
+        ? ProfileSide.right
+        : ProfileSide.left;
+    final existing = profile.bucketFor(other, view);
+    return (existing?.sampleCount ?? 0) < kCalibrationMinReps;
+  }
+
+  /// Deep-copy of a bucket. JSON round-trip is the cheapest correct
+  /// snapshot — `RomBucket.fromJson` reconstructs all internal state
+  /// (recent-sample lists, shrink counters, timestamps), and the lists
+  /// inside the source bucket are not aliased into the copy.
+  RomBucket _cloneBucketForOtherSide(RomBucket source, ProfileSide otherSide) {
+    final json =
+        jsonDecode(jsonEncode(source.toJson())) as Map<String, dynamic>;
+    json['side'] = otherSide.name;
+    return RomBucket.fromJson(json);
   }
 
   void _exitCalibration({required WorkoutPhase toPhase}) {
@@ -2557,6 +2762,38 @@ class WorkoutViewModel extends ChangeNotifier {
   SquatRomThresholdSet resolveSquatThresholds(int repIndexInSet) =>
       _resolveSquatThresholds(repIndexInSet);
 
+  /// Public test seam for the curl resolver. Same shape as
+  /// `resolveSquatThresholds` — exposes the private three-tier walk
+  /// (`_resolveThresholds`) so unit tests can pin every (tier × sensitivity)
+  /// combination without driving the full pose pipeline.
+  ///
+  /// Production callers use the private method via the
+  /// `curlThresholdsProvider` injection into `RepCounter`.
+  @visibleForTesting
+  RomThresholds resolveCurlThresholds(
+    ProfileSide side,
+    CurlCameraView view,
+    int repInSet,
+  ) => _resolveThresholds(side, view, repInSet);
+
+  /// Test seam: seed the curl profile so the Tier-1 calibrated path can be
+  /// exercised. Production code paths load the profile via
+  /// `_profileRepository.loadCurl()` during `init()`.
+  @visibleForTesting
+  // ignore: use_setters_to_change_properties
+  void seedCurlProfileForTest(CurlRomProfile profile) {
+    _profile = profile;
+  }
+
+  /// Test seam: feed the curl in-session auto-cal so Tier-2 can be exercised
+  /// without driving the full rep pipeline. Mirrors `seedSquatAutoCalForTest`.
+  @visibleForTesting
+  void seedCurlAutoCalForTest(double minAngle, double maxAngle, int repCount) {
+    for (var i = 0; i < repCount; i++) {
+      _autoCalibrator.recordRepExtremes(minAngle, maxAngle);
+    }
+  }
+
   /// Test seam: seed the squat profile so the tier-1 path can be
   /// exercised under unit tests. Production code paths load the profile
   /// via `_profileRepository.loadSquat()` during `init()`.
@@ -2606,49 +2843,77 @@ class WorkoutViewModel extends ChangeNotifier {
     _failCalibration(message);
   }
 
+  /// Test seam: pin the curl view detector to a known value so
+  /// `_completeCalibration` can compute the bucket key without running
+  /// the live view-detector pipeline.
+  @visibleForTesting
+  void setDetectedCurlViewForTest(CurlCameraView view) {
+    _detectedCurlView = view;
+  }
+
+  /// Test seam: hydrate `_profile` from the configured profile repository
+  /// without running `init()` (which would also boot camera/pose). Used
+  /// by Global Calibration tests that need the duplicate-at-save guard
+  /// to see a pre-seeded calibrated bucket.
+  @visibleForTesting
+  Future<void> loadCurlProfileForTest() async {
+    _profile = await _profileRepository.loadCurl() ?? CurlRomProfile();
+  }
+
   SquatRomThresholdSet _resolveSquatThresholds(int repIndexInSet) {
     // Tier 1 — personal profile.
     final profile = _squatProfile;
     if (profile != null && profile.isCalibrated) {
       final b = profile.bucket!;
-      final t = SquatRomThresholdSet(
+      final highAnchor = SquatRomThresholdSet(
         startAngle: b.observedMaxKneeAngle - kSquatProfileStartMargin,
         bottomAngle: b.observedMinKneeAngle + kSquatProfileBottomMargin,
         endAngle: b.observedMaxKneeAngle - kSquatProfileEndMargin,
       );
-      TelemetryLog.instance.log(
-        'squat.thresholds_resolved',
-        'tier=1 source=calibrated '
-            'start=${t.startAngle.toStringAsFixed(2)} '
-            'bottom=${t.bottomAngle.toStringAsFixed(2)} '
-            'end=${t.endAngle.toStringAsFixed(2)} '
-            'samples=${b.sampleCount}',
+      final t = highAnchor.applySensitivity(_feedbackSensitivity);
+      _logSquatThresholdsResolved(
+        tier: 1,
+        source: 'calibrated',
+        thresholds: t,
+        extra: 'samples=${b.sampleCount}',
       );
       return t;
     }
     // Tier 2 — in-session auto-cal.
     final auto = _squatAutoCalibrator.currentThresholds;
     if (auto != null) {
-      TelemetryLog.instance.log(
-        'squat.thresholds_resolved',
-        'tier=2 source=autoCalibrated '
-            'start=${auto.startAngle.toStringAsFixed(2)} '
-            'bottom=${auto.bottomAngle.toStringAsFixed(2)} '
-            'end=${auto.endAngle.toStringAsFixed(2)} '
-            'reps=${_squatAutoCalibrator.repCount}',
+      final t = auto.applySensitivity(_feedbackSensitivity);
+      _logSquatThresholdsResolved(
+        tier: 2,
+        source: 'autoCalibrated',
+        thresholds: t,
+        extra: 'reps=${_squatAutoCalibrator.repCount}',
       );
-      return auto;
+      return t;
     }
     // Tier 3 — cold-start, sensitivity-modified.
-    final cold = SquatRomThresholdSet.forSensitivity(_feedbackSensitivity);
+    final t = SquatRomThresholdSet.anchor.applySensitivity(
+      _feedbackSensitivity,
+    );
+    _logSquatThresholdsResolved(tier: 3, source: 'global', thresholds: t);
+    return t;
+  }
+
+  void _logSquatThresholdsResolved({
+    required int tier,
+    required String source,
+    required SquatRomThresholdSet thresholds,
+    String? extra,
+  }) {
     TelemetryLog.instance.log(
       'squat.thresholds_resolved',
-      'tier=3 source=global sensitivity=${_feedbackSensitivity.name} '
-          'start=${cold.startAngle.toStringAsFixed(2)} '
-          'bottom=${cold.bottomAngle.toStringAsFixed(2)} '
-          'end=${cold.endAngle.toStringAsFixed(2)}',
+      'tier=$tier source=$source '
+          'sensitivity=${_feedbackSensitivity.name} '
+          'start=${thresholds.startAngle.toStringAsFixed(2)} '
+          'bottom=${thresholds.bottomAngle.toStringAsFixed(2)} '
+          'end=${thresholds.endAngle.toStringAsFixed(2)}'
+          '${extra != null ? ' $extra' : ''}',
     );
-    return cold;
   }
 
   /// Fires once per session when the anatomical classifier locks a ratio

@@ -399,18 +399,23 @@ class FormAuditor {
     /// rep. Curl's `romForRep(rec)` takes a rep to route by `rec.side`;
     /// here that parameter would be unused, so the closure is nullary.
     SquatRomThresholdSet resolveRom() {
-      // Tier 1: calibrated personal-profile bucket.
+      // Tier 1: calibrated personal-profile bucket. Bucket-derived tuple is
+      // High-anchored; the post-pass derives Medium. Without this the audit
+      // would grade Medium users against High gates — diverging from the
+      // live-session resolver (`WorkoutViewModel._resolveSquatThresholds`).
       final profile = squatProfile;
       if (profile != null && profile.isCalibrated) {
         final b = profile.bucket!;
         return SquatRomThresholdSet.fromBucket(
           observedMinKneeAngle: b.observedMinKneeAngle,
           observedMaxKneeAngle: b.observedMaxKneeAngle,
-        );
+        ).applySensitivity(sensitivity);
       }
-      // Tier 2: session-end auto-cal snapshot.
-      if (autoCalSnapshot != null) return autoCalSnapshot;
-      // Tier 3: cold-start, sensitivity-modified.
+      // Tier 2: session-end auto-cal snapshot. Same High-anchored convention.
+      if (autoCalSnapshot != null) {
+        return autoCalSnapshot.applySensitivity(sensitivity);
+      }
+      // Tier 3: cold-start, sensitivity-modified (already done above).
       return coldStartRom;
     }
 
@@ -530,6 +535,7 @@ class FormAuditor {
     required List<CurlRepRecord> repRecords,
     required bool fatigueDetected,
     PushUpRomProfile? pushUpProfile,
+    FeedbackSensitivity sensitivity = FeedbackSensitivity.medium,
   }) {
     final repsTotal = repRecords.length;
     if (repsTotal == 0) {
@@ -545,14 +551,18 @@ class FormAuditor {
     }
 
     // Tier 1 → Tier 3 priority: calibrated profile if present, else defaults.
-    final calibrated = pushUpProfile?.thresholds;
-    // Both paths expose `startAngle` and `bottomAngle` — different class names
-    // (PushUpRomThresholds vs PushUpRomThresholdSet) so we extract the two
-    // doubles up-front to keep the loop free of dispatch noise.
-    final bottomAngle =
-        calibrated?.bottomAngle ?? PushUpRomDefaults.defaults.bottomAngle;
-    final startAngle =
-        calibrated?.startAngle ?? PushUpRomDefaults.defaults.startAngle;
+    // Both paths are High-anchored; the sensitivity post-pass derives Medium
+    // so the audit grades against the same gates the live FSM saw. Without
+    // this, calibrated Medium users would see audit scores against High
+    // gates, diverging from the live-session experience.
+    final calibratedAnchor = pushUpProfile?.thresholds;
+    final calibrated = calibratedAnchor?.applySensitivity(sensitivity);
+    final coldStart = PushUpRomDefaults.anchor.applySensitivity(sensitivity);
+    // Both classes (PushUpRomThresholds and PushUpRomThresholdSet) expose
+    // `startAngle` and `bottomAngle` — extract the two doubles up-front so
+    // the loop is free of dispatch noise.
+    final bottomAngle = calibrated?.bottomAngle ?? coldStart.bottomAngle;
+    final startAngle = calibrated?.startAngle ?? coldStart.startAngle;
 
     final depth = _CriterionBuilder('Depth');
     final start = _CriterionBuilder('Start extension');

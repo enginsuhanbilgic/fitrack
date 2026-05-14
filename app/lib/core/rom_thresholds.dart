@@ -3,6 +3,17 @@
 ///
 /// The FSM consumes one of these per rep and the source is locked at
 /// IDLE→CONCENTRIC; it never swaps mid-rep (see plan invariant).
+///
+/// SENSITIVITY CONTRACT (2026-05-14)
+/// ─────────────────────────────────
+/// Every factory in this file returns a **High-anchored** threshold tuple.
+/// `RomThresholds.applySensitivity(s)` is the single post-pass that turns the
+/// High anchor into the user's selected level. Apply it at the *call site*
+/// (the resolver in `WorkoutViewModel`) — not inside the factories — so the
+/// diagnostic path (`globalUnmodified`) can opt out cleanly.
+///
+/// This brings ROM thresholds in line with how form-error thresholds already
+/// work: sensitivity applies at every tier, not just cold-start.
 library;
 
 import 'constants.dart';
@@ -42,94 +53,81 @@ class RomThresholds {
     required this.source,
   });
 
-  /// Returns the cold-start / [ThresholdSource.global] threshold set.
+  /// Tier-3 looseness deltas: `(dStart, dPeak, dEnd)` applied to the
+  /// High-anchored constants to reproduce today's Medium numbers exactly.
+  /// peakExit is re-derived from `peak + kCurlPeakExitGap`.
+  static const (double, double, double) _tier3MediumLooseness = (
+    -5.0,
+    10.0,
+    0.0,
+  );
+
+  /// Tier-1 (telemetry-derived) High anchor for curl, per view.
+  /// Reproduces today's `sideLeftStrict` / `sideRightStrict` exactly.
+  /// Looseness for Medium is `(-3, +8, +8)` — preserves today's `*Default`.
+  /// Applied via `_applyTelemetrySensitivity` (separate path, separate
+  /// floor mode) since telemetry tuples ship with curated tight gaps that
+  /// the strict bucket-derived floor would over-correct.
+  static const (double, double, double) _telemetryMediumLooseness = (
+    -3.0,
+    8.0,
+    8.0,
+  );
+
+  /// Apply the user's sensitivity selection to a High-anchored threshold set.
   ///
-  /// [sensitivity] is applied only on this path — calibrated and auto-calibrated
-  /// thresholds are personal and are never modified by sensitivity. Defaults to
-  /// [FeedbackSensitivity.medium] so all existing callers compile unchanged.
+  /// Returns `this` unmodified for High. For Medium, applies the Tier-3
+  /// looseness deltas — bucket-derived (Tier-1 calibrated, Tier-2 auto-cal)
+  /// and Tier-3 cold-start share the same `(-5, +10, 0)` because they both
+  /// use the curl FSM's per-rep tolerance system; only the telemetry path
+  /// uses a different delta tuple (handled separately via
+  /// [_applyTelemetrySensitivity]).
   ///
-  /// Three-tier resolver, sensitivity-aware. Per the project convention
-  /// (2026-05-13), Tier 1 is the canonical source; Tier 2 is shelved.
-  ///   1. Telemetry-derived defaults — sensitivity selects the strict/default
-  ///      constant directly (no delta math needed).
-  ///   2. Pipeline-derived defaults (SHELVED) — sensitivity deltas applied via
-  ///      [_applyRomSensitivity] after derivation. Gated off by default.
-  ///   3. Legacy hand-tuned constants — same delta application.
-  factory RomThresholds.global([
-    CurlCameraView view = CurlCameraView.unknown,
-    FeedbackSensitivity sensitivity = FeedbackSensitivity.medium,
-  ]) {
-    // Tier 1 — telemetry-derived defaults (project convention; sensitivity-aware).
-    if (kUseTelemetryRomDefaults) {
-      final telemetry = CurlRomDefaults.forView(view, sensitivity);
-      if (telemetry != null) {
-        return RomThresholds(
-          startAngle: telemetry.startAngle,
-          peakAngle: telemetry.peakAngle,
-          peakExitAngle: telemetry.peakExitAngle,
-          endAngle: telemetry.endAngle,
-          source: ThresholdSource.global,
-        );
-      }
-    }
-    // Tier 2 — pipeline-derived defaults (SHELVED); apply sensitivity deltas.
-    if (kUsePipelineRomDefaults) {
-      final set = PipelineRomDefaults.forView(view);
-      return _applyRomSensitivity(
-        RomThresholds(
-          startAngle: set.startAngle,
-          peakAngle: set.peakAngle,
-          peakExitAngle: set.peakExitAngle,
-          endAngle: set.endAngle,
-          source: ThresholdSource.global,
-        ),
-        sensitivity,
-        view,
-      );
-    }
-    // Tier 3 — legacy hand-tuned constants; apply sensitivity deltas.
-    return _applyRomSensitivity(
-      const RomThresholds(
-        startAngle: kCurlStartAngle,
-        peakAngle: kCurlPeakAngle,
-        peakExitAngle: kCurlPeakExitAngle,
-        endAngle: kCurlEndAngle,
-        source: ThresholdSource.global,
-      ),
-      sensitivity,
-      view,
-    );
+  /// Idempotent on High; safe to call from any tier's resolver as the last
+  /// op before returning to the FSM driver.
+  RomThresholds applySensitivity(FeedbackSensitivity sensitivity) {
+    if (sensitivity == FeedbackSensitivity.high) return this;
+    final (dStart, dPeak, dEnd) = _tier3MediumLooseness;
+    return _applyLooseness(this, dStart, dPeak, dEnd);
   }
 
-  /// Applies additive ROM deltas for a sensitivity level to a base threshold set.
+  /// Variant of [applySensitivity] that uses telemetry-specific deltas.
+  /// Called inside [global] when the Tier-1 telemetry path wins, since
+  /// that tier's strict/loose gap differs from Tier-3's hand-tuned gap.
   ///
-  /// FSM invariant (start > end > peakExit > peak) is re-verified and floors
-  /// applied so the invariant always holds regardless of input.
-  /// peakExitAngle is always re-derived from the adjusted peak + kCurlPeakExitGap.
-  static RomThresholds _applyRomSensitivity(
+  /// Uses the **soft floor** (`end > peakExit` only) — telemetry tuples are
+  /// hand-crafted with small end-to-peakExit gaps that are valid for the
+  /// curl FSM but would fail the strict bucket-derived floor.
+  RomThresholds _applyTelemetrySensitivity(FeedbackSensitivity sensitivity) {
+    if (sensitivity == FeedbackSensitivity.high) return this;
+    final (dStart, dPeak, dEnd) = _telemetryMediumLooseness;
+    return _applyLooseness(this, dStart, dPeak, dEnd, strictFloor: false);
+  }
+
+  /// Pure delta application. Re-derives peakExit from peak + gap and
+  /// asserts FSM completability invariant.
+  ///
+  /// `strictFloor` controls how much margin is enforced between `end` and
+  /// `peakExit`:
+  /// - `true` (default, for bucket-derived/Tier-3 paths): `end > peakExit + gap`.
+  ///   The extra gap is required because restricted-ROM buckets (e.g. 90°/130°)
+  ///   can produce raw `end ≤ peakExit`, an uncompletable FSM.
+  /// - `false` (telemetry path): `end > peakExit` only. Telemetry tuples are
+  ///   curated and ship with small end-to-peakExit gaps that the FSM handles
+  ///   fine but that would be over-corrected by the strict floor.
+  static RomThresholds _applyLooseness(
     RomThresholds base,
-    FeedbackSensitivity sensitivity, [
-    CurlCameraView view = CurlCameraView.unknown,
-  ]) {
-    if (sensitivity == FeedbackSensitivity.medium) return base;
-    // ROM deltas: (dStart, dPeak, dEnd)
-    // High: tighter gates — must curl deeper and extend more fully.
-    final (dStart, dPeak, dEnd) = switch (sensitivity) {
-      FeedbackSensitivity.high => (5.0, -10.0, 0.0),
-      FeedbackSensitivity.medium => (
-        0.0,
-        0.0,
-        0.0,
-      ), // unreachable; guarded above
-    };
+    double dStart,
+    double dPeak,
+    double dEnd, {
+    bool strictFloor = true,
+  }) {
     final peak = base.peakAngle + dPeak;
     final start = base.startAngle + dStart;
     final end = base.endAngle + dEnd;
     final peakExit = peak + kCurlPeakExitGap;
-    // Invariant floors: start > end > peakExit > peak
-    final safeEnd = end > peakExit + kCurlPeakExitGap
-        ? end
-        : peakExit + kCurlPeakExitGap;
+    final endFloor = strictFloor ? peakExit + kCurlPeakExitGap : peakExit + 0.1;
+    final safeEnd = end > endFloor ? end : endFloor;
     final safeStart = start > safeEnd ? start : safeEnd + 1.0;
     return RomThresholds(
       startAngle: safeStart,
@@ -140,7 +138,87 @@ class RomThresholds {
     );
   }
 
-  /// Derives thresholds from a populated bucket.
+  /// Returns the cold-start / [ThresholdSource.global] threshold set,
+  /// already sensitivity-modified.
+  ///
+  /// Three-tier resolver (Tier 1 is canonical; Tier 2 shelved):
+  ///   1. Telemetry-derived defaults (`CurlRomDefaults`) — uses telemetry-tuned
+  ///      looseness deltas via `_applyTelemetrySensitivity`.
+  ///   2. Pipeline-derived defaults (SHELVED).
+  ///   3. Legacy hand-tuned constants — uses the Tier-3 looseness deltas via
+  ///      `applySensitivity`.
+  ///
+  /// For the diagnostic short-circuit that needs unmodified globals (sensitivity
+  /// not applied), use [globalUnmodified].
+  factory RomThresholds.global([
+    CurlCameraView view = CurlCameraView.unknown,
+    FeedbackSensitivity sensitivity = FeedbackSensitivity.medium,
+  ]) {
+    // Tier 1 — telemetry-derived defaults. Returns the strict (High-anchored)
+    // tuple; sensitivity is applied via telemetry-specific deltas.
+    if (kUseTelemetryRomDefaults) {
+      final telemetry = CurlRomDefaults.forView(view);
+      if (telemetry != null) {
+        final highAnchor = RomThresholds(
+          startAngle: telemetry.startAngle,
+          peakAngle: telemetry.peakAngle,
+          peakExitAngle: telemetry.peakExitAngle,
+          endAngle: telemetry.endAngle,
+          source: ThresholdSource.global,
+        );
+        return highAnchor._applyTelemetrySensitivity(sensitivity);
+      }
+    }
+    // Tier 2 — pipeline-derived defaults (SHELVED). Tier-3 looseness applied.
+    if (kUsePipelineRomDefaults) {
+      final set = PipelineRomDefaults.forView(view);
+      final highAnchor = RomThresholds(
+        startAngle: set.startAngle,
+        peakAngle: set.peakAngle,
+        peakExitAngle: set.peakExitAngle,
+        endAngle: set.endAngle,
+        source: ThresholdSource.global,
+      );
+      return highAnchor.applySensitivity(sensitivity);
+    }
+    // Tier 3 — legacy hand-tuned constants. These are today's Medium-baseline
+    // values; the High anchor is derived from them via the Tier-3 deltas
+    // inverted so applying `(-5, +10, 0)` on Medium reproduces today exactly.
+    final tier3HighAnchor = const RomThresholds(
+      startAngle: kCurlStartAngle + 5.0,
+      peakAngle: kCurlPeakAngle - 10.0,
+      peakExitAngle: kCurlPeakExitAngle - 10.0,
+      endAngle: kCurlEndAngle + 0.0,
+      source: ThresholdSource.global,
+    );
+    return tier3HighAnchor.applySensitivity(sensitivity);
+  }
+
+  /// Cold-start globals with **no sensitivity post-pass**. Used by the
+  /// diagnostic short-circuit (`diagnosticDisableAutoCalibration`) — applying
+  /// sensitivity there would bias the baseline that the offline Python
+  /// derivation script consumes, making measurements circular.
+  ///
+  /// Returns the Tier-3 Medium-baseline tuple (today's `kCurl*Angle` numbers
+  /// unchanged) to preserve the diagnostic workflow contract bit-for-bit.
+  factory RomThresholds.globalUnmodified([
+    CurlCameraView view = CurlCameraView.unknown,
+  ]) {
+    // Diagnostic mode keeps reading from the legacy hand-tuned constants —
+    // they're what the Python tuning workflow was calibrated against. We
+    // deliberately bypass Tier-1 / Tier-2 here so the baseline is stable
+    // across telemetry-derivation iterations.
+    return const RomThresholds(
+      startAngle: kCurlStartAngle,
+      peakAngle: kCurlPeakAngle,
+      peakExitAngle: kCurlPeakExitAngle,
+      endAngle: kCurlEndAngle,
+      source: ThresholdSource.global,
+    );
+  }
+
+  /// Derives thresholds from a populated bucket. Returns the **High-anchored**
+  /// tuple — apply `.applySensitivity(...)` at the call site for Medium users.
   ///
   /// Raw math:
   ///   peakAngle     = observedMinAngle + kProfilePeakTolerance  × m
@@ -151,11 +229,6 @@ class RomThresholds {
   /// FSM-completability invariants applied after the raw math:
   ///   1. endAngle  ≥ peakExitAngle + kCurlPeakExitGap   → ECCENTRIC can finish
   ///   2. startAngle ≥ peakAngle    + kCurlPeakExitGap   → CONCENTRIC can begin
-  ///
-  /// Without these invariants a restricted-ROM bucket (e.g. min=90°, max=130°)
-  /// produces `end ≤ peakExit` — the FSM enters PEAK and never leaves. Floor
-  /// keeps the user counting; bucket sample acceptance gating
-  /// (`kMinViableRomDegrees`) is the *separate* concern of profile updates.
   ///
   /// `m` = kProfileWarmupMultiplier when [warmup] is true, else 1.0.
   factory RomThresholds.fromBucket(
@@ -169,8 +242,9 @@ class RomThresholds {
     );
   }
 
-  /// Same math as [fromBucket] but tagged as auto-calibrated. Kept as a
-  /// separate factory so the source is explicit at the call site.
+  /// Same math as [fromBucket] but tagged as auto-calibrated. Returns the
+  /// **High-anchored** tuple — apply `.applySensitivity(...)` at the call
+  /// site for Medium users.
   factory RomThresholds.autoCalibrated(RomBucketLike bucket) {
     return _build(
       bucket: bucket,
@@ -189,7 +263,6 @@ class RomThresholds {
     final rawStart =
         bucket.observedMaxAngle - kProfileStartTolerance * multiplier;
     final rawEnd = bucket.observedMaxAngle - kProfileEndTolerance * multiplier;
-    // Floors guarantee the FSM is always completable.
     final start = rawStart > peak + kCurlPeakExitGap
         ? rawStart
         : peak + kCurlPeakExitGap;

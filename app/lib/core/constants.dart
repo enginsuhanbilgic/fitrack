@@ -55,6 +55,30 @@ const Duration kStuckStateLimit = Duration(seconds: 5);
 const double kFarSideConfidenceGate = 0.4;
 
 // ── Biceps Curl FSM thresholds (degrees) ────────────────
+//
+// SENSITIVITY CONTRACT (2026-05-14)
+// ──────────────────────────────────
+// The `kCurl*Angle` / `kSquat*Angle` / `kPushUp*Angle` constants below are
+// the **Medium-baseline** numbers — referenced by *non-sensitivity-aware*
+// downstream paths:
+//   * `RomThresholds.globalUnmodified` — diagnostic short-circuit.
+//   * `curl_rom_profile.dart:78-79` — cold-start bucket seeding.
+//   * `squat_strategy.dart:417` — long-femur auto-detection gate.
+//   * `squat_rom_profile.dart` — cold-start squat bucket seeding.
+//   * `push_up_rom_profile.dart` — push-up FSM defaults.
+//   * `form_auditor.dart` push-up audit cold-start fallback.
+//   * `workout_view_model.dart` `squat.calibration_start` telemetry payload.
+//
+// The **High anchor** (consumed by the sensitivity post-pass) lives inside
+// the per-exercise `core/*_rom_defaults.dart` modules — NOT here. Editing
+// any constant below moves the Medium baseline for every consumer above;
+// editing the High anchor only changes the FSM gates routed through the
+// post-pass (`RomThresholds.global`, `SquatRomThresholdSet.anchor`,
+// `PushUpRomDefaults.anchor`).
+//
+// Do not edit these to "tune sensitivity." The toggle lives in
+// `_tier3MediumLooseness` / `_telemetryMediumLooseness` / per-exercise
+// `_mediumLooseness` tuples in the threshold modules.
 /// IDLE → CONCENTRIC when elbow angle drops below this.
 const double kCurlStartAngle = 160.0;
 

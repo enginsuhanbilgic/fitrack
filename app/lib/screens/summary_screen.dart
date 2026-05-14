@@ -588,12 +588,15 @@ class _SummaryScreenState extends State<SummaryScreen> {
   String _sideLabel(ProfileSide s) =>
       s == ProfileSide.left ? 'Left arm' : 'Right arm';
 
-  String _sourceLabel(ThresholdSource s) => switch (s) {
-    ThresholdSource.calibrated => 'Calibrated',
-    ThresholdSource.autoCalibrated => 'Auto-calibrated',
-    ThresholdSource.warmup => 'Warmup',
-    ThresholdSource.global => 'Generic',
-  };
+  String _sourceLabel(ThresholdSource s) {
+    final base = switch (s) {
+      ThresholdSource.calibrated => 'Calibrated',
+      ThresholdSource.autoCalibrated => 'Auto-calibrated',
+      ThresholdSource.warmup => 'Warmup',
+      ThresholdSource.global => 'Generic',
+    };
+    return '$base · ${widget.feedbackSensitivity.label}';
+  }
 
   Color _sourceColor(ThresholdSource s) => switch (s) {
     ThresholdSource.calibrated => const Color(0xFF00E676),
@@ -960,9 +963,10 @@ class _SummaryScreenState extends State<SummaryScreen> {
                     child: Row(
                       children: [
                         SizedBox(
-                          width: 110,
+                          width: 160,
                           child: Text(
                             _sourceLabel(s),
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(color: color, fontSize: 12),
                           ),
                         ),
@@ -1261,11 +1265,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
                 exerciseLabel: vm.exerciseLabel,
               ),
               const SizedBox(height: 12),
-              SummaryStatsGrid(
-                reps: vm.reps,
-                sets: vm.sets,
-                duration: vm.duration,
-              ),
+              SummaryStatsGrid(reps: vm.reps, duration: vm.duration),
               if (vm.variantLabels.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 SummaryVariantChips(labels: vm.variantLabels),

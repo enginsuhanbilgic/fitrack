@@ -343,60 +343,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _recalibrate() async {
-    final surfaceColor = Theme.of(context).colorScheme.surface;
-    final selected = await showModalBottomSheet<ExerciseType>(
-      context: context,
-      backgroundColor: surfaceColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
-              child: Text(
-                'Recalibrate — choose view',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ),
-            /* ListTile(
-              leading: const Icon(Icons.face),
-              title: const Text('Front view'),
-              subtitle: const Text('Face the camera'),
-              onTap: () => Navigator.pop(ctx, ExerciseType.bicepsCurlFront),
-            ), */
-            ListTile(
-              leading: const Icon(Icons.rotate_90_degrees_ccw),
-              title: const Text('Biceps curl side view'),
-              subtitle: const Text('Stand sideways to the camera'),
-              onTap: () => Navigator.pop(ctx, ExerciseType.bicepsCurlSide),
-            ),
-            ListTile(
-              leading: const Icon(Icons.accessibility),
-              title: const Text('Squat'),
-              subtitle: const Text('Calibrate your full squat range of motion'),
-              onTap: () => Navigator.pop(ctx, ExerciseType.squat),
-            ),
-            ListTile(
-              leading: const Icon(Icons.accessibility_new),
-              title: const Text('Push-up side view'),
-              subtitle: const Text('Calibrate top and bottom push-up depth'),
-              onTap: () => Navigator.pop(ctx, ExerciseType.pushUp),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (selected == null || !mounted) return;
+  Future<void> _recalibrate(ExerciseType exercise) async {
+    if (!mounted) return;
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
         builder: (_) =>
-            WorkoutScreen(exercise: selected, forceCalibration: true),
+            WorkoutScreen(exercise: exercise, forceCalibration: true),
       ),
     );
   }
@@ -454,88 +407,118 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // per-exercise subsections. Pre-2026-05-13 this was split:
                 // curl at the top, squat near the bottom — confusing scan.
                 _sectionHeader(context, 'Calibration'),
-                _subSectionHeader(context, 'Biceps curl'),
-                _ProfileSection(
-                  profile: _profile,
-                  showDetails: _showDetails,
-                  onToggleDetails: (v) => setState(() => _showDetails = v),
-                ),
-                const SizedBox(height: 12),
-                _ActionRow(
-                  icon: Icons.refresh,
-                  label: 'Recalibrate curl',
-                  subtitle: 'Re-record your full range of motion.',
-                  onTap: _recalibrate,
-                ),
-                _ActionRow(
-                  icon: Icons.delete_outline,
-                  label: 'Reset curl profile',
-                  subtitle: 'Delete all calibrated buckets.',
-                  destructive: true,
-                  onTap: _confirmReset,
-                ),
-                const SizedBox(height: 12),
-                _subSectionHeader(context, 'Squat'),
-                _SquatProfileSection(profile: _squatProfile),
-                _ActionRow(
-                  icon: Icons.refresh,
-                  label: 'Recalibrate squat',
-                  subtitle:
-                      'Record your full squat range of motion. Opt-in only — '
-                      'never auto-launches.',
-                  onTap: () => Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const WorkoutScreen(
-                        exercise: ExerciseType.squat,
-                        forceCalibration: true,
+
+                // Biceps Curl
+                (() {
+                  final theme = Theme.of(context);
+                  final status = _CurlProfileContent.overallStatus(
+                    _profile,
+                    theme,
+                  );
+                  return ExpansionTile(
+                    shape: const Border(), // Remove default top/bottom borders
+                    title: const Text('Biceps Curl'),
+                    leading: const Icon(Icons.fitness_center),
+                    trailing: _StatusPill(label: status.$1, color: status.$2),
+                    children: [
+                      _CurlProfileContent(
+                        profile: _profile,
+                        showDetails: _showDetails,
+                        onToggleDetails: (v) =>
+                            setState(() => _showDetails = v),
                       ),
-                    ),
-                  ),
-                ),
-                _ActionRow(
-                  icon: Icons.delete_outline,
-                  label: 'Reset squat profile',
-                  subtitle:
-                      'Delete your calibrated squat range — falls back to '
-                      'default thresholds.',
-                  destructive: true,
-                  onTap: _confirmResetSquat,
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: const Text('Tall lifter (relax lean threshold)'),
-                  subtitle: const Text('Applies to next workout'),
-                  value: _squatLongFemurLifter,
-                  onChanged: _setSquatLongFemurLifter,
-                ),
-                const SizedBox(height: 12),
-                _subSectionHeader(context, 'Push-up'),
-                _PushUpProfileSection(profile: _pushUpProfile),
-                _ActionRow(
-                  icon: Icons.refresh,
-                  label: 'Recalibrate push-up',
-                  subtitle: 'Record your top and bottom push-up angles.',
-                  onTap: () => Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const WorkoutScreen(
-                        exercise: ExerciseType.pushUp,
-                        forceCalibration: true,
+                      _ActionRow(
+                        icon: Icons.refresh,
+                        label: 'Recalibrate curl',
+                        subtitle: 'Re-record your full range of motion.',
+                        onTap: () => _recalibrate(ExerciseType.bicepsCurlSide),
                       ),
-                    ),
-                  ),
-                ),
-                _ActionRow(
-                  icon: Icons.delete_outline,
-                  label: 'Reset push-up profile',
-                  subtitle:
-                      'Delete your calibrated push-up range — falls back to '
-                      'default thresholds.',
-                  destructive: true,
-                  onTap: _confirmResetPushUp,
-                ),
+                      _ActionRow(
+                        icon: Icons.delete_outline,
+                        label: 'Reset curl profile',
+                        subtitle: 'Delete all calibrated buckets.',
+                        destructive: true,
+                        onTap: _confirmReset,
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                  );
+                })(),
+
+                // Squat
+                (() {
+                  final theme = Theme.of(context);
+                  final status = _SquatProfileContent.overallStatus(
+                    _squatProfile,
+                    theme,
+                  );
+                  return ExpansionTile(
+                    shape: const Border(),
+                    title: const Text('Squat'),
+                    leading: const Icon(Icons.accessibility),
+                    trailing: _StatusPill(label: status.$1, color: status.$2),
+                    children: [
+                      _SquatProfileContent(profile: _squatProfile),
+                      _ActionRow(
+                        icon: Icons.refresh,
+                        label: 'Recalibrate squat',
+                        subtitle: 'Record your full squat range of motion.',
+                        onTap: () => _recalibrate(ExerciseType.squat),
+                      ),
+                      _ActionRow(
+                        icon: Icons.delete_outline,
+                        label: 'Reset squat profile',
+                        subtitle: 'Delete your calibrated squat range.',
+                        destructive: true,
+                        onTap: _confirmResetSquat,
+                      ),
+                      SwitchListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                        ),
+                        dense: true,
+                        title: const Text('Tall lifter (relax lean threshold)'),
+                        subtitle: const Text('Applies to next workout'),
+                        value: _squatLongFemurLifter,
+                        onChanged: _setSquatLongFemurLifter,
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                  );
+                })(),
+
+                // Push-up
+                (() {
+                  final theme = Theme.of(context);
+                  final status = _PushUpProfileContent.overallStatus(
+                    _pushUpProfile,
+                    theme,
+                  );
+                  return ExpansionTile(
+                    shape: const Border(),
+                    title: const Text('Push-up'),
+                    leading: const Icon(Icons.accessibility_new),
+                    trailing: _StatusPill(label: status.$1, color: status.$2),
+                    children: [
+                      _PushUpProfileContent(profile: _pushUpProfile),
+                      _ActionRow(
+                        icon: Icons.refresh,
+                        label: 'Recalibrate push-up',
+                        subtitle: 'Record your top and bottom push-up angles.',
+                        onTap: () => _recalibrate(ExerciseType.pushUp),
+                      ),
+                      _ActionRow(
+                        icon: Icons.delete_outline,
+                        label: 'Reset push-up profile',
+                        subtitle: 'Delete your calibrated push-up range.',
+                        destructive: true,
+                        onTap: _confirmResetPushUp,
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                  );
+                })(),
+
                 const Divider(),
 
                 // ── 2. Workout ─────────────────────────────────────────────
@@ -686,16 +669,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-/// Biceps-curl-only calibration card. Push-up used to share this card —
-/// split out 2026-05-13 into [_PushUpProfileSection] so the Calibration
-/// section's subheadings ("Biceps curl" / "Squat" / "Push-up") honestly
-/// describe what lives under each.
-class _ProfileSection extends StatelessWidget {
+/// Biceps-curl-only calibration content.
+class _CurlProfileContent extends StatelessWidget {
   final CurlRomProfile? profile;
   final bool showDetails;
   final ValueChanged<bool> onToggleDetails;
 
-  const _ProfileSection({
+  const _CurlProfileContent({
     required this.profile,
     required this.showDetails,
     required this.onToggleDetails,
@@ -705,58 +685,42 @@ class _ProfileSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final p = profile;
-    final summary = p == null ? null : ProfileSummary.of(p);
-    final overallStatus = _overallStatus(summary, theme);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.fitness_center, color: Color(0xFF00E676)),
-                const SizedBox(width: 8),
-                const Text(
-                  'Biceps Curl Profile',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const Spacer(),
-                _StatusPill(label: overallStatus.$1, color: overallStatus.$2),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (p == null || p.buckets.isEmpty)
-              Text(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (p == null || p.buckets.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
                 'Not calibrated. Start a workout to begin recording.',
                 style: TextStyle(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.onSurface.withValues(alpha: 0.70),
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
                 ),
-              )
-            else
-              ..._allCombos().map((combo) {
-                final (side, view) = combo;
-                final bucket = p.bucketFor(side, view);
-                return _BucketRow(
-                  side: side,
-                  view: view,
-                  bucket: bucket,
-                  showDetails: showDetails,
-                );
-              }),
-            if (p != null && p.buckets.isNotEmpty)
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                title: const Text('Show details'),
-                value: showDetails,
-                onChanged: onToggleDetails,
               ),
-          ],
-        ),
+            )
+          else
+            ..._allCombos().map((combo) {
+              final (side, view) = combo;
+              final bucket = p.bucketFor(side, view);
+              return _BucketRow(
+                side: side,
+                view: view,
+                bucket: bucket,
+                showDetails: showDetails,
+              );
+            }),
+          if (p != null && p.buckets.isNotEmpty)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text('Show details'),
+              value: showDetails,
+              onChanged: onToggleDetails,
+            ),
+        ],
       ),
     );
   }
@@ -766,14 +730,15 @@ class _ProfileSection extends StatelessWidget {
     (ProfileSide.right, CurlCameraView.sideRight),
   ];
 
-  static (String, Color) _overallStatus(ProfileSummary? s, ThemeData theme) {
-    if (s == null || s.totalBuckets == 0) {
+  static (String, Color) overallStatus(CurlRomProfile? p, ThemeData theme) {
+    final summary = p == null ? null : ProfileSummary.of(p);
+    if (summary == null || summary.totalBuckets == 0) {
       return (
         'Uncalibrated',
         theme.colorScheme.onSurface.withValues(alpha: 0.38),
       );
     }
-    if (s.calibratedBuckets == 0) {
+    if (summary.calibratedBuckets == 0) {
       return ('Auto', Colors.orangeAccent);
     }
     return ('Calibrated', const Color(0xFF00E676));
@@ -892,83 +857,69 @@ class _StatusPill extends StatelessWidget {
   }
 }
 
-/// Squat-profile summary card. Mirrors the shape of `_ProfileSection`'s
-/// push-up block but with squat-specific terminology — squat has no
-/// `(side, view)` axis, so just one row of "Bottom · Top · ROM" plus a
-/// diagnostics line with sample count + last-updated.
-class _SquatProfileSection extends StatelessWidget {
+/// Squat-profile summary content.
+class _SquatProfileContent extends StatelessWidget {
   final squat_profile.SquatRomProfile? profile;
 
-  const _SquatProfileSection({required this.profile});
+  const _SquatProfileContent({required this.profile});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final p = profile;
     final bucket = p?.bucket;
-    final isCalibrated = p?.isCalibrated ?? false;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.accessibility, color: Color(0xFF00E676)),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Squat Profile',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                _StatusPill(
-                  label: isCalibrated ? 'Calibrated' : 'Uncalibrated',
-                  color: isCalibrated
-                      ? const Color(0xFF00E676)
-                      : theme.colorScheme.onSurface.withValues(alpha: 0.38),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (bucket == null)
-              Text(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (bucket == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
                 'Not calibrated. Use Recalibrate to record your deepest '
                 'squat and standing extension.',
                 style: TextStyle(
                   color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
                 ),
-              )
-            else
-              Text(
-                'Bottom ${bucket.observedMinKneeAngle.toStringAsFixed(0)}° · '
-                'Top ${bucket.observedMaxKneeAngle.toStringAsFixed(0)}° · '
-                'ROM ${(bucket.observedMaxKneeAngle - bucket.observedMinKneeAngle).toStringAsFixed(0)}°',
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
-                ),
               ),
-            if (bucket != null) ...[
-              const SizedBox(height: 6),
-              // Diagnostics line — sample count + last updated. Matches
-              // the curl block's `_BucketRow` "N reps" / showDetails
-              // exposure but lives inline because squat has only one
-              // bucket so there's nothing to expand/collapse.
-              Text(
-                '${bucket.sampleCount} ${bucket.sampleCount == 1 ? "rep" : "reps"} '
-                '· updated ${_relativeTime(bucket.lastUpdated)}',
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
-                  fontSize: 12,
-                ),
+            )
+          else
+            Text(
+              'Bottom ${bucket.observedMinKneeAngle.toStringAsFixed(0)}° · '
+              'Top ${bucket.observedMaxKneeAngle.toStringAsFixed(0)}° · '
+              'ROM ${(bucket.observedMaxKneeAngle - bucket.observedMinKneeAngle).toStringAsFixed(0)}°',
+              style: TextStyle(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
               ),
-            ],
+            ),
+          if (bucket != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              '${bucket.sampleCount} ${bucket.sampleCount == 1 ? "rep" : "reps"} '
+              '· updated ${_relativeTime(bucket.lastUpdated)}',
+              style: TextStyle(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
+                fontSize: 12,
+              ),
+            ),
           ],
-        ),
+        ],
       ),
+    );
+  }
+
+  static (String, Color) overallStatus(
+    squat_profile.SquatRomProfile? p,
+    ThemeData theme,
+  ) {
+    final isCalibrated = p?.isCalibrated ?? false;
+    return (
+      isCalibrated ? 'Calibrated' : 'Uncalibrated',
+      isCalibrated
+          ? const Color(0xFF00E676)
+          : theme.colorScheme.onSurface.withValues(alpha: 0.38),
     );
   }
 
@@ -981,67 +932,57 @@ class _SquatProfileSection extends StatelessWidget {
   }
 }
 
-/// Push-up calibration card. Mirrors [_SquatProfileSection]'s single-bucket
+/// Push-up calibration content. Mirrors [_SquatProfileContent]'s single-bucket
 /// shape (push-up profile has no per-side splits). Split out from
-/// [_ProfileSection] 2026-05-13 so the "Push-up" subheading on the Settings
+/// [_CurlProfileContent] 2026-05-13 so the "Push-up" subheading on the Settings
 /// → Calibration screen actually corresponds to its own card.
-class _PushUpProfileSection extends StatelessWidget {
+class _PushUpProfileContent extends StatelessWidget {
   final PushUpRomProfile? profile;
 
-  const _PushUpProfileSection({required this.profile});
+  const _PushUpProfileContent({required this.profile});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final p = profile;
-    final isCalibrated = p?.isCalibrated ?? false;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.accessibility_new, color: Color(0xFF00E676)),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Push-up Profile',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                _StatusPill(
-                  label: isCalibrated ? 'Calibrated' : 'Uncalibrated',
-                  color: isCalibrated
-                      ? const Color(0xFF00E676)
-                      : theme.colorScheme.onSurface.withValues(alpha: 0.38),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (p == null)
-              Text(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (p == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
                 'Not calibrated. Use Recalibrate to record your top and '
                 'bottom push-up angles.',
                 style: TextStyle(
                   color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
                 ),
-              )
-            else
-              Text(
-                'Top ${p.topAngle.toStringAsFixed(0)}° · '
-                'Bottom ${p.bottomAngle.toStringAsFixed(0)}° · '
-                'ROM ${p.romDegrees.toStringAsFixed(0)}°',
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
-                ),
               ),
-          ],
-        ),
+            )
+          else
+            Text(
+              'Top ${p.topAngle.toStringAsFixed(0)}° · '
+              'Bottom ${p.bottomAngle.toStringAsFixed(0)}° · '
+              'ROM ${p.romDegrees.toStringAsFixed(0)}°',
+              style: TextStyle(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.70),
+              ),
+            ),
+        ],
       ),
+    );
+  }
+
+  static (String, Color) overallStatus(PushUpRomProfile? p, ThemeData theme) {
+    final isCalibrated = p?.isCalibrated ?? false;
+    return (
+      isCalibrated ? 'Calibrated' : 'Uncalibrated',
+      isCalibrated
+          ? const Color(0xFF00E676)
+          : theme.colorScheme.onSurface.withValues(alpha: 0.38),
     );
   }
 }

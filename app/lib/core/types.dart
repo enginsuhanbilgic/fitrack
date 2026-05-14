@@ -98,10 +98,28 @@ enum SquatVariant {
   const SquatVariant(this.label);
 }
 
-/// Form/ROM coaching sensitivity for biceps curl.
+/// Form/ROM coaching sensitivity dial. Two levels today (`high`, `medium`);
+/// extensible to a third (e.g. `low`) by adding a row to each looseness
+/// table and a switch case to each per-exercise `applySensitivity`.
 ///
-/// Affects only [ThresholdSource.global] (cold-start) reps. Calibrated and
-/// auto-calibrated paths are personal and are never modified by sensitivity.
+/// CONTRACT (2026-05-14)
+/// ─────────────────────
+/// Applied as a **post-pass at every resolution tier** for ROM thresholds
+/// (curl, squat, push-up) and for form-error thresholds. Every per-exercise
+/// `*_rom_defaults.dart` factory returns a **High-anchored** tuple; the
+/// resolver in `WorkoutViewModel` calls `.applySensitivity(s)` to produce the
+/// user's selected level just before handing the threshold set to the FSM.
+///
+/// `high` is the strict baseline (identity transform). `medium` applies
+/// per-tier looseness deltas that reproduce pre-2026-05-14 Medium-baseline
+/// numbers bit-for-bit at Tier 3 (cold-start) and Tier 1 telemetry. At
+/// bucket-derived tiers (Tier 1 calibrated, Tier 2 auto-cal), Medium now
+/// also loosens — pre-2026-05-14 sensitivity was inert there, which made
+/// the toggle feel dead after calibration.
+///
+/// Diagnostic mode (`diagnosticDisableAutoCalibration`) intentionally
+/// bypasses the post-pass via `RomThresholds.globalUnmodified` so the
+/// offline tuning workflow's Python script sees a stable baseline.
 enum FeedbackSensitivity {
   high('High'),
   medium('Medium');

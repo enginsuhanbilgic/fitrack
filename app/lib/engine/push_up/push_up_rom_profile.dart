@@ -1,6 +1,7 @@
 library;
 
 import '../../core/constants.dart';
+import '../../core/types.dart';
 
 class PushUpRomThresholds {
   const PushUpRomThresholds({
@@ -21,6 +22,24 @@ class PushUpRomThresholds {
   final double bottomAngle;
   final double shallowRepMaxAngle;
   final double endAngle;
+
+  /// Apply the user's sensitivity selection to a High-anchored threshold set.
+  ///
+  /// Mirrors `PushUpRomThresholdSet.applySensitivity` (core layer) — same
+  /// looseness deltas, applied to the engine-layer threshold class consumed
+  /// by `PushUpStrategy`. Bucket-derived (calibrated) thresholds come back
+  /// from `PushUpRomProfile.thresholds` as a High anchor; the resolver
+  /// applies this post-pass before handing to the FSM. Idempotent on High.
+  PushUpRomThresholds applySensitivity(FeedbackSensitivity sensitivity) {
+    if (sensitivity == FeedbackSensitivity.high) return this;
+    // Same deltas as PushUpRomThresholdSet._mediumLooseness: (-5, +5, -3, +5).
+    return PushUpRomThresholds(
+      startAngle: startAngle - 5,
+      bottomAngle: bottomAngle + 5,
+      shallowRepMaxAngle: shallowRepMaxAngle + 5,
+      endAngle: endAngle - 3,
+    );
+  }
 }
 
 class PushUpRomProfile {

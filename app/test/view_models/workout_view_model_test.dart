@@ -19,6 +19,7 @@ import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:fitrack/core/constants.dart';
 import 'package:fitrack/core/types.dart';
+import 'package:fitrack/engine/curl/curl_rom_profile.dart';
 import 'package:fitrack/engine/squat/squat_rom_profile.dart';
 import 'package:fitrack/models/pose_result.dart';
 import 'package:fitrack/services/camera_service.dart';
@@ -703,13 +704,13 @@ void main() {
       vm.seedSquatAutoCalForTest(85, 175, 2);
       final t = vm.resolveSquatThresholds(0);
 
-      // Derived from `SquatRomThresholdSet.fromBucket(85, 175)`:
-      //   start = 175 - 10 = 165
-      //   bottom = 85 + 5 = 90
-      //   end = 175 - 5 = 170
-      expect(t.startAngle, closeTo(165, 1e-9));
-      expect(t.bottomAngle, closeTo(90, 1e-9));
-      expect(t.endAngle, closeTo(170, 1e-9));
+      // Auto-cal anchor (High-anchored, 2026-05-14 contract):
+      //   fromBucket(85, 175): start=175-10=165, bottom=85+5=90, end=175-5=170
+      // VM default sensitivity is Medium → applySensitivity adds the
+      // looseness deltas (-5, +2, -3): start=160, bottom=92, end=167.
+      expect(t.startAngle, closeTo(160, 1e-9));
+      expect(t.bottomAngle, closeTo(92, 1e-9));
+      expect(t.endAngle, closeTo(167, 1e-9));
 
       expect(
         TelemetryLog.instance.entries.any(
@@ -744,11 +745,13 @@ void main() {
 
       final t = vm.resolveSquatThresholds(0);
 
-      // Tier 1 wins: derived from profile bucket (80, 180) with the same
-      // margin policy:  start=170, bottom=85, end=175.
-      expect(t.startAngle, closeTo(170, 1e-9));
-      expect(t.bottomAngle, closeTo(85, 1e-9));
-      expect(t.endAngle, closeTo(175, 1e-9));
+      // Tier 1 wins. Profile-derived High anchor (bucket 80, 180):
+      //   start=170, bottom=85, end=175.
+      // VM default sensitivity is Medium → applySensitivity adds the
+      // looseness deltas (-5, +2, -3): start=165, bottom=87, end=172.
+      expect(t.startAngle, closeTo(165, 1e-9));
+      expect(t.bottomAngle, closeTo(87, 1e-9));
+      expect(t.endAngle, closeTo(172, 1e-9));
 
       expect(
         TelemetryLog.instance.entries.any(
@@ -794,6 +797,116 @@ void main() {
               e.message.contains('tier=3'),
         ),
         isTrue,
+      );
+
+      vm.dispose();
+    });
+  });
+
+  // ── Curl resolver: regression guards for the uniform-sensitivity
+  // contract (2026-05-14). Pin the sensitivity post-pass at every tier so
+  // a future refactor that drops `.applySensitivity(...)` from any branch
+  // fails here. Sister to the `_resolveSquatThresholds tier priority`
+  // group above; the squat resolver has equivalent coverage.
+  group('WorkoutViewModel — _resolveThresholds (curl) tier priority', () {
+    test('Tier 1 calibrated × Medium loosens the bucket-derived tuple', () {
+      TelemetryLog.instance.clear();
+      final vm = buildVm(exercise: ExerciseType.bicepsCurlSide);
+
+      // Seed a calibrated left-side / sideLeft bucket. Sample count
+      // meets kCalibrationMinReps so Tier 1 wins.
+      final profile = CurlRomProfile();
+      profile.upsertBucket(
+        RomBucket(
+          side: ProfileSide.left,
+          view: CurlCameraView.sideLeft,
+          observedMinAngle: 60,
+          observedMaxAngle: 165,
+          sampleCount: kCalibrationMinReps,
+        ),
+      );
+      vm.seedCurlProfileForTest(profile);
+
+      // VM default sensitivity is Medium. Bucket-derived anchor:
+      //   peak = 60 + 15 = 75
+      //   peakExit = 75 + 15 = 90
+      //   start = 165 - 10 = 155
+      //   end = 165 - 25 = 140
+      // Tier-3 / bucket looseness for Medium: (-5, +10, 0)
+      //   peak = 85, peakExit = 100, start = 150, end = 140
+      //   Strict floor: end (140) > peakExit + gap (115)? ✓ → 140.
+      //   safeStart = 150 > safeEnd (140) ? 150 : 141 → 150.
+      final t = vm.resolveCurlThresholds(
+        ProfileSide.left,
+        CurlCameraView.sideLeft,
+        // After kProfileWarmupReps so warmup multiplier doesn't apply.
+        kProfileWarmupReps,
+      );
+
+      expect(t.startAngle, closeTo(150, 1e-9));
+      expect(t.peakAngle, closeTo(85, 1e-9));
+      expect(t.peakExitAngle, closeTo(100, 1e-9));
+      expect(t.endAngle, closeTo(140, 1e-9));
+      expect(t.source, ThresholdSource.calibrated);
+
+      expect(
+        TelemetryLog.instance.entries.any(
+          (e) =>
+              e.tag == 'curl.thresholds_resolved' &&
+              e.message.contains('tier=1') &&
+              e.message.contains('source=calibrated') &&
+              e.message.contains('sensitivity=medium'),
+        ),
+        isTrue,
+        reason:
+            'Tier-1 calibrated path must emit curl.thresholds_resolved '
+            'with sensitivity tag.',
+      );
+
+      vm.dispose();
+    });
+
+    test('Tier 2 auto-cal × Medium loosens the auto-cal tuple', () {
+      TelemetryLog.instance.clear();
+      final vm = buildVm(exercise: ExerciseType.bicepsCurlSide);
+
+      // Seed two reps into the curl auto-cal so it has viable thresholds
+      // for Tier 2. No profile → Tier 1 misses.
+      vm.seedCurlAutoCalForTest(55, 170, 2);
+
+      // Auto-cal bucket: min=55, max=170. anchor:
+      //   peak = 55 + 15 = 70
+      //   peakExit = 85
+      //   start = 170 - 10 = 160
+      //   end = 170 - 25 = 145
+      // Medium looseness (-5, +10, 0):
+      //   peak = 80, peakExit = 95, start = 155, end = 145
+      //   Strict floor: end (145) > peakExit + gap (110)? ✓ → 145.
+      //   safeStart = 155 > 145 ? 155 : 146 → 155.
+      final t = vm.resolveCurlThresholds(
+        ProfileSide.left,
+        CurlCameraView.sideLeft,
+        0,
+      );
+
+      expect(t.startAngle, closeTo(155, 1e-9));
+      expect(t.peakAngle, closeTo(80, 1e-9));
+      expect(t.peakExitAngle, closeTo(95, 1e-9));
+      expect(t.endAngle, closeTo(145, 1e-9));
+      expect(t.source, ThresholdSource.autoCalibrated);
+
+      expect(
+        TelemetryLog.instance.entries.any(
+          (e) =>
+              e.tag == 'curl.thresholds_resolved' &&
+              e.message.contains('tier=2') &&
+              e.message.contains('source=autoCalibrated') &&
+              e.message.contains('sensitivity=medium'),
+        ),
+        isTrue,
+        reason:
+            'Tier-2 auto-cal path must emit curl.thresholds_resolved '
+            'with sensitivity tag.',
       );
 
       vm.dispose();

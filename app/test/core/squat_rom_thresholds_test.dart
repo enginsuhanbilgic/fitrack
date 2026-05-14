@@ -1,14 +1,18 @@
 /// Unit tests for the sensitivity-aware squat ROM threshold factory.
 ///
-/// Part 1 of the squat pipeline overhaul (2026-05-13). Pins:
-///   - `forSensitivity(high)` returns the research-derived High constants
-///     (165 / 88 / 163), not the Medium defaults.
-///   - `forSensitivity(medium)` returns the existing hand-tuned constants
-///     bit-for-bit (160 / 90 / 160). This is the backward-compatibility
-///     contract for users on Medium — Part 1 must not regress their FSM.
-///   - `forVariantAndSensitivity` is variant-agnostic today (mirrors the
-///     existing `forVariant` shape). When per-variant gates land, this
-///     test gets a variant axis added.
+/// Post-2026-05-14 contract: every factory returns the **High anchor**;
+/// sensitivity is applied as a post-pass via
+/// [SquatRomThresholdSet.applySensitivity]. The pre-2026-05-14
+/// `forSensitivity` factory is preserved as a back-compat helper that wraps
+/// the new pattern (returns High anchor then chains `.applySensitivity(s)`).
+///
+/// Pins:
+///   - `forSensitivity(high)` returns today's High constants (165 / 88 / 163).
+///   - `forSensitivity(medium)` returns today's Medium-baseline numbers
+///     (160 / 90 / 160) via the looseness deltas (-5, +2, -3) applied to the
+///     High anchor.
+///   - `SquatRomDefaults.defaults` now points at the High anchor (contract
+///     change). Pre-2026-05-14 it pointed at the Medium-baseline tuple.
 library;
 
 import 'package:fitrack/core/constants.dart';
@@ -17,49 +21,130 @@ import 'package:fitrack/core/types.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  group('SquatRomThresholdSet.forSensitivity', () {
-    test('high → research-derived gates (165 / 88 / 163)', () {
-      final t = SquatRomThresholdSet.forSensitivity(FeedbackSensitivity.high);
-      expect(t.startAngle, kSquatStartAngleHigh);
-      expect(t.startAngle, 165.0);
-      expect(t.bottomAngle, kSquatBottomAngleHigh);
-      expect(t.bottomAngle, 88.0);
-      expect(t.endAngle, kSquatEndAngleHigh);
-      expect(t.endAngle, 163.0);
+  group('SquatRomThresholdSet.anchor (High)', () {
+    test('matches research-derived High constants bit-for-bit', () {
+      const a = SquatRomThresholdSet.anchor;
+      expect(a.startAngle, kSquatStartAngleHigh);
+      expect(a.startAngle, 165.0);
+      expect(a.bottomAngle, kSquatBottomAngleHigh);
+      expect(a.bottomAngle, 88.0);
+      expect(a.endAngle, kSquatEndAngleHigh);
+      expect(a.endAngle, 163.0);
+    });
+
+    test('SquatRomDefaults.defaults aliases the High anchor', () {
+      expect(
+        SquatRomDefaults.defaults.startAngle,
+        SquatRomThresholdSet.anchor.startAngle,
+      );
+      expect(
+        SquatRomDefaults.defaults.bottomAngle,
+        SquatRomThresholdSet.anchor.bottomAngle,
+      );
+      expect(
+        SquatRomDefaults.defaults.endAngle,
+        SquatRomThresholdSet.anchor.endAngle,
+      );
     });
 
     test(
-      'medium → existing hand-tuned defaults bit-for-bit (160 / 90 / 160)',
+      'SquatRomDefaults.anchor and SquatRomThresholdSet.anchor are the same tuple',
+      () {
+        expect(
+          SquatRomDefaults.anchor.startAngle,
+          SquatRomThresholdSet.anchor.startAngle,
+        );
+        expect(
+          SquatRomDefaults.anchor.bottomAngle,
+          SquatRomThresholdSet.anchor.bottomAngle,
+        );
+        expect(
+          SquatRomDefaults.anchor.endAngle,
+          SquatRomThresholdSet.anchor.endAngle,
+        );
+      },
+    );
+  });
+
+  group('SquatRomThresholdSet.applySensitivity (post-pass)', () {
+    test('high is identity on the anchor', () {
+      final t = SquatRomThresholdSet.anchor.applySensitivity(
+        FeedbackSensitivity.high,
+      );
+      expect(t.startAngle, SquatRomThresholdSet.anchor.startAngle);
+      expect(t.bottomAngle, SquatRomThresholdSet.anchor.bottomAngle);
+      expect(t.endAngle, SquatRomThresholdSet.anchor.endAngle);
+    });
+
+    test(
+      'medium applies looseness deltas (-5, +2, -3) → Medium-baseline tuple',
+      () {
+        final t = SquatRomThresholdSet.anchor.applySensitivity(
+          FeedbackSensitivity.medium,
+        );
+        // (165-5, 88+2, 163-3) == (160, 90, 160) == today's Medium-baseline.
+        expect(t.startAngle, kSquatStartAngle);
+        expect(t.bottomAngle, kSquatBottomAngle);
+        expect(t.endAngle, kSquatEndAngle);
+        expect(t.startAngle, 160.0);
+        expect(t.bottomAngle, 90.0);
+        expect(t.endAngle, 160.0);
+      },
+    );
+
+    test('idempotent on High', () {
+      final once = SquatRomThresholdSet.anchor.applySensitivity(
+        FeedbackSensitivity.high,
+      );
+      final twice = once.applySensitivity(FeedbackSensitivity.high);
+      expect(twice.startAngle, once.startAngle);
+      expect(twice.bottomAngle, once.bottomAngle);
+      expect(twice.endAngle, once.endAngle);
+    });
+
+    test('Medium FSM invariant: start > end > bottom', () {
+      final t = SquatRomThresholdSet.anchor.applySensitivity(
+        FeedbackSensitivity.medium,
+      );
+      expect(t.startAngle, greaterThanOrEqualTo(t.endAngle));
+      expect(t.endAngle, greaterThan(t.bottomAngle));
+    });
+  });
+
+  group('SquatRomThresholdSet.forSensitivity (back-compat wrapper)', () {
+    test('high → research-derived gates (165 / 88 / 163)', () {
+      final t = SquatRomThresholdSet.forSensitivity(FeedbackSensitivity.high);
+      expect(t.startAngle, kSquatStartAngleHigh);
+      expect(t.bottomAngle, kSquatBottomAngleHigh);
+      expect(t.endAngle, kSquatEndAngleHigh);
+    });
+
+    test(
+      'medium reproduces today\'s Medium-baseline tuple (160 / 90 / 160)',
       () {
         final t = SquatRomThresholdSet.forSensitivity(
           FeedbackSensitivity.medium,
         );
-        // Pin against both the canonical default tuple AND the underlying
-        // constants. Both paths must hold — the second protects against a
-        // future refactor that quietly diverges defaults from constants.
-        expect(t.startAngle, SquatRomDefaults.defaults.startAngle);
-        expect(t.bottomAngle, SquatRomDefaults.defaults.bottomAngle);
-        expect(t.endAngle, SquatRomDefaults.defaults.endAngle);
         expect(t.startAngle, kSquatStartAngle);
         expect(t.bottomAngle, kSquatBottomAngle);
         expect(t.endAngle, kSquatEndAngle);
       },
     );
 
-    test('high vs medium differ on every gate', () {
-      final hi = SquatRomThresholdSet.forSensitivity(FeedbackSensitivity.high);
-      final mid = SquatRomThresholdSet.forSensitivity(
-        FeedbackSensitivity.medium,
-      );
-      expect(hi.startAngle, isNot(mid.startAngle));
-      expect(hi.bottomAngle, isNot(mid.bottomAngle));
-      expect(hi.endAngle, isNot(mid.endAngle));
-      // High is stricter on start/end (must reach a fuller extension) and
-      // tighter on bottom (must descend deeper).
-      expect(hi.startAngle, greaterThan(mid.startAngle));
-      expect(hi.endAngle, greaterThan(mid.endAngle));
-      expect(hi.bottomAngle, lessThan(mid.bottomAngle));
-    });
+    test(
+      'high vs medium differ on every gate with correct strictness ordering',
+      () {
+        final hi = SquatRomThresholdSet.forSensitivity(
+          FeedbackSensitivity.high,
+        );
+        final mid = SquatRomThresholdSet.forSensitivity(
+          FeedbackSensitivity.medium,
+        );
+        expect(hi.startAngle, greaterThan(mid.startAngle));
+        expect(hi.endAngle, greaterThan(mid.endAngle));
+        expect(hi.bottomAngle, lessThan(mid.bottomAngle));
+      },
+    );
   });
 
   group('SquatRomDefaults.forVariantAndSensitivity', () {
@@ -79,16 +164,16 @@ void main() {
       }
     });
 
-    test('delegates to forSensitivity (same tuple as the factory)', () {
+    test('delegates to anchor + applySensitivity', () {
       for (final s in FeedbackSensitivity.values) {
         final viaVariant = SquatRomDefaults.forVariantAndSensitivity(
           SquatVariant.bodyweight,
           s,
         );
-        final viaFactory = SquatRomThresholdSet.forSensitivity(s);
-        expect(viaVariant.startAngle, viaFactory.startAngle);
-        expect(viaVariant.bottomAngle, viaFactory.bottomAngle);
-        expect(viaVariant.endAngle, viaFactory.endAngle);
+        final viaAnchor = SquatRomThresholdSet.anchor.applySensitivity(s);
+        expect(viaVariant.startAngle, viaAnchor.startAngle);
+        expect(viaVariant.bottomAngle, viaAnchor.bottomAngle);
+        expect(viaVariant.endAngle, viaAnchor.endAngle);
       }
     });
   });

@@ -155,7 +155,15 @@ void main() {
     });
 
     test('descending returns to idle when user stands back up', () {
-      final strategy = SquatStrategy();
+      // Use the Medium-derived tuple explicitly: post-2026-05-14
+      // `SquatRomDefaults.defaults` aliases the High anchor (165/88/163),
+      // so the default-constructed strategy now uses the strict 165° start
+      // gate. Pin this test to Medium-baseline (160°) by passing the tuple
+      // through the new applySensitivity post-pass.
+      final mediumTuple = SquatRomThresholdSet.anchor.applySensitivity(
+        FeedbackSensitivity.medium,
+      );
+      final strategy = SquatStrategy(romThresholds: mediumTuple);
 
       var out = tickAt(
         strategy: strategy,
@@ -168,7 +176,7 @@ void main() {
       out = tickAt(
         strategy: strategy,
         state: RepState.descending,
-        angle: 165, // above startAngle (160) before reaching bottom
+        angle: 165, // above Medium startAngle (160) before reaching bottom
         hipY: 0.50,
       );
       expect(out.nextState, RepState.idle);
@@ -394,7 +402,13 @@ void main() {
       // The Medium START gate is 160°. An angle at 161° must NOT enter
       // DESCENDING (because 161 > 160). This is the regression mirror to
       // the High test above — confirms the gate moved only under High.
-      final s = SquatStrategy();
+      // Post-2026-05-14: SquatRomDefaults.defaults aliases the High anchor,
+      // so to test Medium behavior we must apply the sensitivity post-pass
+      // explicitly rather than relying on the no-arg constructor default.
+      final mediumTuple = SquatRomThresholdSet.anchor.applySensitivity(
+        FeedbackSensitivity.medium,
+      );
+      final s = SquatStrategy(romThresholds: mediumTuple);
       final out = tickAt(
         strategy: s,
         state: RepState.idle,

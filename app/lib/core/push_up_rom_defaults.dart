@@ -20,11 +20,12 @@
 ///
 /// The underlying numeric constants (`kPushUpStartAngle`, `kPushUpBottomAngle`,
 /// `kPushUpEndAngle`, `kPushUpShallowRepMaxAngle`) live in `constants.dart` as
-/// the single source of truth — `PushUpStrategy`, `PushUpFormAnalyzer`, and
-/// `PushUpRomProfile` reference them directly. This file re-exposes them
-/// through a [PushUpRomDefaults] view-object so consumers reaching for
-/// "where do push-up ROM thresholds come from?" land on a file named after
-/// the exercise, with provenance up top.
+/// the Medium-baseline single source of truth — `PushUpStrategy`,
+/// `PushUpFormAnalyzer`, and `PushUpRomProfile` reference them directly for
+/// non-sensitivity-aware paths (cold-start bucket seeding, FSM defaults).
+/// This file re-exposes them through a [PushUpRomDefaults] view-object so
+/// consumers reaching for "where do push-up ROM thresholds come from?" land
+/// on a file named after the exercise, with provenance up top.
 ///
 /// FSM SHAPE
 /// ─────────
@@ -44,6 +45,16 @@
 /// below are used only as the cold-start fallback and as bounds for the
 /// calibration acceptance gate.
 ///
+/// SENSITIVITY CONTRACT (2026-05-14)
+/// ─────────────────────────────────
+/// [forSensitivity] / [anchor] return the **High-anchored** tuple
+/// unconditionally. Sensitivity is applied as a post-pass via
+/// [PushUpRomThresholdSet.applySensitivity] — mirrors curl's
+/// `RomThresholds.applySensitivity` and squat's
+/// `SquatRomThresholdSet.applySensitivity`. Looseness deltas reproduce
+/// today's `_medium` numbers bit-for-bit:
+///   `(dStart=-5, dBottom=+5, dEnd=-3, dShallow=+5)`
+///
 /// CALIBRATION-RELATED CONSTANTS
 /// ─────────────────────────────
 /// The calibration acceptance bounds (`kPushUpCalibration*`), profile-margin
@@ -51,38 +62,8 @@
 /// remain in `constants.dart` — they are infrastructure parameters for the
 /// calibration flow, not ROM gate values. This file scopes itself to the
 /// FSM gate quadruple only.
-///
-/// SENSITIVITY-KEYED ROM GATES (2026-05-13 design flip)
-/// ────────────────────────────────────────────────────
-/// Push-up ROM gates are now keyed by [FeedbackSensitivity] — see
-/// [PushUpRomDefaults.forSensitivity]. This **replaces** the earlier
-/// "calibration-only" stance documented in prior revisions of this file:
-/// pre-calibration users still need the cold-start defaults, and a single
-/// hand-tuned tuple is not a defensible cold-start for everyone. The tier
-/// design rationale lives in
-/// `docs/plan/2026-05-13-feat-push-up-telemetry-threshold-tuning-plan.md`.
-///
-/// Mapping (per-tier percentile picks, applied by the offline derivation
-/// script `tools/dataset_analysis/scripts/derive_pushup_thresholds_from_telemetry.py`):
-///
-///   | Sensitivity | bottomAngle (P of min_elbow) | startAngle (P of max_elbow) | shallowRepMax (P of min_elbow) |
-///   |-------------|------------------------------|-----------------------------|--------------------------------|
-///   | **high**    | P15 (shallower → stricter)   | P85 (lower → stricter)      | P30                            |
-///   | **medium**  | P10                          | P90                         | P25                            |
-///
-/// `endAngle` is P50 across tiers — population centers there.
-///
-/// **Values shipped in this PR are still hand-tuned.** The API shape lands
-/// here so call sites can migrate to [forSensitivity]; a follow-up PR runs
-/// the derivation script on a representative cohort and swaps the numbers.
-///
-/// Calibration overrides remain in force — once a user completes push-up
-/// calibration, the FSM consumes their per-user [PushUpRomThresholds] from
-/// `engine/push_up/push_up_rom_profile.dart`. Sensitivity affects only the
-/// pre-calibration fallback.
 library;
 
-import 'constants.dart';
 import 'types.dart';
 
 /// Immutable threshold tuple for the push-up FSM.
@@ -110,53 +91,68 @@ class PushUpRomThresholdSet {
   /// A push-up attempt that reverses above bottom but reaches at least this
   /// elbow angle is counted as a shallow/faulty rep instead of discarded.
   final double shallowRepMaxAngle;
+
+  /// Looseness deltas: `(dStart, dBottom, dEnd, dShallow)` applied to the
+  /// High anchor to reproduce today's Medium-baseline (legacy `_medium`)
+  /// numbers exactly. `dBottom=+5` means Medium accepts a shallower bottom.
+  static const (double, double, double, double) _mediumLooseness = (
+    -5.0,
+    5.0,
+    -3.0,
+    5.0,
+  );
+
+  /// Apply the user's sensitivity selection to a High-anchored threshold set.
+  ///
+  /// Returns `this` unmodified for High. For Medium, applies looseness
+  /// deltas. Idempotent on High; safe to call from any tier's resolver as
+  /// the last op before returning to the FSM driver.
+  PushUpRomThresholdSet applySensitivity(FeedbackSensitivity sensitivity) {
+    if (sensitivity == FeedbackSensitivity.high) return this;
+    final (dStart, dBottom, dEnd, dShallow) = _mediumLooseness;
+    return PushUpRomThresholdSet(
+      startAngle: startAngle + dStart,
+      bottomAngle: bottomAngle + dBottom,
+      endAngle: endAngle + dEnd,
+      shallowRepMaxAngle: shallowRepMaxAngle + dShallow,
+    );
+  }
 }
 
-/// Cold-start ROM defaults for push-up — sensitivity-keyed.
+/// Cold-start ROM defaults for push-up — High-anchored.
 ///
-/// Lookup mirrors `SquatRomDefaults.forVariantAndSensitivity` so the
-/// per-exercise files stay shape-consistent. Calibration overrides per-user;
-/// the tuple returned here is only used as the pre-calibration fallback.
+/// Pre-2026-05-14: this class returned a Medium-baseline tuple by default and
+/// a High tuple via [forSensitivity]. After 2026-05-14: returns the
+/// High-anchored tuple unconditionally; the caller applies sensitivity via
+/// [PushUpRomThresholdSet.applySensitivity] at the resolver level.
 class PushUpRomDefaults {
   const PushUpRomDefaults._();
 
-  /// Build the cold-start tuple for the requested [FeedbackSensitivity].
-  ///
-  /// Values are **still hand-tuned in this PR** — the API shape lands
-  /// here so consumers can migrate. The follow-up PR runs the derivation
-  /// script on real telemetry and replaces these constants with derived
-  /// values; the call-site contract is stable.
-  ///
-  /// Exhaustive switch — adding a future enum case is a compile error.
-  static PushUpRomThresholdSet forSensitivity(FeedbackSensitivity s) {
-    return switch (s) {
-      FeedbackSensitivity.high => _high,
-      FeedbackSensitivity.medium => _medium,
-    };
-  }
-
-  /// Backward-compatible alias for the medium tier. Existing call sites
-  /// that haven't migrated to [forSensitivity] still resolve to the same
-  /// tuple they got before the sensitivity-keying restructure.
-  static const PushUpRomThresholdSet defaults = _medium;
-
-  /// High-sensitivity tier — stricter gates. Mirrors the squat high tier:
-  /// stricter start (must be more extended), deeper bottom required,
-  /// stricter return-to-extension. Hand-tuned with ±3-5° offsets from
-  /// the medium tier; numerically derived values land in the follow-up.
-  static const PushUpRomThresholdSet _high = PushUpRomThresholdSet(
+  /// The shipping cold-start **High anchor**. Numbers preserved bit-for-bit
+  /// from pre-2026-05-14 `_high` — stricter start, deeper bottom required,
+  /// stricter return-to-extension.
+  static const PushUpRomThresholdSet anchor = PushUpRomThresholdSet(
     startAngle: 165,
     bottomAngle: 85,
     endAngle: 163,
     shallowRepMaxAngle: 125,
   );
 
-  /// Medium-sensitivity tier — bit-for-bit identical to the legacy
-  /// hand-tuned constants. Returning users on `medium` see no change.
-  static const PushUpRomThresholdSet _medium = PushUpRomThresholdSet(
-    startAngle: kPushUpStartAngle,
-    bottomAngle: kPushUpBottomAngle,
-    endAngle: kPushUpEndAngle,
-    shallowRepMaxAngle: kPushUpShallowRepMaxAngle,
-  );
+  /// Backwards-compatible factory. Returns the High anchor unconditionally;
+  /// the caller is responsible for applying [PushUpRomThresholdSet.applySensitivity]
+  /// at the resolver. Kept so call sites that already invoke `forSensitivity`
+  /// keep compiling while migration is in flight.
+  ///
+  /// Prefer reading [anchor] directly + chaining `.applySensitivity(s)` in
+  /// new code.
+  static PushUpRomThresholdSet forSensitivity(FeedbackSensitivity s) {
+    return anchor.applySensitivity(s);
+  }
+
+  /// Backwards-compatible alias. Points at the **High anchor** under the new
+  /// sensitivity contract. Pre-2026-05-14 callers that read this directly
+  /// got the Medium-baseline tuple; they now get the stricter High numbers.
+  /// Migrate to [anchor] + `.applySensitivity(s)` at the resolver level
+  /// when touching nearby code.
+  static const PushUpRomThresholdSet defaults = anchor;
 }

@@ -793,8 +793,8 @@ class _RecentExerciseCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       hasData
-                          ? '${session.totalReps} reps · ${session.totalSets} sets · ${_formatDuration(session.duration)}'
-                          : '0 reps · 0 sets · 0 min',
+                          ? '${session.totalReps} reps · ${_formatDuration(session.duration)}'
+                          : '0 reps · 0 min',
                       style: TextStyle(fontSize: 13, color: ft.textDim),
                     ),
                     const SizedBox(height: 16),

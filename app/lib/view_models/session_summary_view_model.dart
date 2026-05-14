@@ -403,6 +403,7 @@ SessionSummaryViewModel _fromPushUp(SessionSummaryInput input) {
     repRecords: input.curlRepRecords,
     fatigueDetected: input.fatigueDetected,
     pushUpProfile: input.pushUpProfile,
+    sensitivity: input.feedbackSensitivity,
   );
 
   return SessionSummaryViewModel(

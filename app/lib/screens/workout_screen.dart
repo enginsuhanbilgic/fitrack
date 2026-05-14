@@ -451,7 +451,9 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         ),
 
         // ── CALIBRATION overlay ─────────────────────────────────────────────
-        if (phase == WorkoutPhase.calibration && calibrationSummary == null)
+        if (phase == WorkoutPhase.calibration &&
+            calibrationSummary == null &&
+            !_vm.calibrationOfferSecondSide)
           CalibrationOverlay(
             exercise: widget.exercise,
             repsDetected: _vm.calibrationReps,
@@ -466,8 +468,19 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             errorMessage: _vm.calibrationError,
             onSkip: _vm.skipCalibration,
             onRetry: _vm.calibrationError != null ? _vm.retryCalibration : null,
+            chosenSide: _vm.calibrationChosenSide,
+            onPickSide: widget.exercise.isCurl ? _vm.pickCalibrationSide : null,
           ),
-        if (phase == WorkoutPhase.calibration && calibrationSummary != null)
+        if (phase == WorkoutPhase.calibration && _vm.calibrationOfferSecondSide)
+          _SecondSidePrompt(
+            chosenSide: _vm.calibrationChosenSide,
+            summary: calibrationSummary,
+            onAccept: _vm.acceptSecondSideCalibration,
+            onDecline: _vm.declineSecondSideCalibration,
+          ),
+        if (phase == WorkoutPhase.calibration &&
+            calibrationSummary != null &&
+            !_vm.calibrationOfferSecondSide)
           Positioned.fill(
             child: Container(
               color: Colors.black87,
@@ -611,6 +624,132 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 // Top HUD bar — glassmorphic, replaces AppBar.
 // ──────────────────────────────────────────────────────────────────────────────
 
+/// Curl Global Calibration: post-pass-1 prompt offering an optional
+/// Second-Side Calibration. Replaces the legacy 2 s auto-dismiss
+/// summary card on the first pass — the user must explicitly say
+/// Yes (run a second pass that overwrites the opposite-side bucket)
+/// or No (keep the duplicated bucket from pass 1 and exit).
+class _SecondSidePrompt extends StatelessWidget {
+  final ProfileSide? chosenSide;
+  final CalibrationSummary? summary;
+  final VoidCallback onAccept;
+  final VoidCallback onDecline;
+
+  const _SecondSidePrompt({
+    required this.chosenSide,
+    required this.summary,
+    required this.onAccept,
+    required this.onDecline,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pickedLabel = chosenSide == ProfileSide.left ? 'Left' : 'Right';
+    final otherLabel = chosenSide == ProfileSide.left ? 'right' : 'left';
+    final s = summary;
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black87,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.check_circle,
+                  color: Color(0xFF00E676),
+                  size: 64,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '$pickedLabel arm calibrated',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                if (s != null)
+                  Text(
+                    s.viewLabel,
+                    style: TextStyle(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withValues(alpha: 0.70),
+                      fontSize: 14,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                const SizedBox(height: 20),
+                Text(
+                  'Calibrate the $otherLabel arm too?',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Optional — your $pickedLabel calibration already '
+                  'applies to both arms.',
+                  style: TextStyle(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.54),
+                    fontSize: 13,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton(
+                      onPressed: onDecline,
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 14,
+                        ),
+                      ),
+                      child: const Text(
+                        'No, use globally',
+                        style: TextStyle(color: Colors.white70, fontSize: 15),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton(
+                      onPressed: onAccept,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00E676),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 22,
+                          vertical: 14,
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      child: const Text('Yes, calibrate'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TopHudBar extends StatelessWidget {
   final ExerciseType exercise;
   final WorkoutPhase phase;
@@ -698,12 +837,6 @@ class _TopHudBar extends StatelessWidget {
                     isLight: isLight,
                   ),
                 if (phase == WorkoutPhase.active) ...[
-                  const SizedBox(width: 6),
-                  _HudIconButton(
-                    icon: Icons.replay,
-                    onTap: vm.startNextSet,
-                    isLight: isLight,
-                  ),
                   const SizedBox(width: 6),
                   _HudIconButton(
                     icon: Icons.stop_circle_outlined,
@@ -1459,32 +1592,6 @@ class _MinimalHud extends StatelessWidget {
                         height: 1,
                       ),
                     ),
-                    const Spacer(),
-                    // Set indicator
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'SET',
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: ft.textDim,
-                            letterSpacing: 0,
-                          ),
-                        ),
-                        Text(
-                          '${snapshot.sets}',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            color: ft.accent,
-                            height: 1,
-                          ),
-                        ),
-                      ],
-                    ),
                   ],
                 ),
               ),
@@ -1614,13 +1721,6 @@ class _StatsRow extends StatelessWidget {
         _StatCell(label: 'REPS', value: '${snapshot.reps}', ft: ft),
         _VertDivider(color: dividerColor),
         _StatCell(label: 'TARGET', value: '12', ft: ft),
-        _VertDivider(color: dividerColor),
-        _StatCell(
-          label: 'SET',
-          value: '${snapshot.sets}',
-          ft: ft,
-          valueColor: ft.accent,
-        ),
       ],
     );
   }
@@ -1630,14 +1730,8 @@ class _StatCell extends StatelessWidget {
   final String label;
   final String value;
   final FiTrackColors ft;
-  final Color? valueColor;
 
-  const _StatCell({
-    required this.label,
-    required this.value,
-    required this.ft,
-    this.valueColor,
-  });
+  const _StatCell({required this.label, required this.value, required this.ft});
 
   @override
   Widget build(BuildContext context) {
@@ -1667,7 +1761,7 @@ class _StatCell extends StatelessWidget {
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
-                color: valueColor ?? ft.textStrong,
+                color: ft.textStrong,
                 letterSpacing: 0,
                 height: 1,
               ),

@@ -206,6 +206,107 @@ void main() {
     });
   });
 
+  group('RomThresholds.applySensitivity (post-pass, 2026-05-14)', () {
+    // Bucket-derived tuples are High-anchored; applySensitivity loosens
+    // them for Medium using Tier-3-style deltas (-5, +10, 0).
+    test('high is identity on a calibrated tuple', () {
+      const bucket = _StubBucket(60, 165);
+      final anchor = RomThresholds.fromBucket(bucket);
+      final t = anchor.applySensitivity(FeedbackSensitivity.high);
+      expect(t.startAngle, anchor.startAngle);
+      expect(t.peakAngle, anchor.peakAngle);
+      expect(t.peakExitAngle, anchor.peakExitAngle);
+      expect(t.endAngle, anchor.endAngle);
+      expect(t.source, ThresholdSource.calibrated);
+    });
+
+    test('medium loosens a calibrated tuple by (-5, +10, 0)', () {
+      const bucket = _StubBucket(60, 165);
+      final anchor = RomThresholds.fromBucket(bucket);
+      // anchor: peak=75, peakExit=90, start=155, end=140
+      final t = anchor.applySensitivity(FeedbackSensitivity.medium);
+      // (start-5, peak+10, end+0) → start=150, peak=85, end=140
+      // peakExit re-derived: 85 + 15 = 100
+      // Strict floor: end > peakExit + gap (115)? 140 > 115 ✓
+      expect(t.startAngle, 150);
+      expect(t.peakAngle, 85);
+      expect(t.peakExitAngle, 100);
+      expect(t.endAngle, 140);
+      // Source survives the post-pass.
+      expect(t.source, ThresholdSource.calibrated);
+    });
+
+    test('medium loosens an autoCalibrated tuple the same way', () {
+      const bucket = _StubBucket(60, 165);
+      final anchor = RomThresholds.autoCalibrated(bucket);
+      final t = anchor.applySensitivity(FeedbackSensitivity.medium);
+      expect(t.startAngle, 150);
+      expect(t.peakAngle, 85);
+      expect(t.endAngle, 140);
+      expect(t.source, ThresholdSource.autoCalibrated);
+    });
+
+    test('idempotent on High', () {
+      const bucket = _StubBucket(60, 165);
+      final anchor = RomThresholds.fromBucket(bucket);
+      final once = anchor.applySensitivity(FeedbackSensitivity.high);
+      final twice = once.applySensitivity(FeedbackSensitivity.high);
+      expect(twice.startAngle, once.startAngle);
+      expect(twice.peakAngle, once.peakAngle);
+      expect(twice.endAngle, once.endAngle);
+    });
+
+    test(
+      'FSM invariant survives medium loosening across realistic buckets',
+      () {
+        for (var min = 40.0; min <= 120.0; min += 10) {
+          for (var max = min + 25; max <= 180.0; max += 10) {
+            final bucket = _StubBucket(min, max);
+            final t = RomThresholds.fromBucket(
+              bucket,
+            ).applySensitivity(FeedbackSensitivity.medium);
+            expect(
+              t.endAngle,
+              greaterThan(t.peakExitAngle),
+              reason: 'min=$min max=$max yielded uncompletable Medium FSM: $t',
+            );
+            expect(
+              t.startAngle,
+              greaterThan(t.peakAngle),
+              reason: 'min=$min max=$max yielded uncompletable Medium FSM: $t',
+            );
+          }
+        }
+      },
+    );
+  });
+
+  group('RomThresholds.globalUnmodified (diagnostic path)', () {
+    // The diagnostic short-circuit needs Tier-3 Medium-baseline numbers
+    // verbatim — applying sensitivity would make the offline tuning
+    // workflow circular. globalUnmodified returns the legacy kCurl*
+    // constants directly, regardless of view.
+    test('returns the legacy hand-tuned constants exactly', () {
+      final t = RomThresholds.globalUnmodified();
+      expect(t.startAngle, kCurlStartAngle);
+      expect(t.peakAngle, kCurlPeakAngle);
+      expect(t.peakExitAngle, kCurlPeakExitAngle);
+      expect(t.endAngle, kCurlEndAngle);
+      expect(t.source, ThresholdSource.global);
+    });
+
+    test('view argument is accepted but does not change the output', () {
+      final base = RomThresholds.globalUnmodified();
+      for (final v in CurlCameraView.values) {
+        final t = RomThresholds.globalUnmodified(v);
+        expect(t.startAngle, base.startAngle);
+        expect(t.peakAngle, base.peakAngle);
+        expect(t.peakExitAngle, base.peakExitAngle);
+        expect(t.endAngle, base.endAngle);
+      }
+    });
+  });
+
   group('RomThresholds.toString', () {
     test('includes all four angles and the source label', () {
       // Use a fixed synthetic threshold set so this test is independent of

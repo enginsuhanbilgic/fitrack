@@ -42,6 +42,15 @@ class CalibrationOverlay extends StatelessWidget {
   /// Tapped when the user wants to restart calibration after a failure.
   final VoidCallback? onRetry;
 
+  /// Curl Global Calibration: the side the user has explicitly picked.
+  /// Null means the side-pick panel must be shown and the FSM-driven
+  /// progress UI suppressed. Ignored for non-curl exercises.
+  final ProfileSide? chosenSide;
+
+  /// Called when the user taps Left / Right on the side-pick panel.
+  /// Only consulted when [chosenSide] is null and the exercise is curl.
+  final ValueChanged<ProfileSide>? onPickSide;
+
   const CalibrationOverlay({
     super.key,
     required this.repsDetected,
@@ -56,6 +65,8 @@ class CalibrationOverlay extends StatelessWidget {
     this.exercise = ExerciseType.bicepsCurlSide,
     this.errorMessage,
     this.onRetry,
+    this.chosenSide,
+    this.onPickSide,
   });
 
   @override
@@ -66,6 +77,14 @@ class CalibrationOverlay extends StatelessWidget {
     final viewLocked = view != null && view != CurlCameraView.unknown;
     final isCurl = exercise.isCurl;
     final viewChipVisible = view != null && isCurl;
+    // Curl side-pick panel is shown until the user explicitly picks an
+    // arm. While the panel is up the timeout chip, Skip and Retry are
+    // hidden — the user must commit to a side first. Non-curl exercises
+    // never enter this branch (chosenSide is ignored).
+    final awaitingSidePick = isCurl && chosenSide == null && onPickSide != null;
+    final bannerText =
+        errorMessage ??
+        (awaitingSidePick ? "Pick the side you'll calibrate" : instruction);
 
     return Stack(
       children: [
@@ -97,7 +116,7 @@ class CalibrationOverlay extends StatelessWidget {
                 Semantics(
                   liveRegion: true,
                   child: Text(
-                    errorMessage ?? instruction,
+                    bannerText,
                     style: TextStyle(
                       color: errorMessage == null
                           ? Colors.white
@@ -132,38 +151,43 @@ class CalibrationOverlay extends StatelessWidget {
           ),
         ),
 
-        // ── Center: progress dots + live angle ─────────
+        // ── Center: side-pick panel OR progress dots + live angle ─────────
         Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Decorative dot row gets an accessible label so screen-reader
-              // users hear progress instead of nothing. liveRegion so each
-              // detected rep re-announces.
-              Semantics(
-                liveRegion: true,
-                label:
-                    'Calibration progress: $repsDetected of $progressTarget $progressLabel detected',
-                excludeSemantics: true,
-                child: _RepDots(detected: repsDetected, target: progressTarget),
-              ),
-              const SizedBox(height: 24),
-              if (currentAngle != null)
-                Semantics(
-                  label:
-                      'Current elbow angle ${currentAngle!.toStringAsFixed(0)} degrees',
-                  excludeSemantics: true,
-                  child: Text(
-                    '${currentAngle!.toStringAsFixed(0)}°',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 64,
-                      fontWeight: FontWeight.w900,
+          child: awaitingSidePick
+              ? _SidePickPanel(onPick: onPickSide!)
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Decorative dot row gets an accessible label so
+                    // screen-reader users hear progress instead of nothing.
+                    // liveRegion so each detected rep re-announces.
+                    Semantics(
+                      liveRegion: true,
+                      label:
+                          'Calibration progress: $repsDetected of $progressTarget $progressLabel detected',
+                      excludeSemantics: true,
+                      child: _RepDots(
+                        detected: repsDetected,
+                        target: progressTarget,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 24),
+                    if (currentAngle != null)
+                      Semantics(
+                        label:
+                            'Current elbow angle ${currentAngle!.toStringAsFixed(0)} degrees',
+                        excludeSemantics: true,
+                        child: Text(
+                          '${currentAngle!.toStringAsFixed(0)}°',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 64,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-            ],
-          ),
         ),
 
         // ── Bottom: chips + actions ────────────────────
@@ -209,27 +233,33 @@ class CalibrationOverlay extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 14),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    TextButton(
-                      onPressed: onSkip,
-                      child: const Text(
-                        'Skip',
-                        style: TextStyle(color: Colors.white70, fontSize: 16),
-                      ),
-                    ),
-                    if (onRetry != null)
-                      ElevatedButton(
-                        onPressed: onRetry,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF00E676),
-                          foregroundColor: Colors.black,
+                // Skip and Retry are hidden while the side-pick panel is
+                // up — the user must commit to a side first. Otherwise
+                // a Skip tap could exit calibration before the timeout
+                // is even running, leaving the next workout unaware
+                // whether the user opted out vs. just hadn't picked yet.
+                if (!awaitingSidePick)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: onSkip,
+                        child: const Text(
+                          'Skip',
+                          style: TextStyle(color: Colors.white70, fontSize: 16),
                         ),
-                        child: const Text('Retry'),
                       ),
-                  ],
-                ),
+                      if (onRetry != null)
+                        ElevatedButton(
+                          onPressed: onRetry,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF00E676),
+                            foregroundColor: Colors.black,
+                          ),
+                          child: const Text('Retry'),
+                        ),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -281,6 +311,90 @@ class _RepDots extends StatelessWidget {
           ),
         );
       }),
+    );
+  }
+}
+
+/// Curl Global Calibration: explicit Left/Right picker shown before
+/// any reps are detected. Until the user taps a side the parent VM
+/// holds off arming the rep detector and starting the timeout, so the
+/// user can take their time without burning calibration seconds.
+///
+/// **Anatomical mapping** — `Left arm` maps to [ProfileSide.left] (the
+/// limb the user is curling). The home-screen mirroring quirk does not
+/// apply here: calibration concerns the limb being curled, and the
+/// engine attributes commits by ML Kit anatomical side.
+class _SidePickPanel extends StatelessWidget {
+  final ValueChanged<ProfileSide> onPick;
+  const _SidePickPanel({required this.onPick});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Which arm will you calibrate?',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            "We'll apply this to both arms. You can calibrate the other "
+            'side right after.',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 28),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _SidePickButton(
+                label: 'Left arm',
+                onTap: () => onPick(ProfileSide.left),
+              ),
+              const SizedBox(width: 16),
+              _SidePickButton(
+                label: 'Right arm',
+                onTap: () => onPick(ProfileSide.right),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SidePickButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _SidePickButton({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Calibrate $label',
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF00E676),
+          foregroundColor: Colors.black,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+          textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        child: Text(label),
+      ),
     );
   }
 }

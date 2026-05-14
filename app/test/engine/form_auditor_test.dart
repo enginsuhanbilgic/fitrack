@@ -86,12 +86,19 @@ void main() {
           rep(repIndex: 0, minKneeAngle: 84.0),
           rep(repIndex: 1, minKneeAngle: 86.0),
         ];
+        // Pin sensitivity=High so this test exercises the raw bucket-derived
+        // anchor (no Medium loosening post-pass). Pre-2026-05-14 the audit
+        // didn't apply sensitivity at all; post-2026-05-14 it mirrors the
+        // live FSM resolver. High = identity, which preserves the
+        // observedMin + kSquatProfileBottomMargin math the test was
+        // originally pinning.
         final audit = auditor.auditSquat(
           squatRepMetrics: reps,
           variant: SquatVariant.bodyweight,
           longFemurLifter: false,
           fatigueDetected: false,
           squatProfile: calibrated,
+          sensitivity: FeedbackSensitivity.high,
         );
         final depth = criterionByName(audit, 'Depth');
         expect(depth.evaluated, 2);
@@ -99,7 +106,7 @@ void main() {
           depth.fired,
           1,
           reason:
-              'Tier 1 effective bottomAngle = 80 + 5 = 85°. Only rep 1 '
+              'Tier 1 (High) effective bottomAngle = 80 + 5 = 85°. Only rep 1 '
               '(86° > 85°) should fail; rep 0 (84° < 85°) passes.',
         );
       },
@@ -125,6 +132,10 @@ void main() {
         rep(repIndex: 0, minKneeAngle: 91.0),
         rep(repIndex: 1, minKneeAngle: 93.0),
       ];
+      // High sensitivity = identity post-pass — pins the auto-cal anchor
+      // numerically without Medium loosening. Pre-2026-05-14 the audit was
+      // sensitivity-blind on Tier-2; post-2026-05-14 it mirrors the live
+      // FSM resolver.
       final audit = auditor.auditSquat(
         squatRepMetrics: reps,
         variant: SquatVariant.bodyweight,
@@ -132,13 +143,15 @@ void main() {
         fatigueDetected: false,
         squatProfile: emptyProfile,
         autoCalSnapshot: autoCal,
+        sensitivity: FeedbackSensitivity.high,
       );
       final depth = criterionByName(audit, 'Depth');
       expect(
         depth.fired,
         1,
         reason:
-            'Tier-2 bottomAngle=92°: rep 0 (91°<92°) passes, rep 1 (93°>92°) fires.',
+            'Tier-2 (High) bottomAngle=92°: rep 0 (91°<92°) passes, '
+            'rep 1 (93°>92°) fires.',
       );
     });
 
@@ -350,12 +363,17 @@ void main() {
           ),
         );
 
+        // High sensitivity = identity — exercises the bucket-derived anchor
+        // (observedMinKneeAngle + kSquatProfileBottomMargin) without any
+        // Medium-loosening post-pass. Pins the math at 80+5=85, 82+5=87,
+        // 86+5=91 as the test originally intended.
         FormAudit audit(SquatRomProfile p, double angle) => auditor.auditSquat(
           squatRepMetrics: [rep(minKneeAngle: angle)],
           variant: SquatVariant.bodyweight,
           longFemurLifter: false,
           fatigueDetected: false,
           squatProfile: p,
+          sensitivity: FeedbackSensitivity.high,
         );
 
         // Rep at 89° — fails A/B gate (89 > 87°) but PASSES C gate (89 < 91°).

@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 
-/// Three-column Time / Reps / Sets grid shown directly under [SummaryHero] on
-/// every Session Complete page.
+/// Two-column Time / Reps grid shown directly under [SummaryHero] on every
+/// Session Complete page.
 ///
 /// Replaces three pre-unification widgets: `_StatChip` (squat), `_StatRow`
 /// (push-up), and the `_SummaryStatCard` + `_SetsChip` pair (curl). The card
@@ -13,12 +13,10 @@ class SummaryStatsGrid extends StatelessWidget {
   const SummaryStatsGrid({
     super.key,
     required this.reps,
-    required this.sets,
     required this.duration,
   });
 
   final int reps;
-  final int sets;
   final Duration duration;
 
   static String _formatDuration(Duration d) {
@@ -46,15 +44,6 @@ class SummaryStatsGrid extends StatelessWidget {
             label: 'REPS',
             value: '$reps',
             semanticLabel: 'Reps: $reps',
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _StatTile(
-            icon: Icons.layers_rounded,
-            label: 'SETS',
-            value: '$sets',
-            semanticLabel: 'Sets: $sets',
           ),
         ),
       ],
