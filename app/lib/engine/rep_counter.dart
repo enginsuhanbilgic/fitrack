@@ -16,6 +16,7 @@ export 'curl/curl_strategy.dart'
     show RomThresholdsProvider, CurlRepCommitCallback;
 export 'push_up/push_up_rom_profile.dart'
     show PushUpRomProfile, PushUpRomThresholds;
+export 'push_up/push_up_strategy.dart' show PushUpRomThresholdsProvider;
 export 'squat/squat_strategy.dart'
     show
         SquatRomThresholdsProvider,
@@ -160,6 +161,7 @@ class RepCounter {
     SquatLongFemurDetectedCallback? onSquatLongFemurDetected,
     double? squatPersistedFemurTorsoRatio,
     PushUpRomThresholds pushUpThresholds = PushUpRomThresholds.defaults,
+    PushUpRomThresholdsProvider? pushUpThresholdsProvider,
     // Library-private typedef — external callers (WorkoutViewModel) pass a
     // method tearoff which Dart infers against the private type at the call
     // site, so the name itself never has to leak across libraries.
@@ -184,6 +186,7 @@ class RepCounter {
       onSquatLongFemurDetected: onSquatLongFemurDetected,
       squatPersistedFemurTorsoRatio: squatPersistedFemurTorsoRatio,
       pushUpThresholds: pushUpThresholds,
+      pushUpThresholdsProvider: pushUpThresholdsProvider,
     );
   }
 
@@ -204,6 +207,7 @@ class RepCounter {
     SquatLongFemurDetectedCallback? onSquatLongFemurDetected,
     double? squatPersistedFemurTorsoRatio,
     PushUpRomThresholds pushUpThresholds = PushUpRomThresholds.defaults,
+    PushUpRomThresholdsProvider? pushUpThresholdsProvider,
   }) => switch (exercise) {
     ExerciseType.bicepsCurlFront => CurlStrategy(
       exerciseType: ExerciseType.bicepsCurlFront,
@@ -247,7 +251,10 @@ class RepCounter {
       onLongFemurDetected: onSquatLongFemurDetected,
       persistedFemurTorsoRatio: squatPersistedFemurTorsoRatio,
     ),
-    ExerciseType.pushUp => PushUpStrategy(thresholds: pushUpThresholds),
+    ExerciseType.pushUp => PushUpStrategy(
+      thresholds: pushUpThresholds,
+      thresholdsProvider: pushUpThresholdsProvider,
+    ),
   };
 
   /// Strategy's extremes callback — buffers min/max for the unified
@@ -373,6 +380,17 @@ class RepCounter {
     final strategy = _strategy;
     if (strategy is! SquatStrategy) return null;
     return strategy.ascendingFrameCount;
+  }
+
+  /// Live signed forward-lean angle (deg) from the squat analyzer's
+  /// most recent frame. Positive = forward, negative = backward. Null
+  /// when the active strategy is not squat OR the analyzer hasn't seen
+  /// a high-confidence shoulder/hip pair yet. The HUD reads this for
+  /// the real-time lean indicator (Cue 3, 2026-05-15).
+  double? get squatCurrentSignedLeanDeg {
+    final strategy = _strategy;
+    if (strategy is! SquatStrategy) return null;
+    return strategy.currentSignedLeanDeg;
   }
 
   /// Computes the squat's primary joint angle (knee angle, averaged over

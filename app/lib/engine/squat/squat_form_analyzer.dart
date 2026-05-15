@@ -65,6 +65,45 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   double? _maxKneeShiftRatio;
   double? _maxHeelLiftRatio;
 
+  // ── No-knee-flexion detector (per-rep) ────────────────────
+  /// Knee angle captured at `onDescendingStart` (rep start). Compared
+  /// against `_minKneeAngle` at completion to compute the rep's total
+  /// knee-flexion delta. Null between commit and the next descent.
+  double? _startKneeAngle;
+
+  // ── Hips-forward-on-descent detector (per-rep) ────────────
+  /// First-frame hip/heel reference captured at `onDescendingStart` once
+  /// a high-visibility pose is observed. Used as the t=0 anchor for the
+  /// hip-X-drift evaluation inside the [kSquatHipsForwardWindowMs] window.
+  double? _descentStartHipX;
+  double? _descentStartHeelX;
+  double? _descentStartLegLen;
+  DateTime? _descentStartTime;
+
+  /// Per-frame hip-X samples accumulated inside the descent window.
+  /// Bounded by [kSquatHipsForwardWindowMs] — once the window closes,
+  /// further samples are ignored so a slow descent can't smear the
+  /// initiation signal.
+  final List<double> _descentHipXSamples = [];
+
+  /// Set during the descent-window evaluation if the hip drifted toward
+  /// the toes by more than [kSquatHipsForwardMinRatio] of leg length.
+  /// Drained at rep completion into the FormError set.
+  bool _hipsForwardOnDescentFired = false;
+
+  /// Most recent signed forward-drift ratio (`Δhip.x / leg_len`) measured
+  /// at the close of the descent window. Positive = drifted toward toes
+  /// (fault); negative = hinged back (correct). Null when the check has
+  /// not yet run for the current rep. Surfaced for telemetry.
+  double? _lastRepHipsForwardRatio;
+
+  /// Latest signed lean reading from the most recent `evaluate()` frame.
+  /// Drives the HUD's live forward-lean readout. Distinct from
+  /// `_maxLeanDeg` (per-rep peak magnitude); this one is per-frame and
+  /// preserves sign so the HUD can show "+32°" (forward) vs "−8°"
+  /// (backward) in real time.
+  double? _currentSignedLeanDeg;
+
   // ── Hip-lead detection (per-rep) ────────────────────────────
   /// True between `onAscendingStart` and `onAscendingEnd`. Gates per-frame
   /// hip/shoulder Y appending — `evaluate()` does not accumulate during
@@ -146,6 +185,18 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   /// telemetry's `ascending_frame_count` field.
   int get ascendingFrameCount => _ascendingFrames.length;
 
+  /// Live signed forward-lean angle (deg) from the most recent `evaluate()`
+  /// frame. Positive = forward lean; negative = backward; null when no
+  /// high-confidence shoulder/hip pair was observed yet. The HUD binds to
+  /// this for the on-screen real-time lean indicator (Cue 3, 2026-05-15).
+  double? get currentSignedLeanDeg => _currentSignedLeanDeg;
+
+  /// Most recent forward-hip-drift ratio measured at the close of the
+  /// descent window. Positive = drifted toward toes (fault); negative =
+  /// hinged back (correct). Null between rep commit and the next
+  /// window close. Surfaced for telemetry.
+  double? get lastRepHipsForwardRatio => _lastRepHipsForwardRatio;
+
   /// Call at IDLE → DESCENDING. Resets per-rep extremes; preserves the
   /// `_lastRep*` outputs so the strategy can still read the previous rep's
   /// quality between reps.
@@ -169,6 +220,19 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _lastRepHipLeadRatio = null;
     _lastRepHipMeanVelocity = null;
     _lastRepShoulderMeanVelocity = null;
+    // Reset the no-knee-flexion + hips-forward detectors. `_startKneeAngle`
+    // is populated on the next `trackAngle` call (the first frame of the
+    // descent); `_descentStartHipX` / `_descentStartHeelX` /
+    // `_descentStartLegLen` populate on the first `evaluate()` call where
+    // landmarks are visible enough to anchor the t=0 reference.
+    _startKneeAngle = null;
+    _descentStartHipX = null;
+    _descentStartHeelX = null;
+    _descentStartLegLen = null;
+    _descentStartTime = null;
+    _descentHipXSamples.clear();
+    _hipsForwardOnDescentFired = false;
+    _lastRepHipsForwardRatio = null;
   }
 
   /// Call at BOTTOM → ASCENDING. Enables per-frame hip+shoulder Y
@@ -235,8 +299,11 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   }
 
   /// Track the lowest-knee-angle of the current rep. Called by
-  /// `SquatStrategy` per frame during DESCENDING + BOTTOM.
+  /// `SquatStrategy` per frame during DESCENDING + BOTTOM. Also captures
+  /// the descent-start knee angle (first call after `onDescendingStart`)
+  /// for the no-knee-flexion detector's delta calculation.
   void trackAngle(double kneeAngle) {
+    _startKneeAngle ??= kneeAngle;
     if (_minKneeAngle == null || kneeAngle < _minKneeAngle!) {
       _minKneeAngle = kneeAngle;
     }
@@ -283,6 +350,7 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     // site — erasing lumbar-hyperextension risk along with benign
     // counterbalance lean. Backward lean fires when `lean < -kSquatBackwardLeanWarnDeg`.
     final lean = _signedLeanDeg(current, side);
+    _currentSignedLeanDeg = lean; // null-aware sink for the HUD readout
     if (lean != null) {
       // Track magnitude of the WORSE-direction lean for the per-rep peak.
       // Stored as a positive magnitude so `_lastRepLeanDeg` consumers see
@@ -321,7 +389,88 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       }
     }
 
+    // Hips-forward-on-descent: sample hip.x trajectory in the first
+    // [kSquatHipsForwardWindowMs] of the descent and grade at window
+    // close. The window opens when the first high-confidence pose lands;
+    // `onDescendingStart` itself cannot anchor t=0 because it may fire on
+    // a frame where landmarks weren't yet visible.
+    _maybeSampleDescentHipX(current, side, now);
+
     return errors;
+  }
+
+  /// Captures the first valid hip/heel/leg-length anchor at descent start,
+  /// then accumulates `hip.x` samples until the time window closes. On
+  /// close, computes the signed drift ratio and sets the fault flag if it
+  /// exceeds the threshold. Subsequent frames inside the same rep no-op
+  /// (the check has already run).
+  void _maybeSampleDescentHipX(
+    PoseResult current,
+    ExerciseSide side,
+    DateTime? now,
+  ) {
+    if (_lastRepHipsForwardRatio != null) return; // window already graded
+    final hip = current.landmark(
+      side == ExerciseSide.left ? LM.leftHip : LM.rightHip,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final heel = current.landmark(
+      side == ExerciseSide.left ? LM.leftHeel : LM.rightHeel,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final ankle = current.landmark(
+      side == ExerciseSide.left ? LM.leftAnkle : LM.rightAnkle,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    if (hip == null || heel == null || ankle == null) return;
+    final t = now ?? DateTime.now();
+    // First valid frame: anchor t=0.
+    if (_descentStartTime == null) {
+      _descentStartTime = t;
+      _descentStartHipX = hip.x;
+      _descentStartHeelX = heel.x;
+      _descentStartLegLen = _euclidean(hip, ankle);
+      _descentHipXSamples.add(hip.x);
+      return;
+    }
+    _descentHipXSamples.add(hip.x);
+    final elapsedMs = t.difference(_descentStartTime!).inMilliseconds;
+    if (elapsedMs < kSquatHipsForwardWindowMs) return;
+    if (_descentHipXSamples.length < kSquatHipsForwardMinFrames) {
+      // Fail-open: not enough samples in the window. Mark as graded so the
+      // check doesn't re-run later in the same rep, but emit a null ratio.
+      _lastRepHipsForwardRatio = 0.0;
+      return;
+    }
+    final legLen = _descentStartLegLen!;
+    if (legLen < 1e-6) {
+      _lastRepHipsForwardRatio = 0.0;
+      return;
+    }
+    final endHipX = _descentHipXSamples.last;
+    // Sign convention: in image space, the "toes" direction depends on
+    // which side faces the camera. We use `heel.x` as the reference: a
+    // hip drifting AWAY from the heel along the heel→toes axis is the
+    // fault. For a right-side view (camera on user's left), toes have
+    // higher x than heel, so `(endHipX - startHipX)` with the same sign
+    // as `(toes - heel)` flags a forward drift. The heel anchor itself
+    // is the most stable foot landmark across the descent (foot_index
+    // is occluded once the user shifts their weight back).
+    final hipDelta = endHipX - _descentStartHipX!;
+    // Use the START heel anchor (descent-time t=0) so micro-jitter in the
+    // current frame's heel doesn't perturb the sign. Toes-direction is
+    // approximated as the direction the hip would naturally migrate
+    // during a knee-dominant fault: same X sign as the lateral offset of
+    // hip from heel at start. If `hip - heel` was positive at t=0, then
+    // further positive hipDelta = forward; if negative at t=0, then
+    // further negative hipDelta = forward. Sign-normalize accordingly.
+    final initialHipHeelOffset = _descentStartHipX! - _descentStartHeelX!;
+    final forwardSign = initialHipHeelOffset >= 0 ? 1.0 : -1.0;
+    final ratio = (hipDelta * forwardSign) / legLen;
+    _lastRepHipsForwardRatio = ratio;
+    if (ratio > kSquatHipsForwardMinRatio) {
+      _hipsForwardOnDescentFired = true;
+    }
   }
 
   /// Base-contract stub. Squat completion requires the effective bottom
@@ -354,6 +503,28 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       errors.add(FormError.hipLead);
     }
 
+    // No-knee-flexion: user pivoted at the hip without bending the knees.
+    // Fires only when BOTH the peak lean was substantial AND the knee delta
+    // from descent-start to bottom was small. Either condition alone is
+    // ambiguous (deep squat with appropriate lean / stiff-legged miss with
+    // no lean) — the conjunction is what makes the cue specific.
+    final kneeDelta = (_startKneeAngle != null && _minKneeAngle != null)
+        ? _startKneeAngle! - _minKneeAngle!
+        : null;
+    if (_maxLeanDeg != null &&
+        _maxLeanDeg! >= kSquatNoKneeFlexionMinLeanDeg &&
+        kneeDelta != null &&
+        kneeDelta < kSquatNoKneeFlexionMaxKneeDeltaDeg) {
+      errors.add(FormError.noKneeFlexion);
+    }
+
+    // Hips-forward-on-descent: the t=0→window-close hip drift was toward
+    // the toes by more than `kSquatHipsForwardMinRatio`. Flag was set
+    // inside `_maybeSampleDescentHipX` when the window closed.
+    if (_hipsForwardOnDescentFired) {
+      errors.add(FormError.hipsForwardOnDescent);
+    }
+
     _lastRepQuality = _computeQualityScore(
       effectiveBottomAngle: effectiveBottomAngle,
     );
@@ -365,6 +536,7 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _maxLeanDeg = null;
     _maxKneeShiftRatio = null;
     _maxHeelLiftRatio = null;
+    _startKneeAngle = null;
     // `_ascendingFrames` is cleared at the NEXT `onDescendingStart` so a
     // test that inspects mid-rep state can still read the buffer
     // post-commit. `_lastRepHipLead*` fields drain the same way.
@@ -387,6 +559,15 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _lastRepHipLeadRatio = null;
     _lastRepHipMeanVelocity = null;
     _lastRepShoulderMeanVelocity = null;
+    _startKneeAngle = null;
+    _descentStartHipX = null;
+    _descentStartHeelX = null;
+    _descentStartLegLen = null;
+    _descentStartTime = null;
+    _descentHipXSamples.clear();
+    _hipsForwardOnDescentFired = false;
+    _lastRepHipsForwardRatio = null;
+    _currentSignedLeanDeg = null;
   }
 
   // ── Internals ────────────────────────────────────────────

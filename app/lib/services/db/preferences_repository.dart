@@ -28,22 +28,38 @@ abstract class PreferencesRepository {
   Future<bool> getSquatLongFemurLifter();
   Future<void> setSquatLongFemurLifter(bool value);
 
-  /// Global diagnostic toggle (2026-05-15: unified from per-exercise toggles).
+  /// Global **diagnostic mode** toggle (2026-05-15 split into two settings).
   /// When true, **all three exercises** force every rep to use cold-start
-  /// defaults — bypassing calibrated profiles and (where applicable)
-  /// in-session auto-calibration:
+  /// defaults — bypassing calibrated profiles AND in-session auto-calibration
+  /// regardless of [getAutoCalibrationEnabled]:
   ///   * Curl: `RomThresholds.globalUnmodified(view)` (no sensitivity post-pass).
   ///   * Squat: `SquatRomThresholdSet.anchor` (no sensitivity post-pass).
   ///   * Push-up: `PushUpRomThresholds.defaults` (no sensitivity post-pass).
   ///
-  /// Feedback (TTS / haptics / banners) stays ON — only debug-session prefs
-  /// silence the user-facing channel. This toggle is the developer-mode
-  /// equivalent of "what would a brand-new user feel?" with feedback intact.
+  /// This is the developer-mode override — overrides everything else. The
+  /// DB key (`diagnostic_disable_auto_calibration`) is unchanged from the
+  /// pre-split build to avoid a migration; only the *semantics* shift.
   ///
-  /// Snapshot-on-construction in `WorkoutViewModel`: mid-session Settings
-  /// changes do NOT affect an in-flight workout. Defaults to false.
+  /// Feedback (TTS / haptics / banners) stays ON. Snapshot-on-construction
+  /// in `WorkoutViewModel`. Defaults to false.
   Future<bool> getDiagnosticDisableAutoCalibration();
   Future<void> setDiagnosticDisableAutoCalibration(bool value);
+
+  /// User-facing **auto-calibration** toggle (2026-05-15). When true (default),
+  /// the in-session auto-calibrator (tier 2) is allowed to fit thresholds to
+  /// the user's observed ROM mid-session. When false, tier 2 is skipped and
+  /// the resolver falls straight from "calibrated profile" (tier 1) to
+  /// "cold-start global" (tier 3).
+  ///
+  /// IMPORTANT: this preference does NOT bypass a calibrated personal profile.
+  /// A user who manually calibrated and then turns auto-cal off will still
+  /// get their calibrated thresholds — only the *automatic* mid-session
+  /// refinement is suppressed. Use [getDiagnosticDisableAutoCalibration] to
+  /// force cold-start globals regardless of profile state.
+  ///
+  /// Snapshot-on-construction in `WorkoutViewModel`. Defaults to true.
+  Future<bool> getAutoCalibrationEnabled();
+  Future<void> setAutoCalibrationEnabled(bool value);
 
   /// User-controlled Form Tolerance Percent in `[0, 100]`. Scales the
   /// effective dead-band of every curl form-audit cue between the
@@ -138,6 +154,17 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   static const String _kSquatLongFemurKey = 'squat_long_femur_lifter';
   static const String _kDiagnosticDisableAutoCalibrationKey =
       'diagnostic_disable_auto_calibration';
+  // Auto-calibration user preference (2026-05-15 split). Separate key so DB
+  // migration is not required — old `diagnostic_disable_auto_calibration` rows
+  // keep their meaning (now strictly "diagnostic mode").
+  static const String _kAutoCalibrationEnabledKey = 'auto_calibration_enabled';
+  // One-shot migration sentinel. Set when the 2026-05-15 force-off pass has
+  // already overwritten any prior `auto_calibration_enabled=true` rows from
+  // before the calibration-opt-in contract was enforced. Once present the
+  // migration never runs again. See `getAutoCalibrationEnabled` for the
+  // rationale (the new opt-in semantics require an off-by-default world).
+  static const String _kAutoCalibrationForcedOffKey =
+      'auto_calibration_force_off_v1';
   static const String _kCurlDebugSessionKey = 'curl_debug_session';
   static const String _kSquatDebugSessionKey = 'squat_debug_session';
   static const String _kThemeModeKey = 'theme_mode';
@@ -218,6 +245,52 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   Future<void> setDiagnosticDisableAutoCalibration(bool value) async {
     await _db.insert('preferences', {
       'key': _kDiagnosticDisableAutoCalibrationKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<bool> getAutoCalibrationEnabled() async {
+    // One-shot force-off migration: any user from before 2026-05-15 has the
+    // pref defaulted to `true` (either an explicit row or the legacy empty-row
+    // default). The new calibration-opt-in contract requires auto-cal off
+    // until the user explicitly turns it on, so we overwrite any pre-existing
+    // value once and record a sentinel so the migration never repeats.
+    final migrated = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: <String>[_kAutoCalibrationForcedOffKey],
+      limit: 1,
+    );
+    if (migrated.isEmpty) {
+      await _db.insert('preferences', <String, Object>{
+        'key': _kAutoCalibrationEnabledKey,
+        'value': 'false',
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await _db.insert('preferences', <String, Object>{
+        'key': _kAutoCalibrationForcedOffKey,
+        'value': 'true',
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      return false;
+    }
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kAutoCalibrationEnabledKey],
+      limit: 1,
+    );
+    // Default false: fresh installs land in opt-in mode. Users who explicitly
+    // toggled the setting on post-migration retain that choice.
+    if (rows.isEmpty) return false;
+    return rows.first['value'] == 'true';
+  }
+
+  @override
+  Future<void> setAutoCalibrationEnabled(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kAutoCalibrationEnabledKey,
       'value': value.toString(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -522,6 +595,10 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   SquatVariant _squatVariant = SquatVariant.bodyweight;
   bool _squatLongFemur = false;
   bool _diagnosticDisableAutoCalibration = false;
+  // Mirrors the SQLite migration: auto-cal is off by default under the
+  // calibration-opt-in contract. Tests that need the on path call
+  // `setAutoCalibrationEnabled(true)` explicitly.
+  bool _autoCalibrationEnabled = false;
   bool _curlDebugSession = false;
   bool _squatDebugSession = false;
   FeedbackSensitivity _feedbackSensitivity = FeedbackSensitivity.medium;
@@ -558,6 +635,14 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   @override
   Future<void> setDiagnosticDisableAutoCalibration(bool value) async {
     _diagnosticDisableAutoCalibration = value;
+  }
+
+  @override
+  Future<bool> getAutoCalibrationEnabled() async => _autoCalibrationEnabled;
+
+  @override
+  Future<void> setAutoCalibrationEnabled(bool value) async {
+    _autoCalibrationEnabled = value;
   }
 
   @override

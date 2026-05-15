@@ -202,5 +202,7 @@ class _RepCounterDisplayState extends State<RepCounterDisplay> {
     FormError.fatigue => "You're slowing down, stay strong",
     FormError.elbowRise => 'Keep your elbow pinned to your side',
     FormError.hipLead => 'Lead with your chest',
+    FormError.noKneeFlexion => 'Sit into the squat — bend your knees',
+    FormError.hipsForwardOnDescent => 'Push your hips back',
   };
 }

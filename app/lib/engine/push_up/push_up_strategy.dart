@@ -8,17 +8,41 @@ import '../form_analyzer_base.dart';
 import 'push_up_form_analyzer.dart';
 import 'push_up_rom_profile.dart';
 
+/// Synchronous push-up threshold resolver. Called once per rep at the
+/// IDLE → DESCENDING transition. Implementations consult (in order):
+/// calibrated profile (Tier 1) → in-session auto-cal (Tier 2) →
+/// `PushUpRomThresholds.defaults` (Tier 3, sensitivity-modified).
+///
+/// `repIndexInSet` is included to match the curl/squat provider
+/// signatures even though push-up has no warm-up concept today — the
+/// extra parameter is a tiny price for cross-exercise call-site
+/// uniformity, and future warm-up logic (e.g., a "first rep counts at
+/// a looser threshold" rule) lands without an API churn.
+///
+/// MUST be synchronous — the FSM hot path cannot await I/O.
+typedef PushUpRomThresholdsProvider =
+    PushUpRomThresholds Function(int repIndexInSet);
+
 /// Push-up FSM encapsulated as a strategy.
 ///
 /// No session-scoped state — all tracking resets per rep.
 class PushUpStrategy extends ExerciseStrategy {
   PushUpStrategy({
     PushUpRomThresholds thresholds = PushUpRomThresholds.defaults,
+    PushUpRomThresholdsProvider? thresholdsProvider,
   }) : _thresholds = thresholds,
+       _thresholdsProvider = thresholdsProvider,
        _form = PushUpFormAnalyzer(thresholds: thresholds);
 
   PushUpRomThresholds _thresholds;
+  final PushUpRomThresholdsProvider? _thresholdsProvider;
   final PushUpFormAnalyzer _form;
+
+  /// Per-rep index, advanced on each rep commit. Passed to the
+  /// `_thresholdsProvider` at IDLE → DESCENDING so the resolver can
+  /// implement warm-up logic in the future. Starts at 0 and resets on
+  /// `onNextSet()` (mirrors curl/squat's per-set rep indexing).
+  int _repIndexInSet = 0;
 
   @override
   ExerciseType get exercise => ExerciseType.pushUp;
@@ -81,6 +105,18 @@ class PushUpStrategy extends ExerciseStrategy {
     switch (input.state) {
       case RepState.idle:
         if (smoothed < _thresholds.startAngle) {
+          // Resolve thresholds at the rep boundary. Mirrors the curl /
+          // squat per-rep resolution pattern: the host's three-tier
+          // resolver runs once and the result is locked for the rest of
+          // this rep — the FSM never re-resolves mid-rep
+          // (threshold-lock invariant). When no provider is wired, the
+          // construction-time tuple stays in force.
+          final provider = _thresholdsProvider;
+          if (provider != null) {
+            final resolved = provider(_repIndexInSet);
+            _thresholds = resolved;
+            _form.updateThresholds(resolved);
+          }
           nextState = RepState.descending;
           _form.onRepStart(pose);
           _form.trackAngle(smoothed);
@@ -95,6 +131,7 @@ class PushUpStrategy extends ExerciseStrategy {
             final completionErrors = _form.consumeCompletionErrors();
             errors = [...errors, ...completionErrors];
             repCommitted = true;
+            _repIndexInSet++;
           }
           nextState = RepState.idle;
         }
@@ -109,6 +146,7 @@ class PushUpStrategy extends ExerciseStrategy {
           final completionErrors = _form.consumeCompletionErrors();
           errors = [...errors, ...completionErrors];
           repCommitted = true;
+          _repIndexInSet++;
           nextState = RepState.idle;
         }
       default:
@@ -123,10 +161,16 @@ class PushUpStrategy extends ExerciseStrategy {
   }
 
   @override
-  void onNextSet() => _form.reset();
+  void onNextSet() {
+    _repIndexInSet = 0;
+    _form.reset();
+  }
 
   @override
-  void onReset() => _form.reset();
+  void onReset() {
+    _repIndexInSet = 0;
+    _form.reset();
+  }
 
   _ElbowAngleCandidate? _sideElbowAngle(
     PoseResult pose, {

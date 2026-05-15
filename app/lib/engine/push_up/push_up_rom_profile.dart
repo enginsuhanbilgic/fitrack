@@ -43,7 +43,10 @@ class PushUpRomThresholds {
 }
 
 class PushUpRomProfile {
-  static const int schemaVersion = 1;
+  /// Schema version. Bumped 1 → 2 on 2026-05-15 to add
+  /// [calibrationRepCount] and [lastAppliedRepAt]. v1 records load cleanly
+  /// via `fromJson` (the two new fields default to null when absent).
+  static const int schemaVersion = 2;
 
   const PushUpRomProfile({
     required this.topAngle,
@@ -51,12 +54,16 @@ class PushUpRomProfile {
     required this.sampleCount,
     required this.createdAt,
     required this.lastUpdated,
+    this.calibrationRepCount,
+    this.lastAppliedRepAt,
+    this.isLegacyV1 = false,
   });
 
   factory PushUpRomProfile.calibrated({
     required double topAngle,
     required double bottomAngle,
     int sampleCount = 1,
+    int? calibrationRepCount,
     DateTime? now,
   }) {
     final reason = validate(topAngle: topAngle, bottomAngle: bottomAngle);
@@ -70,6 +77,7 @@ class PushUpRomProfile {
       sampleCount: sampleCount,
       createdAt: timestamp,
       lastUpdated: timestamp,
+      calibrationRepCount: calibrationRepCount,
     );
   }
 
@@ -78,6 +86,34 @@ class PushUpRomProfile {
   final int sampleCount;
   final DateTime createdAt;
   final DateTime lastUpdated;
+
+  /// How many reps the user performed during the calibration session that
+  /// produced this profile. Null on v1 (legacy) records — the legacy
+  /// calibration flow did not track this. Used by the
+  /// "recalibrate suggestion" UX (Phase 6 of the parity plan): if this is
+  /// less than the current `kPushUpCalibrationMinReps`, surface a
+  /// non-blocking banner inviting recalibration. Never auto-launches
+  /// calibration (per `feedback_calibration_opt_in.md` memory rule).
+  final int? calibrationRepCount;
+
+  /// Timestamp of the most recent `applyRep()` call. Null until in-session
+  /// profile refinement has fired at least once. Used by the migration-
+  /// safety path: a v1 record whose `lastAppliedRepAt` is null is treated
+  /// as a one-shot calibration snapshot for the purposes of skipping
+  /// shrink-confirm gates on first refinement. See Phase 4 of the parity
+  /// plan for details.
+  final DateTime? lastAppliedRepAt;
+
+  /// True if this record was loaded from a pre-v2 schema (i.e. the
+  /// `calibrationRepCount` field was absent in the source JSON). Recorded
+  /// at deserialization time so downstream consumers don't have to guess
+  /// from the field being null (which is also valid for fresh v2 records
+  /// where the calibration overlay didn't supply a count).
+  ///
+  /// Defaults to false. Set true only by [fromJson] when migrating v1.
+  /// Constructor-initialized as a `final` field so the class remains
+  /// `const`-constructible.
+  final bool isLegacyV1;
 
   bool get isCalibrated => sampleCount > 0;
 
@@ -156,21 +192,41 @@ class PushUpRomProfile {
     'sampleCount': sampleCount,
     'createdAt': createdAt.toIso8601String(),
     'lastUpdated': lastUpdated.toIso8601String(),
+    // v2 fields (2026-05-15). Omitted from payload when null so reading
+    // a freshly-serialised v2 record on an older app version that only
+    // knows v1 still deserialises cleanly via the v1 fast-path below.
+    if (calibrationRepCount != null) 'calibrationRepCount': calibrationRepCount,
+    if (lastAppliedRepAt != null)
+      'lastAppliedRepAt': lastAppliedRepAt!.toIso8601String(),
   };
 
+  /// Deserialise a `PushUpRomProfile` from JSON.
+  ///
+  /// Accepts both v1 (pre-2026-05-15) and v2 schemas. v1 records have no
+  /// `calibrationRepCount` or `lastAppliedRepAt` fields; those default to
+  /// null and `isLegacyV1` is set true so downstream consumers (in-session
+  /// refinement, recalibrate-suggestion UX) can adapt their behaviour.
   factory PushUpRomProfile.fromJson(Map<String, dynamic> json) {
     final version = json['schemaVersion'] as int?;
-    if (version != schemaVersion) {
+    if (version != 1 && version != schemaVersion) {
       throw StateError(
-        'PushUpRomProfile schema mismatch: got=$version expected=$schemaVersion',
+        'PushUpRomProfile schema mismatch: '
+        'got=$version expected=1 or $schemaVersion',
       );
     }
+    final isV1 = version == 1;
+    final lastAppliedRaw = json['lastAppliedRepAt'] as String?;
     final profile = PushUpRomProfile(
       topAngle: (json['topAngle'] as num).toDouble(),
       bottomAngle: (json['bottomAngle'] as num).toDouble(),
       sampleCount: json['sampleCount'] as int? ?? 0,
       createdAt: DateTime.parse(json['createdAt'] as String),
       lastUpdated: DateTime.parse(json['lastUpdated'] as String),
+      calibrationRepCount: json['calibrationRepCount'] as int?,
+      lastAppliedRepAt: lastAppliedRaw != null
+          ? DateTime.parse(lastAppliedRaw)
+          : null,
+      isLegacyV1: isV1,
     );
     final reason = validate(
       topAngle: profile.topAngle,

@@ -72,9 +72,9 @@ class CurlRomDefaults {
 
   static const CurlRomThresholdSet sideLeftAnchor = CurlRomThresholdSet(
     startAngle: 157.6,
-    peakAngle: 85.0,
-    peakExitAngle: 95.0,
-    endAngle: 137.6,
+    peakAngle: 70.0,
+    peakExitAngle: 80.0,
+    endAngle: 150.6,
   );
 
   // ── Side-right anchor (aliases sideLeft — bilateral symmetry) ──────────

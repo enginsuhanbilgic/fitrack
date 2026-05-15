@@ -159,4 +159,6 @@ String _labelFor(FormError err) => switch (err) {
   FormError.pushUpShortRom => 'Shallow Push-up',
   FormError.trunkTibia => 'Trunk-Tibia (legacy)',
   FormError.hipLead => 'Hip Lead',
+  FormError.noKneeFlexion => 'No Knee Flexion',
+  FormError.hipsForwardOnDescent => 'Hips Forward on Descent',
 };

@@ -78,6 +78,23 @@ enum FormError {
   /// "Lead with your chest". Source: deep-research biomechanical spec
   /// (2026-05-13); added by Squat Pipeline Overhaul — Part 3.
   hipLead,
+
+  /// Torso-pivot-only descent — user bent forward at the hip without
+  /// bending the knees. Fires at rep completion when `_maxLeanDeg`
+  /// exceeds `kSquatNoKneeFlexionMinLeanDeg` AND the knee-angle delta
+  /// from descent-start to bottom is less than
+  /// `kSquatNoKneeFlexionMaxKneeDeltaDeg`. TTS cue: "Sit into the squat —
+  /// bend your knees". Added 2026-05-15 to distinguish leaning-instead-of-
+  /// squatting from a deep squat with appropriate forward lean.
+  noKneeFlexion,
+
+  /// Hips drifted forward (toward toes) at descent start instead of
+  /// hinging back. Fires when, within the first `kSquatHipsForwardWindowMs`
+  /// of DESCENDING, `hip.x` translates toward the toes by more than
+  /// `kSquatHipsForwardMinRatio` of leg length, relative to the heel.
+  /// TTS cue: "Push your hips back". Added 2026-05-15 to coach the
+  /// canonical "sit back into the squat" initiation pattern.
+  hipsForwardOnDescent,
   // Push-up
   hipSag, // shoulder-hip-ankle collinearity deviation > 15°
   pushUpShortRom, // rep completed without elbow reaching bottom threshold

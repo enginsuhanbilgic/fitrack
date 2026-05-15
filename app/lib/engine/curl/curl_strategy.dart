@@ -192,10 +192,22 @@ class CurlStrategy extends ExerciseStrategy {
       pose.landmark(LM.rightElbow, minConfidence: curlConf),
       pose.landmark(LM.rightWrist, minConfidence: curlConf),
     );
-    if (leftAngle != null && rightAngle != null) {
-      return (leftAngle + rightAngle) / 2.0;
+    // Single-arm curls: the declared side IS the training arm. Averaging
+    // both arms collapses the active arm's ROM because the resting arm
+    // sits near startAngle (~160°) and drags the mean above peakAngle.
+    // Fall back to the off-arm only when the declared one is below the
+    // confidence gate (e.g. wrist briefly leaves frame).
+    switch (side) {
+      case ExerciseSide.left:
+        return leftAngle ?? rightAngle;
+      case ExerciseSide.right:
+        return rightAngle ?? leftAngle;
+      case ExerciseSide.both:
+        if (leftAngle != null && rightAngle != null) {
+          return (leftAngle + rightAngle) / 2.0;
+        }
+        return leftAngle ?? rightAngle;
     }
-    return leftAngle ?? rightAngle;
   }
 
   @override

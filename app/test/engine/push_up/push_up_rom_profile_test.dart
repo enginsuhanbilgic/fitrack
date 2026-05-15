@@ -69,4 +69,57 @@ void main() {
       );
     });
   });
+
+  group('PushUpRomProfile — v2 schema (2026-05-15)', () {
+    test('v1 fixture deserialises with null v2 fields and isLegacyV1=true', () {
+      final v1 = <String, dynamic>{
+        'schemaVersion': 1,
+        'topAngle': 168.0,
+        'bottomAngle': 86.0,
+        'sampleCount': 3,
+        'createdAt': '2026-04-01T10:00:00.000Z',
+        'lastUpdated': '2026-04-01T10:00:00.000Z',
+      };
+      final loaded = PushUpRomProfile.fromJson(v1);
+
+      expect(loaded.topAngle, 168);
+      expect(loaded.bottomAngle, 86);
+      expect(loaded.calibrationRepCount, isNull);
+      expect(loaded.lastAppliedRepAt, isNull);
+      expect(loaded.isLegacyV1, isTrue);
+    });
+
+    test('v2 fixture round-trips cleanly through toJson/fromJson', () {
+      final original = PushUpRomProfile.calibrated(
+        topAngle: 168,
+        bottomAngle: 86,
+        calibrationRepCount: 5,
+      );
+      final loaded = PushUpRomProfile.fromJson(original.toJson());
+
+      expect(loaded.calibrationRepCount, 5);
+      expect(loaded.lastAppliedRepAt, isNull);
+      // Fresh v2 records produced by `calibrated()` are NOT legacy — the
+      // factory writes schemaVersion=2 into toJson, so fromJson sees v2.
+      expect(loaded.isLegacyV1, isFalse);
+    });
+
+    test('toJson omits null v2 fields to keep payloads small', () {
+      final profile = PushUpRomProfile.calibrated(
+        topAngle: 168,
+        bottomAngle: 86,
+        // No calibrationRepCount supplied.
+      );
+      final json = profile.toJson();
+
+      expect(json.containsKey('calibrationRepCount'), isFalse);
+      expect(json.containsKey('lastAppliedRepAt'), isFalse);
+      expect(json['schemaVersion'], 2);
+    });
+
+    test('isLegacyV1 is false on fresh `calibrated()` factory output', () {
+      final fresh = PushUpRomProfile.calibrated(topAngle: 168, bottomAngle: 86);
+      expect(fresh.isLegacyV1, isFalse);
+    });
+  });
 }

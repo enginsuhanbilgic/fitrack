@@ -565,6 +565,8 @@ class _SummaryScreenState extends State<SummaryScreen> {
     FormError.pushUpShortRom => 'Shallow Push-up',
     FormError.trunkTibia => 'Trunk-Tibia (legacy)',
     FormError.hipLead => 'Hip Lead',
+    FormError.noKneeFlexion => 'No Knee Flexion',
+    FormError.hipsForwardOnDescent => 'Hips Forward on Descent',
   };
 
   /// 5-tier knee-shift bucket label (plan flow-decision plan-time #1).

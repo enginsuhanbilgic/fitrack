@@ -18,6 +18,8 @@ import 'package:share_plus/share_plus.dart';
 
 import '../app.dart';
 import '../core/constants.dart';
+import '../core/rom_thresholds.dart';
+import '../core/squat_rom_defaults.dart';
 import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
 import '../engine/push_up/push_up_rom_profile.dart';
@@ -221,6 +223,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _ttsVerbosity = value);
   }
 
+  /// Opens an AlertDialog explaining the scope of Coaching strictness.
+  /// Companion to [_showFormToleranceHelp] — together they answer the
+  /// "wait, what does each dial actually do?" question that surfaced
+  /// during the 2026-05-15 planning conversation. Wording mirrors the
+  /// form tolerance dialog (same five sections) so the two read as a
+  /// paired set rather than two independent monologues.
+  Future<void> _showCoachingStrictnessHelp(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Coaching strictness'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'WHAT IT DOES\n'
+            'Controls the range-of-motion gates that decide whether a '
+            'movement counts as a rep. Applies to all exercises (curl, '
+            'squat, push-up) and at every threshold tier (calibrated, '
+            'auto-calibrated, cold-start).\n\n'
+            'WHAT THE LEVELS MEAN\n'
+            'High — strict. Reps must reach deeper peak flex and return '
+            'closer to full extension to be counted. Better for technique '
+            'training.\n'
+            'Medium — easier. Shallower peaks and shallower returns still '
+            'count. Better for fatigue sets and momentum drills.\n\n'
+            'WHAT IT DOES NOT AFFECT\n'
+            '• Form-error coaching loudness — that is "Curl form '
+            'tolerance" below, a separate dial.\n'
+            '• The biomechanical fault thresholds themselves (lean, swing, '
+            'shrug, drift, elbow rise) — those are fixed safety gates.\n'
+            '• Post-session form audit summaries — those always read the '
+            'true motion regardless of strictness.\n\n'
+            'COACHING STRICTNESS vs FORM TOLERANCE\n'
+            'Coaching strictness controls *when a movement counts as a '
+            'rep.* Form tolerance controls *when the analyzer talks to '
+            'you about how that rep looked.* Two independent dials that '
+            'never read each other.\n\n'
+            'SCOPE\n'
+            'All exercises (curl, squat, push-up). Comprehensive across '
+            'all three resolver tiers — switching levels mid-app updates '
+            'every rep that follows, calibrated or not.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Human-readable subtitle for the Form Tolerance slider (Option B
   /// labeling, 2026-05-15): the slider keeps the `0 → 100` direction the
   /// user expects from a percent control, but every band's wording spells
@@ -347,7 +401,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = AppServicesScope.read(context).preferencesRepository;
     await prefs.setDiagnosticDisableAutoCalibration(value);
     TelemetryLog.instance.log(
-      'preferences.diagnostic_disable_auto_cal_toggled',
+      'preferences.diagnostic_mode_toggled',
       'enabled=$value',
     );
     if (!mounted) return;
@@ -594,6 +648,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onToggleDetails: (v) =>
                             setState(() => _showDetails = v),
                       ),
+                      _RomDefaultsTile.forCurl(_feedbackSensitivity),
                       _ActionRow(
                         icon: Icons.refresh,
                         label: 'Recalibrate curl',
@@ -626,6 +681,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     trailing: _StatusPill(label: status.$1, color: status.$2),
                     children: [
                       _SquatProfileContent(profile: _squatProfile),
+                      _RomDefaultsTile.forSquat(_feedbackSensitivity),
                       _ActionRow(
                         icon: Icons.refresh,
                         label: 'Recalibrate squat',
@@ -668,6 +724,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     trailing: _StatusPill(label: status.$1, color: status.$2),
                     children: [
                       _PushUpProfileContent(profile: _pushUpProfile),
+                      _RomDefaultsTile.forPushUp(_feedbackSensitivity),
                       _ActionRow(
                         icon: Icons.refresh,
                         label: 'Recalibrate push-up',
@@ -690,12 +747,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                 // ── 2. Workout ─────────────────────────────────────────────
                 _sectionHeader(context, 'Workout'),
-                const ListTile(
+                // ── Coaching strictness ─────────────────────────────────
+                // Controls REP-COUNTING ROM gates only. Form-error cue
+                // loudness is governed by "Curl form tolerance" below —
+                // two independent dials per the 2026-05-14 doctrine.
+                // Subtitle wording matches that boundary literally so the
+                // user doesn't carry over the pre-2026-05-14 mental model
+                // ("strictness ⇒ everything coaching").
+                ListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
-                  title: Text('Coaching strictness'),
-                  subtitle: Text(
-                    'How strict the form and rep-gate coaching is',
+                  title: Row(
+                    children: [
+                      const Text('Coaching strictness'),
+                      IconButton(
+                        icon: const Icon(Icons.help_outline, size: 18),
+                        tooltip: 'About coaching strictness',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () => _showCoachingStrictnessHelp(context),
+                      ),
+                    ],
+                  ),
+                  subtitle: const Text(
+                    'How strict the rep-counting range-of-motion gates are. '
+                    'Does not affect form-error coaching loudness — see '
+                    'Curl form tolerance below.',
                   ),
                 ),
                 Padding(
@@ -799,6 +876,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   value: _hapticsEnabled,
                   onChanged: _setHapticsEnabled,
                 ),
+                // Auto-calibration toggle hidden 2026-05-15: the in-session
+                // tier-2 refiner is permanently disabled at the persistence
+                // layer (setAutoCalibrationEnabled is a no-op). UI surface
+                // removed so users can't be misled into thinking the feature
+                // is configurable. Engine code retained for possible future
+                // reinstatement — see WorkoutViewModel autocal.disabled log.
                 const Divider(),
 
                 // ── 3. App ─────────────────────────────────────────────────
@@ -851,12 +934,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
-                  title: const Text('Disable auto-calibration'),
+                  title: const Text('Diagnostic mode'),
                   subtitle: const Text(
-                    'Forces curl, squat, and push-up to use cold-start '
-                    'defaults — bypasses calibrated profiles and (where '
-                    'applicable) in-session auto-cal. Feedback stays ON '
-                    'so you can test cues. Turn off after testing.',
+                    'Developer override. Forces every rep (curl, squat, '
+                    'push-up) onto cold-start defaults — bypasses both '
+                    'calibrated personal profiles AND the Auto-calibration '
+                    'switch above. Feedback stays ON. Turn off after '
+                    'testing — leaving this on means your calibration '
+                    'never applies.',
                   ),
                   value: _diagnosticDisableAutoCalibration,
                   onChanged: _setDiagnosticDisableAutoCalibration,
@@ -1194,6 +1279,130 @@ class _PushUpProfileContent extends StatelessWidget {
       isCalibrated
           ? const Color(0xFF00E676)
           : theme.colorScheme.onSurface.withValues(alpha: 0.38),
+    );
+  }
+}
+
+/// Collapsed-by-default tile showing the **resolved cold-start ROM defaults**
+/// for one exercise at the current sensitivity. These are the same numbers the
+/// FSM logs in `*.thresholds_resolved` lines — surface them in-app so users
+/// can correlate live `angle_raw` traces with the gates that actually run.
+///
+/// Always reflects the FSM's view of the world: anchors with the sensitivity
+/// post-pass already applied. Does NOT show calibrated personal thresholds
+/// (Q3 deferred — see 2026-05-15 design discussion).
+class _RomDefaultsTile extends StatelessWidget {
+  const _RomDefaultsTile({
+    required this.sensitivity,
+    required this.rows,
+    this.subtitle,
+  });
+
+  /// Active sensitivity — shown in the tile subtitle so the user knows which
+  /// post-pass produced the numbers below.
+  final FeedbackSensitivity sensitivity;
+
+  /// `(label, angle°)` pairs. Each exercise supplies its own field set —
+  /// curl has 4, squat has 3, push-up has 4 (different names).
+  final List<(String, double)> rows;
+
+  /// Optional extra qualifier appended after the sensitivity name
+  /// (e.g. "side-right" for curl).
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final subtitleText = subtitle == null
+        ? sensitivity.name
+        : '${sensitivity.name} · $subtitle';
+    return ExpansionTile(
+      shape: const Border(),
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: const Icon(Icons.tune, size: 20),
+      title: const Text('ROM defaults'),
+      subtitle: Text(
+        subtitleText,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.65),
+        ),
+      ),
+      children: [
+        for (final (label, value) in rows)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(
+              children: [
+                Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
+                Text(
+                  '${value.toStringAsFixed(1)}°',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 4),
+        Text(
+          'Matches `*.thresholds_resolved` telemetry. Calibrated personal '
+          'thresholds, when present, override these for the matched buckets.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.55),
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Per-exercise factories ───────────────────────────────────────────────
+  //
+  // Co-located here so the widget owns the resolution logic. Each factory
+  // returns the *resolved* tuple (sensitivity post-pass applied), not the
+  // raw anchor — see file-level doc-block.
+
+  static _RomDefaultsTile forCurl(FeedbackSensitivity sensitivity) {
+    // Curl anchors are bilateral-symmetric today (`sideRightAnchor` aliases
+    // `sideLeftAnchor`); picking sideRight is arbitrary but matches the most
+    // recent diagnostic-session source.
+    final t = RomThresholds.global(CurlCameraView.sideRight, sensitivity);
+    return _RomDefaultsTile(
+      sensitivity: sensitivity,
+      subtitle: 'side view',
+      rows: [
+        ('Start', t.startAngle),
+        ('Peak', t.peakAngle),
+        ('Peak exit', t.peakExitAngle),
+        ('End', t.endAngle),
+      ],
+    );
+  }
+
+  static _RomDefaultsTile forSquat(FeedbackSensitivity sensitivity) {
+    final t = SquatRomThresholdSet.anchor.applySensitivity(sensitivity);
+    return _RomDefaultsTile(
+      sensitivity: sensitivity,
+      rows: [
+        ('Start', t.startAngle),
+        ('Bottom', t.bottomAngle),
+        ('End', t.endAngle),
+      ],
+    );
+  }
+
+  static _RomDefaultsTile forPushUp(FeedbackSensitivity sensitivity) {
+    final t = PushUpRomThresholds.defaults.applySensitivity(sensitivity);
+    return _RomDefaultsTile(
+      sensitivity: sensitivity,
+      rows: [
+        ('Start', t.startAngle),
+        ('Bottom', t.bottomAngle),
+        ('Shallow rep max', t.shallowRepMaxAngle),
+        ('End', t.endAngle),
+      ],
     );
   }
 }

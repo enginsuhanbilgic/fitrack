@@ -198,6 +198,12 @@ class SquatStrategy extends ExerciseStrategy {
   /// `ascending_frame_count` field of the `squat.hip_lead` telemetry line.
   int get ascendingFrameCount => _form.ascendingFrameCount;
 
+  /// Live signed forward-lean angle (deg) from the most recent frame.
+  /// Positive = forward; negative = backward; null when the analyzer
+  /// hasn't seen a high-confidence shoulder/hip pair yet. The HUD reads
+  /// this to render the real-time lean indicator (Cue 3, 2026-05-15).
+  double? get currentSignedLeanDeg => _form.currentSignedLeanDeg;
+
   /// Active lean warning threshold (variant + tall-lifter boost). Useful
   /// for tests asserting orthogonality of long-femur signals.
   double get leanWarnDeg => _form.leanWarnDeg;

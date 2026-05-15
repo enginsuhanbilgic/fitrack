@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
@@ -13,8 +14,10 @@ import '../engine/angle_utils.dart';
 import '../core/squat_rom_defaults.dart';
 import '../engine/curl/curl_auto_calibrator.dart';
 import '../engine/curl/curl_rom_profile.dart';
+import '../engine/curl/mad_outlier.dart' as mad;
 import '../engine/curl/rep_boundary_detector.dart';
 import '../engine/landmark_smoother.dart';
+import '../engine/push_up/push_up_auto_calibrator.dart';
 import '../engine/rep_counter.dart';
 import '../engine/setup_framing_check.dart';
 import '../engine/squat/squat_auto_calibrator.dart';
@@ -201,7 +204,99 @@ class CalibrationSummary {
   const CalibrationSummary({required this.viewLabel, required this.sidesLabel});
 }
 
-enum _PushUpCalibrationStage { topHold, bottomHold, rise }
+/// Push-up manual calibration protocol stages (2026-05-15 redesign).
+///
+/// `observeReps` collects per-rep top/bottom extremes from
+/// [kPushUpCalibrationTargetReps] valid reps via a slim local-min/max
+/// detector ([_PushUpCalibrationRepDetector]) — replaces the pre-2026-05-15
+/// hold-and-average protocol (`topHold` / `bottomHold` / `rise`) which read
+/// statically held angles that drift higher than the user's actual rep
+/// extremes. `confirm` shows the captured anchors + derived gates and
+/// awaits the user's accept/redo.
+enum _PushUpCalibrationStage { observeReps, confirm }
+
+/// Per-rep top/bottom extreme detector used during push-up calibration.
+///
+/// Pure signal-processing component: watches the elbow-angle stream and
+/// emits a `(top, bottom)` pair every time the user completes one descent
+/// + ascent cycle that crosses the validity thresholds. Does NOT drive the
+/// production push-up FSM — it shares a name with what the live strategy
+/// does but is intentionally simpler so calibration can't accidentally
+/// affect live rep counting.
+///
+/// State machine:
+///   awaitingTop → descending  (top captured, angle started falling)
+///   descending  → ascending   (rolling min established, angle started rising)
+///   ascending   → emit + awaitingTop  (angle back at top threshold)
+///
+/// Rep validity: requires (top − bottom) ≥ [kPushUpCalibrationMinExcursion]
+/// at emit time. Otherwise the cycle is silently discarded (e.g. a
+/// micro-bounce while user shifts position).
+class _PushUpCalibrationRepDetector {
+  _PushUpCalibrationRepStage _stage = _PushUpCalibrationRepStage.awaitingTop;
+  double? _runningTop;
+  double? _runningBottom;
+
+  /// Process one frame's elbow angle. Returns a `(top, bottom)` pair when
+  /// a valid rep has just completed; null otherwise. Caller is responsible
+  /// for the body-line / posture check — the detector accepts any angle
+  /// stream and only enforces the geometric rep shape.
+  (double top, double bottom)? onAngle(double angle) {
+    switch (_stage) {
+      case _PushUpCalibrationRepStage.awaitingTop:
+        if (angle >= kPushUpCalibrationRepTopMinAngle) {
+          _runningTop = angle;
+          _runningBottom = angle;
+          _stage = _PushUpCalibrationRepStage.descending;
+        }
+        return null;
+      case _PushUpCalibrationRepStage.descending:
+        final top = _runningTop ?? angle;
+        // Keep the highest observed top — user may rise slightly before the
+        // real descent begins.
+        if (angle > top) _runningTop = angle;
+        // Track the descending minimum.
+        if (_runningBottom == null || angle < _runningBottom!) {
+          _runningBottom = angle;
+        }
+        // Begin ascent when angle starts rising off the bottom by at least
+        // a small hysteresis margin (3°). Avoids flipping to ascending on
+        // jitter while the user is still descending.
+        if (_runningBottom != null && angle > _runningBottom! + 3.0) {
+          _stage = _PushUpCalibrationRepStage.ascending;
+        }
+        return null;
+      case _PushUpCalibrationRepStage.ascending:
+        // If the user reverses and goes deeper, treat as a new descent.
+        final currentBottom = _runningBottom;
+        if (currentBottom != null && angle < currentBottom) {
+          _runningBottom = angle;
+          _stage = _PushUpCalibrationRepStage.descending;
+          return null;
+        }
+        // Rep completes when the angle returns to a near-locked-out top.
+        if (angle >= kPushUpCalibrationRepTopMinAngle) {
+          final top = _runningTop;
+          final bottom = currentBottom;
+          _stage = _PushUpCalibrationRepStage.awaitingTop;
+          _runningTop = null;
+          _runningBottom = null;
+          if (top == null || bottom == null) return null;
+          if ((top - bottom) < kPushUpCalibrationMinExcursion) return null;
+          return (top, bottom);
+        }
+        return null;
+    }
+  }
+
+  void reset() {
+    _stage = _PushUpCalibrationRepStage.awaitingTop;
+    _runningTop = null;
+    _runningBottom = null;
+  }
+}
+
+enum _PushUpCalibrationRepStage { awaitingTop, descending, ascending }
 
 /// All engine, phase, calibration, TTS and UI-observable state for a single
 /// workout session. UI subscribes via [ChangeNotifier]; the widget never owns
@@ -234,6 +329,15 @@ class WorkoutViewModel extends ChangeNotifier {
   bool _diagnosticDisableAutoCalibration = false;
   bool get diagnosticDisableAutoCalibration =>
       _diagnosticDisableAutoCalibration;
+
+  /// User-facing **auto-calibration** preference (2026-05-15 split). When
+  /// false, the in-session auto-calibrator (tier 2) is skipped — but a
+  /// calibrated personal profile (tier 1) is STILL honored. Use
+  /// [diagnosticDisableAutoCalibration] to force cold-start globals across
+  /// every tier. Snapshot-on-construction; mid-session Settings changes
+  /// take effect on the *next* workout.
+  bool _autoCalibrationEnabled = true;
+  bool get autoCalibrationEnabled => _autoCalibrationEnabled;
 
   /// Whether this session is running as a *curl debug session*. When
   /// true the workout silently observes — no TTS, no haptics, no banners,
@@ -310,6 +414,14 @@ class WorkoutViewModel extends ChangeNotifier {
   /// calibration sample-count gate.
   final SquatAutoCalibrator _squatAutoCalibrator = SquatAutoCalibrator();
 
+  /// In-session push-up auto-calibrator. Resets at every set boundary
+  /// (push-up has no view-lock concept, mirroring squat). Drives Tier 2
+  /// of the push-up threshold resolver until a [PushUpRomProfile]
+  /// reaches the calibration sample-count gate. Anchored on min/max of
+  /// MAD-accepted rolling window — see file-level doc on
+  /// [PushUpAutoCalibrator] for the design.
+  final PushUpAutoCalibrator _pushUpAutoCalibrator = PushUpAutoCalibrator();
+
   /// Set when the squat profile's bucket received an `applyRep` whose
   /// result actually updated state — drives the lazy save on session
   /// end. Mirrors `_profileDirty` for curl.
@@ -327,14 +439,14 @@ class WorkoutViewModel extends ChangeNotifier {
   final List<RepExtreme> _calibrationCollected = [];
   CalibrationSummary? _calibrationSummary;
   _PushUpCalibrationStage _pushUpCalibrationStage =
-      _PushUpCalibrationStage.topHold;
-  DateTime? _pushUpCalibrationHoldStartedAt;
-  final List<double> _pushUpCalibrationHoldSamples = [];
+      _PushUpCalibrationStage.observeReps;
+  final _PushUpCalibrationRepDetector _pushUpCalibrationRepDetector =
+      _PushUpCalibrationRepDetector();
+  final List<double> _pushUpCalibrationTopSamples = [];
+  final List<double> _pushUpCalibrationBottomSamples = [];
   double? _pushUpCalibrationTopAngle;
-  double? _pushUpCalibrationBottomAngle;
-  int _pushUpCalibrationBottomSampleCount = 0;
   String _pushUpCalibrationInstruction =
-      'Hold the top push-up position with your body straight.';
+      'Do 3 controlled push-ups at your normal tempo.';
 
   // ── Lifecycle / phase ──────────────────────────────────
   bool _isReady = false;
@@ -577,6 +689,16 @@ class WorkoutViewModel extends ChangeNotifier {
   int get calibrationSecondsRemaining => _calibrationSecondsRemaining;
   String? get calibrationError => _calibrationError;
   double? get calibrationCurrentAngle => _calibrationCurrentAngle;
+
+  /// Live signed forward-lean (deg) from the squat analyzer's most recent
+  /// frame. Positive = forward; negative = backward; null when the active
+  /// exercise is not squat or the analyzer hasn't seen a high-confidence
+  /// shoulder/hip pair yet. The workout HUD reads this for the real-time
+  /// lean readout (Cue 3, 2026-05-15). Updates per `notifyListeners()` —
+  /// no separate stream needed since the view-model already notifies on
+  /// every pose snapshot.
+  double? get squatCurrentSignedLeanDeg =>
+      _repCounter.squatCurrentSignedLeanDeg;
   CalibrationSummary? get calibrationSummary => _calibrationSummary;
   int get calibrationProgressTarget => switch (exercise) {
     ExerciseType.pushUp => 3,
@@ -655,6 +777,11 @@ class WorkoutViewModel extends ChangeNotifier {
         // the squat long-femur "snapshot-on-construction" rule).
         _diagnosticDisableAutoCalibration = await _preferencesRepository
             .getDiagnosticDisableAutoCalibration();
+        // Auto-calibration preference — separate from diagnostic mode
+        // (2026-05-15 split). Diagnostic mode overrides everything; this
+        // flag only controls whether tier-2 in-session auto-cal runs.
+        _autoCalibrationEnabled = await _preferencesRepository
+            .getAutoCalibrationEnabled();
         // Curl-debug-session snapshot. Read AFTER the diagnostic toggle so
         // the implicit "debug-session forces diagnostic on" rule below is
         // ordering-independent of which Settings switch the user flipped
@@ -707,7 +834,14 @@ class WorkoutViewModel extends ChangeNotifier {
         if (_diagnosticDisableAutoCalibration) {
           TelemetryLog.instance.log(
             'diagnostic.mode_active',
-            'auto-calibration disabled — every rep will run on source=global',
+            'diagnostic mode ON — every rep will run on source=global '
+                '(overrides personal profile and auto-calibration)',
+          );
+        } else if (!_autoCalibrationEnabled) {
+          TelemetryLog.instance.log(
+            'autocal.disabled',
+            'auto-calibration OFF — calibrated profile still honored; '
+                'tier-2 auto-cal will be skipped',
           );
         }
       } else if (exercise == ExerciseType.squat) {
@@ -731,10 +865,19 @@ class WorkoutViewModel extends ChangeNotifier {
         // High anchor, no sensitivity post-pass) when this flag is true.
         _diagnosticDisableAutoCalibration = await _preferencesRepository
             .getDiagnosticDisableAutoCalibration();
+        _autoCalibrationEnabled = await _preferencesRepository
+            .getAutoCalibrationEnabled();
         if (_diagnosticDisableAutoCalibration) {
           TelemetryLog.instance.log(
             'diagnostic.mode_active',
-            'squat auto-calibration disabled — every rep will run on source=global',
+            'diagnostic mode ON — squat rep will run on source=global '
+                '(overrides personal profile and auto-calibration)',
+          );
+        } else if (!_autoCalibrationEnabled) {
+          TelemetryLog.instance.log(
+            'autocal.disabled',
+            'squat auto-calibration OFF — calibrated profile still honored; '
+                'tier-2 auto-cal will be skipped',
           );
         }
         if (kSquatDebugSessionEnabled) {
@@ -788,10 +931,19 @@ class WorkoutViewModel extends ChangeNotifier {
         // selects `PushUpRomThresholds.defaults` over the saved profile.
         _diagnosticDisableAutoCalibration = await _preferencesRepository
             .getDiagnosticDisableAutoCalibration();
+        _autoCalibrationEnabled = await _preferencesRepository
+            .getAutoCalibrationEnabled();
         if (_diagnosticDisableAutoCalibration) {
           TelemetryLog.instance.log(
             'diagnostic.mode_active',
-            'push-up calibrated profile bypassed — every rep will run on defaults',
+            'diagnostic mode ON — push-up rep will run on defaults '
+                '(overrides calibrated profile and auto-calibration)',
+          );
+        } else if (!_autoCalibrationEnabled) {
+          TelemetryLog.instance.log(
+            'autocal.disabled',
+            'push-up auto-calibration OFF — calibrated profile still honored; '
+                'tier-2 auto-cal will be skipped',
           );
         }
       }
@@ -822,24 +974,22 @@ class WorkoutViewModel extends ChangeNotifier {
         onSquatRepCommit: _handleSquatRepCommit,
         onSquatLongFemurDetected: _handleSquatLongFemurDetected,
         squatPersistedFemurTorsoRatio: _squatProfile?.bucket?.femurTorsoRatio,
-        // Push-up uses a binary calibrated/cold-start choice (no auto-cal
-        // tier today). Either branch is High-anchored; the post-pass derives
-        // Medium. Mirrors the resolver shape in `_resolveThresholds` (curl)
-        // and `_resolveSquatThresholds` so push-up participates in the same
-        // uniform-sensitivity contract.
+        // Push-up resolver wiring (2026-05-15, plan Phase 3). Mirrors
+        // curl/squat: a synchronous provider is invoked per rep at the
+        // IDLE → DESCENDING transition inside `PushUpStrategy.tick`, and
+        // the resolver function applies the three-tier precedence
+        // (calibrated → auto-cal → defaults) per the truth table in
+        // `.agent_brain/SKILLS.md`.
         //
-        // Global diagnostic toggle (`_diagnosticDisableAutoCalibration`):
-        // bypasses the saved profile and forces `PushUpRomThresholds.defaults`
-        // so the user can test the cold-start defaults and form audit
-        // against their actual form. Sensitivity is still applied so the
-        // user's selected level is honored. Snapshot-on-construction: a
-        // mid-session Settings toggle does NOT affect an in-flight workout.
-        pushUpThresholds:
-            (_diagnosticDisableAutoCalibration
-                    ? PushUpRomThresholds.defaults
-                    : (_pushUpProfile?.thresholds ??
-                          PushUpRomThresholds.defaults))
-                .applySensitivity(_feedbackSensitivity),
+        // The seed `pushUpThresholds:` value below is what the strategy
+        // uses on the very first rep BEFORE the provider has been called
+        // (defensive — covers tests and any future code path that
+        // constructs `RepCounter` without consulting the provider).
+        // Identical math to what the resolver returns for the same input
+        // state, so behavior is consistent regardless of which path is
+        // taken.
+        pushUpThresholds: _resolvePushUpThresholds(0),
+        pushUpThresholdsProvider: _resolvePushUpThresholds,
         onPushUpRepCommit: _handlePushUpRepCommit,
       );
       if ((exercise.isCurl ||
@@ -902,15 +1052,22 @@ class WorkoutViewModel extends ChangeNotifier {
         return t;
       }
     }
-    final auto = _autoCalibrator.currentThresholds;
-    if (auto != null) {
-      final t = auto.applySensitivity(_feedbackSensitivity);
-      _logCurlThresholdsResolved(
-        tier: 2,
-        source: 'autoCalibrated',
-        thresholds: t,
-      );
-      return t;
+    // Tier 2 — in-session auto-calibrator. Gated by the user-facing
+    // auto-calibration preference (2026-05-15 split). When the user
+    // disables auto-cal, tier 1 still applies (handled above) but the
+    // resolver falls straight to tier 3 here, skipping mid-session
+    // refinement.
+    if (_autoCalibrationEnabled) {
+      final auto = _autoCalibrator.currentThresholds;
+      if (auto != null) {
+        final t = auto.applySensitivity(_feedbackSensitivity);
+        _logCurlThresholdsResolved(
+          tier: 2,
+          source: 'autoCalibrated',
+          thresholds: t,
+        );
+        return t;
+      }
     }
     // Cold-start path. Sensitivity is applied inside `RomThresholds.global`
     // (the three-tier resolver uses tier-specific looseness deltas).
@@ -1052,13 +1209,26 @@ class WorkoutViewModel extends ChangeNotifier {
       }
       return;
     }
-    _autoCalibrator.recordRepExtremes(minAngle, maxAngle);
+    // Calibration-opt-in contract (2026-05-15): the live rep-commit path
+    // NEVER mutates the personal profile or the in-session auto-calibrator
+    // unless the user has explicitly enabled auto-calibration. Profile
+    // updates outside this gate are reserved for the manual calibration
+    // overlay (`_completeCurlCalibration`).
+    if (_autoCalibrationEnabled) {
+      _autoCalibrator.recordRepExtremes(minAngle, maxAngle);
+    }
     final profile = _profile;
     if (profile == null) return;
-    final bucket = profile.bucketFor(side, view) ?? RomBucket.empty(side, view);
-    final result = bucket.applyRep(minAngle, maxAngle);
-    profile.upsertBucket(bucket);
-    _profileDirty = true;
+    RepApplyResult? result;
+    RomBucket? mutatedBucket;
+    if (_autoCalibrationEnabled) {
+      final bucket =
+          profile.bucketFor(side, view) ?? RomBucket.empty(side, view);
+      result = bucket.applyRep(minAngle, maxAngle);
+      profile.upsertBucket(bucket);
+      _profileDirty = true;
+      mutatedBucket = bucket;
+    }
 
     // Re-resolve the source the FSM would have used for this rep. The
     // resolver is pure, so calling it here yields the same source the engine
@@ -1108,13 +1278,20 @@ class WorkoutViewModel extends ChangeNotifier {
       }
     }
 
-    TelemetryLog.instance.log(
-      'profile.update',
-      'side=${side.name} view=${view.name} result=${result.name} '
-          'samples=${bucket.sampleCount} '
-          'min=${bucket.observedMinAngle.toStringAsFixed(1)} '
-          'max=${bucket.observedMaxAngle.toStringAsFixed(1)}',
-    );
+    // `profile.update` fires only when the live path actually wrote to the
+    // bucket. Under the calibration-opt-in contract (auto-cal OFF) the bucket
+    // is untouched here and the log line would be a meaningless echo, so we
+    // skip it. Manual calibration completion emits `calibration.complete`
+    // separately as the canonical write-event for the overlay path.
+    if (result != null && mutatedBucket != null) {
+      TelemetryLog.instance.log(
+        'profile.update',
+        'side=${side.name} view=${view.name} result=${result.name} '
+            'samples=${mutatedBucket.sampleCount} '
+            'min=${mutatedBucket.observedMinAngle.toStringAsFixed(1)} '
+            'max=${mutatedBucket.observedMaxAngle.toStringAsFixed(1)}',
+      );
+    }
 
     // Raw per-rep extremes — the un-smoothed angles this rep actually hit.
     // Distinct from `profile.update` above (which logs the EMA-smoothed
@@ -1133,7 +1310,7 @@ class WorkoutViewModel extends ChangeNotifier {
           'min_at_peak=${minAtPeak?.toStringAsFixed(1) ?? "null"} '
           'concentric_ms=${concentricDuration?.inMilliseconds ?? -1} '
           'source=${resolved.source.name} '
-          'result=${result.name}',
+          'result=${result?.name ?? "skipped"}',
     );
 
     // Side-view form telemetry — the second canonical paste-back line.
@@ -1500,14 +1677,13 @@ class WorkoutViewModel extends ChangeNotifier {
   }
 
   void _resetPushUpCalibrationState() {
-    _pushUpCalibrationStage = _PushUpCalibrationStage.topHold;
-    _pushUpCalibrationHoldStartedAt = null;
-    _pushUpCalibrationHoldSamples.clear();
+    _pushUpCalibrationStage = _PushUpCalibrationStage.observeReps;
+    _pushUpCalibrationRepDetector.reset();
+    _pushUpCalibrationTopSamples.clear();
+    _pushUpCalibrationBottomSamples.clear();
     _pushUpCalibrationTopAngle = null;
-    _pushUpCalibrationBottomAngle = null;
-    _pushUpCalibrationBottomSampleCount = 0;
     _pushUpCalibrationInstruction =
-        'Hold the top push-up position with your body straight.';
+        'Do 3 controlled push-ups at your normal tempo.';
   }
 
   void _onCalibrationRep(RepExtreme rep) {
@@ -1826,8 +2002,9 @@ class WorkoutViewModel extends ChangeNotifier {
     _calibrationSub = null;
     _calibrationDetector?.dispose();
     _calibrationDetector = null;
-    _pushUpCalibrationHoldStartedAt = null;
-    _pushUpCalibrationHoldSamples.clear();
+    _pushUpCalibrationRepDetector.reset();
+    _pushUpCalibrationTopSamples.clear();
+    _pushUpCalibrationBottomSamples.clear();
   }
 
   /// Hole #1 trigger: called whenever `_detectedCurlView` flips to a non-unknown
@@ -1975,108 +2152,131 @@ class WorkoutViewModel extends ChangeNotifier {
     }
 
     switch (_pushUpCalibrationStage) {
-      case _PushUpCalibrationStage.topHold:
-        _trackPushUpCalibrationHold(
+      case _PushUpCalibrationStage.observeReps:
+        _handlePushUpCalibrationFrame(
           angle: angle,
-          isAllowed: (a) =>
-              a >= kPushUpCalibrationTopMinAngle &&
-              a <= kPushUpCalibrationTopMaxAngle &&
-              bodyDeviation <= kPushUpCalibrationBodyLineMaxDeviation,
-          outOfRangeInstruction:
-              'Start at the top with elbows nearly straight and your body in one line.',
-          onComplete: (avg) {
-            _pushUpCalibrationTopAngle = avg;
-            _pushUpCalibrationStage = _PushUpCalibrationStage.bottomHold;
-            _pushUpCalibrationHoldStartedAt = null;
-            _pushUpCalibrationHoldSamples.clear();
-            _calibrationReps = 1;
-            _pushUpCalibrationInstruction =
-                'Lower as far as you comfortably can and hold that bottom position.';
-            _tts.speak('Go all the way down and hold.');
-          },
+          bodyDeviation: bodyDeviation,
         );
-      case _PushUpCalibrationStage.bottomHold:
-        final top = _pushUpCalibrationTopAngle;
-        _trackPushUpCalibrationHold(
-          angle: angle,
-          isAllowed: (a) =>
-              top != null &&
-              a >= kPushUpCalibrationBottomMinAngle &&
-              a <= kPushUpCalibrationBottomMaxAngle &&
-              (top - a) >= kPushUpCalibrationMinExcursion &&
-              bodyDeviation <= kPushUpCalibrationBodyLineMaxDeviation,
-          outOfRangeInstruction:
-              'Hold your lowest controlled push-up position with your body straight.',
-          onComplete: (avg) {
-            _pushUpCalibrationBottomAngle = avg;
-            _pushUpCalibrationBottomSampleCount =
-                _pushUpCalibrationHoldSamples.length;
-            _pushUpCalibrationStage = _PushUpCalibrationStage.rise;
-            _pushUpCalibrationHoldStartedAt = null;
-            _pushUpCalibrationHoldSamples.clear();
-            _calibrationReps = 2;
-            _pushUpCalibrationInstruction =
-                'Push back up to the top position and stop there.';
-            _tts.speak('Push back up.');
-          },
-        );
-      case _PushUpCalibrationStage.rise:
-        final top = _pushUpCalibrationTopAngle;
-        final bottom = _pushUpCalibrationBottomAngle;
-        if (top != null &&
-            bottom != null &&
-            angle >= top - kPushUpProfileEndMargin) {
-          _completePushUpCalibration(bottomAngle: bottom);
-          return;
-        }
-        _pushUpCalibrationInstruction =
-            'Push back up to the top position and stop there.';
+      case _PushUpCalibrationStage.confirm:
+        // Passive — waiting for the post-capture summary timer to fire
+        // (set in `_completePushUpCalibration`). Per-frame angle stream is
+        // ignored so a rebound rep can't accidentally re-arm the detector.
         break;
     }
 
     notifyListeners();
   }
 
-  void _trackPushUpCalibrationHold({
+  /// Per-frame work for the `observeReps` stage. Feeds the rep detector,
+  /// applies body-line + MAD filtering on emit, advances to `confirm` once
+  /// [kPushUpCalibrationTargetReps] valid reps are buffered.
+  void _handlePushUpCalibrationFrame({
     required double angle,
-    required bool Function(double angle) isAllowed,
-    required String outOfRangeInstruction,
-    required ValueChanged<double> onComplete,
+    required double bodyDeviation,
   }) {
-    if (!isAllowed(angle)) {
-      _pushUpCalibrationHoldStartedAt = null;
-      _pushUpCalibrationHoldSamples.clear();
-      _pushUpCalibrationInstruction = outOfRangeInstruction;
+    final completed = _pushUpCalibrationRepDetector.onAngle(angle);
+    if (completed == null) {
+      // Update the standing instruction based on how many reps we've kept.
+      final kept = _pushUpCalibrationTopSamples.length;
+      if (kept == 0) {
+        _pushUpCalibrationInstruction =
+            'Do 3 controlled push-ups at your normal tempo.';
+      } else {
+        final remaining = kPushUpCalibrationTargetReps - kept;
+        _pushUpCalibrationInstruction =
+            'Captured $kept/$kPushUpCalibrationTargetReps — '
+            '$remaining to go.';
+      }
       return;
     }
 
-    final now = DateTime.now();
-    _pushUpCalibrationHoldStartedAt ??= now;
-    _pushUpCalibrationHoldSamples.add(angle);
-    _pushUpCalibrationInstruction = switch (_pushUpCalibrationStage) {
-      _PushUpCalibrationStage.topHold =>
-        'Hold the top push-up position with your body straight.',
-      _PushUpCalibrationStage.bottomHold =>
-        'Hold your lowest controlled position.',
-      _PushUpCalibrationStage.rise =>
-        'Push back up to the top position and stop there.',
-    };
+    final (top, bottom) = completed;
 
-    final elapsed = now.difference(_pushUpCalibrationHoldStartedAt!).inSeconds;
-    if (elapsed < kPushUpCalibrationHoldSeconds) return;
-
-    final spread = _angleSpread(_pushUpCalibrationHoldSamples);
-    if (spread > kPushUpCalibrationHoldMaxSpread) {
-      _pushUpCalibrationHoldStartedAt = null;
-      _pushUpCalibrationHoldSamples.clear();
-      _pushUpCalibrationInstruction = 'Hold still for a few seconds.';
+    // Reject reps with bad posture at the moment of rep completion. A more
+    // rigorous check would track the worst body-line throughout the rep
+    // window; deferred for cost.
+    if (bodyDeviation > kPushUpCalibrationBodyLineMaxDeviation) {
+      TelemetryLog.instance.log(
+        'pushup_calibration.rep_rejected',
+        'reason=body_line top=${top.toStringAsFixed(1)} '
+            'bottom=${bottom.toStringAsFixed(1)} '
+            'body_dev=${bodyDeviation.toStringAsFixed(1)}',
+      );
+      _pushUpCalibrationInstruction =
+          'Keep your body in one line — that rep was discarded. Try again.';
       return;
     }
 
-    final avg =
-        _pushUpCalibrationHoldSamples.reduce((a, b) => a + b) /
-        _pushUpCalibrationHoldSamples.length;
-    onComplete(avg);
+    // Reject reps with extremes outside the calibration acceptance bands —
+    // mirrors the pre-2026-05-15 hold-protocol gates so the saved profile
+    // can't drift outside the validated ROM envelope.
+    final outOfBand =
+        top < kPushUpCalibrationTopMinAngle ||
+        top > kPushUpCalibrationTopMaxAngle ||
+        bottom < kPushUpCalibrationBottomMinAngle ||
+        bottom > kPushUpCalibrationBottomMaxAngle;
+    if (outOfBand) {
+      TelemetryLog.instance.log(
+        'pushup_calibration.rep_rejected',
+        'reason=out_of_band top=${top.toStringAsFixed(1)} '
+            'bottom=${bottom.toStringAsFixed(1)}',
+      );
+      _pushUpCalibrationInstruction =
+          'That rep landed outside the calibration range — try a fuller '
+          'rep with elbows nearly straight at the top.';
+      return;
+    }
+
+    // MAD outlier rejection — only kicks in once we have ≥ 2 samples on
+    // each axis. mad_outlier returns false (i.e. accept) for empty buffers.
+    final topOutlier = mad.isMadOutlier(_pushUpCalibrationTopSamples, top);
+    final bottomOutlier = mad.isMadOutlier(
+      _pushUpCalibrationBottomSamples,
+      bottom,
+    );
+    if (topOutlier || bottomOutlier) {
+      TelemetryLog.instance.log(
+        'pushup_calibration.rep_rejected',
+        'reason=mad_outlier top=${top.toStringAsFixed(1)} '
+            'bottom=${bottom.toStringAsFixed(1)} '
+            'top_outlier=$topOutlier bottom_outlier=$bottomOutlier',
+      );
+      _pushUpCalibrationInstruction =
+          'That rep looked different from the others — try one more with '
+          'matching depth.';
+      return;
+    }
+
+    _pushUpCalibrationTopSamples.add(top);
+    _pushUpCalibrationBottomSamples.add(bottom);
+    _calibrationReps = _pushUpCalibrationTopSamples.length;
+    TelemetryLog.instance.log(
+      'pushup_calibration.rep_captured',
+      'rep=${_pushUpCalibrationTopSamples.length} '
+          'top=${top.toStringAsFixed(1)} '
+          'bottom=${bottom.toStringAsFixed(1)}',
+    );
+
+    if (_pushUpCalibrationTopSamples.length < kPushUpCalibrationTargetReps) {
+      final remaining =
+          kPushUpCalibrationTargetReps - _pushUpCalibrationTopSamples.length;
+      _pushUpCalibrationInstruction =
+          'Captured '
+          '${_pushUpCalibrationTopSamples.length}/'
+          '$kPushUpCalibrationTargetReps — $remaining to go.';
+      _tts.speak('Good. Keep going.');
+      return;
+    }
+
+    // All reps captured — compute anchors and advance to confirm.
+    final topAnchor = _pushUpCalibrationTopSamples.reduce(math.max);
+    final bottomAnchor = _pushUpCalibrationBottomSamples.reduce(math.min);
+    _pushUpCalibrationTopAngle = topAnchor;
+    _pushUpCalibrationStage = _PushUpCalibrationStage.confirm;
+    _pushUpCalibrationInstruction =
+        'All reps captured. Saving your range of motion.';
+    _tts.speak('Range captured.');
+    _completePushUpCalibration(bottomAngle: bottomAnchor);
   }
 
   void _completePushUpCalibration({required double bottomAngle}) {
@@ -2091,7 +2291,7 @@ class WorkoutViewModel extends ChangeNotifier {
       profile = PushUpRomProfile.calibrated(
         topAngle: top,
         bottomAngle: bottomAngle,
-        sampleCount: _pushUpCalibrationBottomSampleCount,
+        sampleCount: _pushUpCalibrationBottomSamples.length,
       );
     } catch (e) {
       _failCalibration(e.toString());
@@ -2200,17 +2400,6 @@ class WorkoutViewModel extends ChangeNotifier {
       (180.0 - hipAngle).abs(),
       shoulder.confidence + hip.confidence + ankle.confidence,
     );
-  }
-
-  double _angleSpread(List<double> values) {
-    if (values.isEmpty) return 0;
-    var min = values.first;
-    var max = values.first;
-    for (final value in values.skip(1)) {
-      if (value < min) min = value;
-      if (value > max) max = value;
-    }
-    return max - min;
   }
 
   // ── Frame pipeline ────────────────────────────────────
@@ -2871,7 +3060,24 @@ class WorkoutViewModel extends ChangeNotifier {
           rejectedOutlier: false,
         ),
       );
+      // Feed the in-session push-up auto-calibrator. Convention: top =
+      // most-extended (largest elbow angle), bottom = deepest (smallest).
+      // Matches `PushUpAutoCalibrator.recordRepExtremes(topAngle, bottomAngle)`.
+      // The auto-cal handles its own MAD outlier rejection and emission
+      // gating — see `push_up_auto_calibrator.dart`.
+      //
+      // Calibration-opt-in contract (2026-05-15): the live rep-commit path
+      // only feeds the auto-calibrator when the user has explicitly enabled
+      // auto-calibration. Manual push-up calibration writes the profile
+      // directly via its overlay path and is unaffected by this gate.
+      if (_autoCalibrationEnabled) {
+        _pushUpAutoCalibrator.recordRepExtremes(maxElbowAngle, minElbowAngle);
+      }
     }
+    // No view-model-side rep-index counter is kept for push-up — the
+    // strategy's internal `_repIndexInSet` is the source of truth, passed
+    // into `_resolvePushUpThresholds` via the provider callback. Mirrors
+    // the curl / squat resolver pattern.
   }
 
   /// Feeds the in-session auto-calibrator and the persistent squat
@@ -2885,6 +3091,12 @@ class WorkoutViewModel extends ChangeNotifier {
   /// readings and the bucket's `applyRep` would crash on null.
   void _recordSquatExtremes(double? minKneeAngle, double? maxKneeAngle) {
     if (minKneeAngle == null || maxKneeAngle == null) return;
+    // Calibration-opt-in contract (2026-05-15): the live rep-commit path
+    // NEVER mutates the squat profile or its in-session auto-calibrator
+    // unless the user has explicitly enabled auto-calibration. Profile
+    // updates outside this gate are reserved for the manual squat
+    // calibration overlay (`_completeSquatCalibration`).
+    if (!_autoCalibrationEnabled) return;
     _squatAutoCalibrator.recordRepExtremes(minKneeAngle, maxKneeAngle);
     final profile = _squatProfile;
     if (profile != null) {
@@ -3063,17 +3275,20 @@ class WorkoutViewModel extends ChangeNotifier {
       );
       return t;
     }
-    // Tier 2 — in-session auto-cal.
-    final auto = _squatAutoCalibrator.currentThresholds;
-    if (auto != null) {
-      final t = auto.applySensitivity(_feedbackSensitivity);
-      _logSquatThresholdsResolved(
-        tier: 2,
-        source: 'autoCalibrated',
-        thresholds: t,
-        extra: 'reps=${_squatAutoCalibrator.repCount}',
-      );
-      return t;
+    // Tier 2 — in-session auto-cal. Gated by the user-facing
+    // auto-calibration preference (2026-05-15 split).
+    if (_autoCalibrationEnabled) {
+      final auto = _squatAutoCalibrator.currentThresholds;
+      if (auto != null) {
+        final t = auto.applySensitivity(_feedbackSensitivity);
+        _logSquatThresholdsResolved(
+          tier: 2,
+          source: 'autoCalibrated',
+          thresholds: t,
+          extra: 'reps=${_squatAutoCalibrator.repCount}',
+        );
+        return t;
+      }
     }
     // Tier 3 — cold-start, sensitivity-modified.
     final t = SquatRomThresholdSet.anchor.applySensitivity(
@@ -3096,6 +3311,97 @@ class WorkoutViewModel extends ChangeNotifier {
           'start=${thresholds.startAngle.toStringAsFixed(2)} '
           'bottom=${thresholds.bottomAngle.toStringAsFixed(2)} '
           'end=${thresholds.endAngle.toStringAsFixed(2)}'
+          '${extra != null ? ' $extra' : ''}',
+    );
+  }
+
+  /// Resolve push-up thresholds for the next rep. Synchronous (no I/O) —
+  /// invoked from `PushUpStrategy.tick` at the IDLE → DESCENDING
+  /// transition. Mirrors `_resolveSquatThresholds`.
+  ///
+  /// Tier precedence (matches the truth table in `.agent_brain/SKILLS.md`,
+  /// "Push-up Calibration Tier Precedence"):
+  ///   1. Global diagnostic toggle ON → tier 3 defaults UNMODIFIED
+  ///      (sensitivity NOT applied — diagnostic baseline is the contract
+  ///      the telemetry-derivation pipeline expects).
+  ///   2. Calibrated profile present → tier 1 (profile.thresholds, +sens).
+  ///   3. Auto-cal has emitted thresholds → tier 2 (+sens).
+  ///   4. Otherwise → tier 3 defaults (+sens).
+  PushUpRomThresholds _resolvePushUpThresholds(int repIndexInSet) {
+    // TODO(phase-5): when push-up debug session lands (parity with curl /
+    // squat), add a second short-circuit here that returns
+    // `PushUpRomThresholds.defaults` unmodified when
+    // `kPushUpDebugSessionEnabled && _isPushUpDebugSession` is true.
+    // The truth table in `.agent_brain/SKILLS.md` already documents this
+    // row; the implementation lands with Phase 5 of the cross-exercise
+    // parity plan.
+    if (_diagnosticDisableAutoCalibration) {
+      const t = PushUpRomThresholds.defaults;
+      _logPushUpThresholdsResolved(
+        tier: 3,
+        source: 'global',
+        thresholds: t,
+        repIndex: repIndexInSet,
+        extra: 'diagnostic=true',
+      );
+      return t;
+    }
+    final profile = _pushUpProfile;
+    if (profile != null && profile.isCalibrated) {
+      final t = profile.thresholds.applySensitivity(_feedbackSensitivity);
+      _logPushUpThresholdsResolved(
+        tier: 1,
+        source: 'calibrated',
+        thresholds: t,
+        repIndex: repIndexInSet,
+        extra: 'samples=${profile.sampleCount}',
+      );
+      return t;
+    }
+    // Tier 2 — gated by the user-facing auto-calibration preference
+    // (2026-05-15 split).
+    if (_autoCalibrationEnabled) {
+      final auto = _pushUpAutoCalibrator.currentThresholds;
+      if (auto != null) {
+        final t = auto.applySensitivity(_feedbackSensitivity);
+        _logPushUpThresholdsResolved(
+          tier: 2,
+          source: 'autoCalibrated',
+          thresholds: t,
+          repIndex: repIndexInSet,
+          extra: 'reps=${_pushUpAutoCalibrator.repCount}',
+        );
+        return t;
+      }
+    }
+    final t = PushUpRomThresholds.defaults.applySensitivity(
+      _feedbackSensitivity,
+    );
+    _logPushUpThresholdsResolved(
+      tier: 3,
+      source: 'global',
+      thresholds: t,
+      repIndex: repIndexInSet,
+    );
+    return t;
+  }
+
+  void _logPushUpThresholdsResolved({
+    required int tier,
+    required String source,
+    required PushUpRomThresholds thresholds,
+    required int repIndex,
+    String? extra,
+  }) {
+    TelemetryLog.instance.log(
+      'push_up.thresholds_resolved',
+      'tier=$tier source=$source '
+          'sensitivity=${_feedbackSensitivity.name} '
+          'start=${thresholds.startAngle.toStringAsFixed(2)} '
+          'bottom=${thresholds.bottomAngle.toStringAsFixed(2)} '
+          'shallowRepMax=${thresholds.shallowRepMaxAngle.toStringAsFixed(2)} '
+          'end=${thresholds.endAngle.toStringAsFixed(2)} '
+          'rep_index=$repIndex'
           '${extra != null ? ' $extra' : ''}',
     );
   }
@@ -3140,6 +3446,8 @@ class WorkoutViewModel extends ChangeNotifier {
       'Stop leaning back — stack ribs over hips',
     FormError.heelLift => 'Drive your heels into the floor',
     FormError.hipLead => 'Lead with your chest',
+    FormError.noKneeFlexion => 'Sit into the squat — bend your knees',
+    FormError.hipsForwardOnDescent => 'Push your hips back',
     // forwardKneeShift intentionally has a fallback string — TTS suppression
     // happens in `_onFormErrors`, not here. The string is still used by the
     // visual highlight subtitle if the in-workout overlay surfaces it.
@@ -3189,6 +3497,9 @@ class WorkoutViewModel extends ChangeNotifier {
     // view-lock concept, so the set boundary is the only reset trigger
     // (mirrors curl's per-set reset). Tier 1 (profile) survives.
     _squatAutoCalibrator.reset();
+    // Same contract for push-up — rested-between-sets shifts the
+    // observed ROM so the prior window's anchor no longer applies.
+    _pushUpAutoCalibrator.reset();
     _snapshot = RepSnapshot(
       reps: 0,
       sets: _snapshot.sets + 1,

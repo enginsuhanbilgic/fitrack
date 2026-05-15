@@ -481,6 +481,17 @@ const int kSquatCalibrationMinReps = 3;
 /// long-femur path.
 const double kSquatMinViableRomDegrees = 40.0;
 
+/// Minimum ROM excursion (top_elbow − bottom_elbow, degrees) required for the
+/// push-up [PushUpAutoCalibrator] to emit thresholds. Added 2026-05-15 alongside
+/// the new auto-calibrator class. Mirrors [kSquatMinViableRomDegrees] in shape
+/// — the bar exists so a flat-elbow-angle session (pose detector confused, user
+/// hovering over a chair, etc.) cannot trip a "calibrated-looking" tier-2
+/// threshold from garbage data. 40° matches the existing
+/// [kPushUpCalibrationMinExcursion] floor (20°) doubled for in-session
+/// robustness — auto-cal sees real workout reps with more variance than a
+/// deliberate calibration session, so the floor is stricter here.
+const double kPushUpMinViableRomDegrees = 40.0;
+
 /// Margin added to `observedMinKneeAngle` when deriving the BOTTOM gate from
 /// a calibrated profile. Mirrors [kPushUpProfileBottomMargin] / the curl
 /// profile's peak-tolerance pattern — the gate sits a touch *above* the
@@ -529,10 +540,27 @@ const double kPushUpCalibrationMinExcursion = 20.0;
 const double kPushUpCalibrationBodyLineMaxDeviation = 30.0;
 
 /// Hold duration for each push-up calibration pose.
+/// DEPRECATED 2026-05-15 — push-up manual calibration migrated from the
+/// hold-and-average protocol to per-rep extreme observation. Constant
+/// retained because it appears in test fixtures and pre-migration telemetry
+/// derivation scripts; new code should not read it.
 const int kPushUpCalibrationHoldSeconds = 3;
 
 /// Maximum angle spread allowed while holding a calibration pose.
+/// DEPRECATED 2026-05-15 — see [kPushUpCalibrationHoldSeconds].
 const double kPushUpCalibrationHoldMaxSpread = 10.0;
+
+/// Number of valid push-up reps the manual calibrator observes before
+/// computing anchor angles. With 3 reps, MAD outlier rejection is applied
+/// from rep #3 onward — the first two reps seed the buffer, rep #3 is
+/// retried if it deviates more than 3.5×MAD from the seed pair.
+const int kPushUpCalibrationTargetReps = 3;
+
+/// Minimum elbow-angle threshold a rep must reach at its top before the
+/// per-rep detector treats the upward phase as a completed rep. Set just
+/// below [kPushUpCalibrationTopMinAngle] so a controlled lockout is
+/// required but a slightly shallow top doesn't silently drop the rep.
+const double kPushUpCalibrationRepTopMinAngle = 135.0;
 
 /// Personal push-up threshold margins derived from calibrated top/bottom.
 const double kPushUpProfileStartMargin = 12.0;
@@ -646,6 +674,52 @@ const double kHipLeadAscendingWindowFraction = 0.30;
 /// 30%-window math degenerates to a 1–2 frame sample. Fail-open below
 /// this count.
 const int kHipLeadMinAscendingFrames = 6;
+
+// ── No-knee-flexion detector (2026-05-15) ────────────────
+/// Minimum peak forward-lean magnitude (deg) required before
+/// [FormError.noKneeFlexion] can fire. Below this, the rep doesn't look
+/// remotely like a torso-pivot pattern even if the knee delta is small,
+/// so suppressing the cue avoids false positives on stiff-legged "almost
+/// no-rep" attempts that already trigger `squatDepth`.
+///
+/// PRELIMINARY — awaiting telemetry-derived tuning. Picked from
+/// biomechanics literature: a real squat at parallel sits the trunk at
+/// 30–45° from vertical, while a torso-pivot-only fault commonly clears
+/// 25° well before the knees engage.
+const double kSquatNoKneeFlexionMinLeanDeg = 25.0;
+
+/// Maximum knee-angle delta (deg) from descent-start to bottom that still
+/// counts as "no meaningful knee flexion." A normal squat drops the knee
+/// angle by 40–60°+; a torso-pivot rep drops it under ~20°.
+///
+/// PRELIMINARY — awaiting telemetry-derived tuning. Source: biomechanics
+/// of squat patterning (deep-research spec, 2026-05-15).
+const double kSquatNoKneeFlexionMaxKneeDeltaDeg = 20.0;
+
+// ── Hips-forward-on-descent detector (2026-05-15) ────────
+/// Time window (ms) after `onDescendingStart` during which the hip-X
+/// trajectory is sampled. A proper hip-hinge initiates immediately —
+/// 200 ms covers the first ~6 frames at 30 fps, which is where the
+/// "sit back" pattern is biomechanically distinguishable from a
+/// knee-dominant or chest-dive descent.
+const int kSquatHipsForwardWindowMs = 200;
+
+/// Minimum forward hip-X drift (toward toes), measured as a fraction of
+/// leg length, that fires [FormError.hipsForwardOnDescent]. Compares
+/// `hip.x[t=window] - hip.x[t=0]` against the heel reference: positive
+/// means hips drifted toward the toes (fault), negative means hinged
+/// back (correct).
+///
+/// PRELIMINARY — awaiting telemetry-derived tuning. 0.05 of leg length
+/// is roughly 4–5 cm of forward hip travel for an average lifter; well
+/// above pose-jitter noise floor but below the natural micro-shift of a
+/// correctly-executed hip-hinge.
+const double kSquatHipsForwardMinRatio = 0.05;
+
+/// Minimum raw frame count inside the window before the hips-forward
+/// check runs. Fail-open below this count — a 1-frame window is
+/// dominated by pose-detector noise. Mirrors `kHipLeadMinAscendingFrames`.
+const int kSquatHipsForwardMinFrames = 3;
 
 // ── Push-up form thresholds ──────────────────────────────
 /// Max shoulder-hip-ankle collinearity deviation for hip sag (degrees).
