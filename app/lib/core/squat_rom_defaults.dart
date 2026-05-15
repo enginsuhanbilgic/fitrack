@@ -4,22 +4,32 @@
 /// the exercise; provenance is documented in the doc-block below per the
 /// 2026-05-13 project convention.
 ///
-/// PROVENANCE — hand-tuned, literature-anchored
-/// ────────────────────────────────────────────
-/// Unlike `curl_rom_defaults.dart` (telemetry-derived from in-app diagnostic
-/// sessions), the squat FSM gates below are **hand-tuned numerical defaults**
-/// anchored to the master research spec (`docs/squat/SQUAT_MASTER_SPEC.md`).
-/// FiTrack does not yet run a diagnostic-session telemetry pipeline for squat;
-/// when it does, this file will host the derived constants and the provenance
-/// section above will be updated to "telemetry-derived" with a session-date
-/// reference.
+/// PROVENANCE — telemetry-derived (PROJECT CONVENTION)
+/// ───────────────────────────────────────────────────
+/// The High-anchored constants below come from live in-app diagnostic-session
+/// telemetry (the "Squat Debug Session" home-screen tile) — promoted from
+/// hand-tuned literature defaults on 2026-05-15 when the squat debug-session
+/// path reached curl parity (tier-3 enforcement + feedback suppression).
+/// Workflow when retuning:
+///   1. Record a debug session, paste the log to
+///      `tools/dataset_analysis/data/telemetry/sessions/`.
+///   2. Run `derive_squat_thresholds_from_telemetry.py` — it auto-saves the
+///      derived report to `data/telemetry/derived/`.
+///   3. Paste the Dart literal values from the derived report over the
+///      `SquatRomThresholdSet.anchor` block below.
 ///
-/// The underlying numeric constants (`kSquatStartAngle`, `kSquatBottomAngle`,
-/// `kSquatEndAngle`, and their `*High` counterparts) live in `constants.dart`
-/// as the single source of truth — `SquatStrategy` and tests reference them
-/// directly. This file re-exposes them through a [SquatRomDefaults] view-object
-/// so consumers reaching for "where do squat ROM thresholds come from?" land
-/// on a file named after the exercise, with provenance up top.
+/// Source: diagnostic session 2026-05-15, bodyweight squat, parity-mode
+/// (every rep ran on tier=3 source=global diagnostic=true). n=12 raw reps,
+/// 12 kept after 3.5×MAD rejection. P10 of min_knee = 47.1°,
+/// P90 of max_knee = 166.4°, P50 of max_knee = 163.4°. ICC=0.000 (single
+/// session — second session recommended to bound inter-session variance).
+///
+/// This file is now the **single source of truth** for squat ROM defaults.
+/// The `kSquatStartAngleHigh` / `kSquatBottomAngleHigh` / `kSquatEndAngleHigh`
+/// constants in `constants.dart` are kept in lockstep with the literals here
+/// (test compatibility); flip the values here first, then mirror to
+/// constants.dart. `SquatStrategy` and tests continue to reference the
+/// `k*High` constants for now.
 ///
 /// FSM SHAPE
 /// ─────────
@@ -83,14 +93,20 @@ class SquatRomThresholdSet {
   /// `dBottom=+2` means Medium accepts a *shallower* bottom (less strict).
   static const (double, double, double) _mediumLooseness = (-5.0, 2.0, -3.0);
 
-  /// Returns the High anchor — bit-for-bit identical to today's
-  /// `forSensitivity(high)` output.
+  /// Returns the **telemetry-derived High anchor**.
   ///
-  /// Apply [applySensitivity] at the call site to derive Medium.
+  /// Values inlined from the 2026-05-15 derivation (see file-level provenance
+  /// block). Apply [applySensitivity] at the call site to derive Medium —
+  /// Medium = High + `(-5, +2, -3)`, computed at runtime.
+  ///
+  /// The `kSquat*AngleHigh` constants in `constants.dart` are kept in
+  /// lockstep with these literals for test compatibility (see
+  /// `test/core/squat_rom_thresholds_test.dart`). When retuning, update the
+  /// literals here first, then mirror the same values to `constants.dart`.
   static const SquatRomThresholdSet anchor = SquatRomThresholdSet(
-    startAngle: kSquatStartAngleHigh,
-    bottomAngle: kSquatBottomAngleHigh,
-    endAngle: kSquatEndAngleHigh,
+    startAngle: 166.4,
+    bottomAngle: 47.1,
+    endAngle: 163.4,
   );
 
   /// Apply the user's sensitivity selection to a High-anchored threshold set.

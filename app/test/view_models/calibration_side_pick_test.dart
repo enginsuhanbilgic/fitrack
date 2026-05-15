@@ -151,68 +151,10 @@ void main() {
       expect(left.observedMaxAngle, right.observedMaxAngle);
       expect(left.sampleCount, right.sampleCount);
 
-      // The host should now offer the Second-Side Calibration prompt
-      // instead of auto-dismissing.
-      expect(vm.calibrationOfferSecondSide, isTrue);
+      // Calibration summary card surfaces and then auto-dismisses; no
+      // second-pass prompt is offered. (The user calibrates the other
+      // arm by re-entering calibration from Settings.)
       expect(vm.calibrationSummary, isNotNull);
-    });
-
-    test('second pass: accept + different reps → only opposite-side bucket '
-        'changes; first-pass side untouched', () async {
-      final repo = InMemoryProfileRepository();
-      final vm = _buildCurlVm(repo: repo);
-      addTearDown(vm.dispose);
-
-      vm.enterCalibrationForTest();
-      vm.setDetectedCurlViewForTest(CurlCameraView.sideLeft);
-      vm.pickCalibrationSide(ProfileSide.left);
-      _ingestThreeFirstPassReps(vm);
-      await Future<void>.delayed(Duration.zero);
-
-      // Snapshot the Left bucket bytes before the second pass.
-      final savedAfterFirst = await repo.loadCurl();
-      final leftBytesBefore = jsonEncode(
-        savedAfterFirst!
-            .bucketFor(ProfileSide.left, CurlCameraView.sideLeft)!
-            .toJson(),
-      );
-
-      // User taps Yes — second pass starts. Detector is re-armed,
-      // chosenSide flips to Right, collected list is reset.
-      vm.acceptSecondSideCalibration();
-      expect(vm.calibrationChosenSide, ProfileSide.right);
-      expect(vm.calibrationOfferSecondSide, isFalse);
-      expect(vm.calibrationReps, 0);
-
-      _ingestThreeSecondPassReps(vm);
-      await Future<void>.delayed(Duration.zero);
-
-      final savedAfterSecond = await repo.loadCurl();
-      final leftAfter = savedAfterSecond!.bucketFor(
-        ProfileSide.left,
-        CurlCameraView.sideLeft,
-      );
-      final rightAfter = savedAfterSecond.bucketFor(
-        ProfileSide.right,
-        CurlCameraView.sideLeft,
-      );
-
-      // Left must be untouched byte-identically.
-      expect(
-        jsonEncode(leftAfter!.toJson()),
-        leftBytesBefore,
-        reason: 'second-pass must not touch the first-pass bucket',
-      );
-      // Right must have been overwritten with second-pass data —
-      // its observedMinAngle reflects the higher peak band of pass 2.
-      expect(
-        rightAfter!.observedMinAngle,
-        greaterThan(leftAfter.observedMinAngle),
-        reason:
-            'second-pass reps had a shallower peak (min ≈70°) than '
-            'first-pass (min ≈50°) — opposite-side bucket must '
-            'reflect the pass-2 distribution',
-      );
     });
 
     test('pre-seeded calibrated Left bucket survives a Right-only '

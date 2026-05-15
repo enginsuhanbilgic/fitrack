@@ -451,9 +451,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         ),
 
         // ── CALIBRATION overlay ─────────────────────────────────────────────
-        if (phase == WorkoutPhase.calibration &&
-            calibrationSummary == null &&
-            !_vm.calibrationOfferSecondSide)
+        if (phase == WorkoutPhase.calibration && calibrationSummary == null)
           CalibrationOverlay(
             exercise: widget.exercise,
             repsDetected: _vm.calibrationReps,
@@ -461,7 +459,18 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             progressLabel: _vm.calibrationProgressLabel,
             instruction: _vm.calibrationInstruction,
             currentAngle: _vm.calibrationCurrentAngle,
-            detectedView: _vm.detectedCurlView,
+            // During calibration, the user is the authoritative source for
+            // which side is being calibrated. ML Kit's anatomical
+            // left/right labels are unreliable in side recordings, so the
+            // raw `detectedCurlView` can disagree with the user's pick
+            // and confuse them. Once a side has been picked, mirror it
+            // back as the live indicator; before that, fall back to the
+            // detector so the "Detecting view…" chip works.
+            detectedView: _vm.calibrationChosenSide == ProfileSide.left
+                ? CurlCameraView.sideLeft
+                : _vm.calibrationChosenSide == ProfileSide.right
+                ? CurlCameraView.sideRight
+                : _vm.detectedCurlView,
             secondsRemaining: _vm.calibrationError == null
                 ? _vm.calibrationSecondsRemaining
                 : null,
@@ -471,16 +480,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             chosenSide: _vm.calibrationChosenSide,
             onPickSide: widget.exercise.isCurl ? _vm.pickCalibrationSide : null,
           ),
-        if (phase == WorkoutPhase.calibration && _vm.calibrationOfferSecondSide)
-          _SecondSidePrompt(
-            chosenSide: _vm.calibrationChosenSide,
-            summary: calibrationSummary,
-            onAccept: _vm.acceptSecondSideCalibration,
-            onDecline: _vm.declineSecondSideCalibration,
-          ),
-        if (phase == WorkoutPhase.calibration &&
-            calibrationSummary != null &&
-            !_vm.calibrationOfferSecondSide)
+        if (phase == WorkoutPhase.calibration && calibrationSummary != null)
           Positioned.fill(
             child: Container(
               color: Colors.black87,
@@ -622,132 +622,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 // ──────────────────────────────────────────────────────────────────────────────
 // Top HUD bar — glassmorphic, replaces AppBar.
 // ──────────────────────────────────────────────────────────────────────────────
-
-/// Curl Global Calibration: post-pass-1 prompt offering an optional
-/// Second-Side Calibration. Replaces the legacy 2 s auto-dismiss
-/// summary card on the first pass — the user must explicitly say
-/// Yes (run a second pass that overwrites the opposite-side bucket)
-/// or No (keep the duplicated bucket from pass 1 and exit).
-class _SecondSidePrompt extends StatelessWidget {
-  final ProfileSide? chosenSide;
-  final CalibrationSummary? summary;
-  final VoidCallback onAccept;
-  final VoidCallback onDecline;
-
-  const _SecondSidePrompt({
-    required this.chosenSide,
-    required this.summary,
-    required this.onAccept,
-    required this.onDecline,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final pickedLabel = chosenSide == ProfileSide.left ? 'Left' : 'Right';
-    final otherLabel = chosenSide == ProfileSide.left ? 'right' : 'left';
-    final s = summary;
-    return Positioned.fill(
-      child: Container(
-        color: Colors.black87,
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.check_circle,
-                  color: Color(0xFF00E676),
-                  size: 64,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  '$pickedLabel arm calibrated',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                if (s != null)
-                  Text(
-                    s.viewLabel,
-                    style: TextStyle(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.onSurface.withValues(alpha: 0.70),
-                      fontSize: 14,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                const SizedBox(height: 20),
-                Text(
-                  'Calibrate the $otherLabel arm too?',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Optional — your $pickedLabel calibration already '
-                  'applies to both arms.',
-                  style: TextStyle(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.onSurface.withValues(alpha: 0.54),
-                    fontSize: 13,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    TextButton(
-                      onPressed: onDecline,
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 14,
-                        ),
-                      ),
-                      child: const Text(
-                        'No, use globally',
-                        style: TextStyle(color: Colors.white70, fontSize: 15),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    ElevatedButton(
-                      onPressed: onAccept,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF00E676),
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 22,
-                          vertical: 14,
-                        ),
-                        textStyle: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      child: const Text('Yes, calibrate'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _TopHudBar extends StatelessWidget {
   final ExerciseType exercise;
@@ -1021,13 +895,17 @@ class _SetupBanner extends StatelessWidget {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final topPad = MediaQuery.of(context).padding.top;
 
+    // Framing hint (curl only) wins over the generic per-exercise prompt
+    // when the landmarks pass confidence but the camera height/tilt is
+    // off — gives the user an actionable correction.
     final text = vm.setupOkFrames > 0
         ? 'Almost there… (${vm.setupOkFrames} / $kSetupCheckFrames)'
-        : exercise == ExerciseType.pushUp
-        ? 'Side view: keep shoulder, elbow, wrist, hip and ankle visible'
-        : exercise == ExerciseType.squat
-        ? 'Stand sideways — left or right side to the camera'
-        : 'Step back until your full body is visible';
+        : vm.setupFramingHint ??
+              (exercise == ExerciseType.pushUp
+                  ? 'Side view: keep shoulder, elbow, wrist, hip and ankle visible'
+                  : exercise == ExerciseType.squat
+                  ? 'Stand sideways — left or right side to the camera'
+                  : 'Step back until your full body is visible');
 
     return Positioned(
       top: topPad + 62, // below top HUD bar

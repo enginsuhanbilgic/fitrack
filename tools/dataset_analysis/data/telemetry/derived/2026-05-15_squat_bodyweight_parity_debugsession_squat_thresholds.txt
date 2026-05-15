@@ -1,0 +1,21 @@
+
+============================================================
+  ✅  variant=bodyweight
+  reps: 12 raw → kept_min=12 kept_max=12
+  sessions: 1   ICC_min=0.000   ICC_max=0.000
+
+  startAngle  (P90 of max_knee) =  166.4°  CI [164.7°, 167.1°]
+  endAngle    (P50 of max_knee) =  163.4°  CI [162.0°, 164.7°]
+  bottomAngle (P10 of min_knee) =   47.1°  CI [46.1°, 49.9°]
+
+  ── Dart snippet ─────────────────────────────────────
+// Derived squat ROM thresholds — variant: bodyweight
+// reps: 12 raw, kept_min=12 kept_max=12, 1 session(s)
+// ICC_min=0.000  ICC_max=0.000
+// 95% BCa CI — start: [164.7°, 167.1°], bottom: [46.1°, 49.9°], end: [162.0°, 164.7°]
+static const SquatRomThresholdSet bodyweightDefaults = SquatRomThresholdSet(
+  startAngle: 166.4,
+  bottomAngle: 47.1,
+  endAngle: 163.4,
+);
+  ─────────────────────────────────────────────────────

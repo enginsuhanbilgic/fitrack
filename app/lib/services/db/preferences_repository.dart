@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../../core/constants.dart' show kDefaultFormTolerancePercent;
 import '../../core/types.dart';
 import '../../models/user_profile.dart' show Units;
 
@@ -27,13 +28,34 @@ abstract class PreferencesRepository {
   Future<bool> getSquatLongFemurLifter();
   Future<void> setSquatLongFemurLifter(bool value);
 
-  /// Diagnostic-only toggle. When true, the curl FSM forces every rep to
-  /// run on `RomThresholds.global(view)` for the entire session — bypasses
-  /// auto-calibration AND saved profile buckets. Used solely to collect
-  /// clean per-rep extremes for default-threshold derivation. Has no
-  /// effect on squat or push-up. Defaults to false.
+  /// Global diagnostic toggle (2026-05-15: unified from per-exercise toggles).
+  /// When true, **all three exercises** force every rep to use cold-start
+  /// defaults — bypassing calibrated profiles and (where applicable)
+  /// in-session auto-calibration:
+  ///   * Curl: `RomThresholds.globalUnmodified(view)` (no sensitivity post-pass).
+  ///   * Squat: `SquatRomThresholdSet.anchor` (no sensitivity post-pass).
+  ///   * Push-up: `PushUpRomThresholds.defaults` (no sensitivity post-pass).
+  ///
+  /// Feedback (TTS / haptics / banners) stays ON — only debug-session prefs
+  /// silence the user-facing channel. This toggle is the developer-mode
+  /// equivalent of "what would a brand-new user feel?" with feedback intact.
+  ///
+  /// Snapshot-on-construction in `WorkoutViewModel`: mid-session Settings
+  /// changes do NOT affect an in-flight workout. Defaults to false.
   Future<bool> getDiagnosticDisableAutoCalibration();
   Future<void> setDiagnosticDisableAutoCalibration(bool value);
+
+  /// User-controlled Form Tolerance Percent in `[0, 100]`. Scales the
+  /// effective dead-band of every curl form-audit cue between the
+  /// hard-coded baseline (`kFormMinMovement*`, equivalent to `0`) and the
+  /// corresponding audit threshold (equivalent to `100`). Snapshot at
+  /// workout start; mid-session changes do not affect an in-flight
+  /// workout. Does NOT affect rep counting, quality scoring, or
+  /// post-session audit summaries. Defaults to
+  /// [kDefaultFormTolerancePercent] (0 = strictest, preserves the
+  /// 2026-05-15 hard-coded behavior bit-for-bit for upgrading users).
+  Future<int> getFormTolerancePercent();
+  Future<void> setFormTolerancePercent(int value);
 
   /// Whether the next biceps curl session should run as a *debug session*
   /// — silent observation mode that suppresses user-facing feedback (TTS,
@@ -124,6 +146,7 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   static const String _kTtsEnabledKey = 'tts_enabled';
   static const String _kTtsVerbosityKey = 'tts_verbosity';
   static const String _kHapticsEnabledKey = 'haptics_enabled';
+  static const String _kFormTolerancePercentKey = 'form_tolerance_percent';
   // ── Demo Mode keys (schema v10 / demo-mode-toggle.md) ──
   static const String _kDemoModeEnabledKey = 'demo_mode_enabled';
   static const String _kOnboardingChoiceMadeKey = 'onboarding_choice_made';
@@ -392,6 +415,32 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   }
 
   @override
+  Future<int> getFormTolerancePercent() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kFormTolerancePercentKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return kDefaultFormTolerancePercent;
+    final raw = rows.first['value'] as String?;
+    if (raw == null) return kDefaultFormTolerancePercent;
+    final parsed = int.tryParse(raw);
+    if (parsed == null) return kDefaultFormTolerancePercent;
+    return parsed.clamp(0, 100);
+  }
+
+  @override
+  Future<void> setFormTolerancePercent(int value) async {
+    final clamped = value.clamp(0, 100);
+    await _db.insert('preferences', {
+      'key': _kFormTolerancePercentKey,
+      'value': clamped.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
   Future<bool> getDemoModeEnabled() async {
     final rows = await _db.query(
       'preferences',
@@ -481,6 +530,7 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   bool _ttsEnabled = true;
   TtsVerbosity _ttsVerbosity = TtsVerbosity.medium;
   bool _hapticsEnabled = true;
+  int _formTolerancePercent = kDefaultFormTolerancePercent;
   bool _demoModeEnabled = false;
   bool _onboardingChoiceMade = false;
   String? _userProfileBackup;
@@ -573,6 +623,14 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   @override
   Future<void> setHapticsEnabled(bool value) async {
     _hapticsEnabled = value;
+  }
+
+  @override
+  Future<int> getFormTolerancePercent() async => _formTolerancePercent;
+
+  @override
+  Future<void> setFormTolerancePercent(int value) async {
+    _formTolerancePercent = value.clamp(0, 100);
   }
 
   @override

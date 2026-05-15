@@ -140,6 +140,12 @@ class SquatStrategy extends ExerciseStrategy {
   double? _minAngleThisRep;
   double? _maxAngleThisRep;
 
+  /// Timestamp at which the FSM most recently entered BOTTOM. Used to
+  /// enforce [kSquatBottomDwellMs] before BOTTOM → ASCENDING can commit.
+  /// Cleared on every reset path so a stale value from a prior rep cannot
+  /// satisfy the dwell check on the next entry. Added 2026-05-15.
+  DateTime? _bottomEntryTs;
+
   /// Thresholds resolved at IDLE→DESCENDING. Held for the rest of the rep
   /// so Tier 1 / Tier 2 can't fight over thresholds mid-rep. Mirrors curl's
   /// `_activeThresholds` invariant. Falls back to [_romThresholds] when no
@@ -296,15 +302,30 @@ class SquatStrategy extends ExerciseStrategy {
         }
       case RepState.descending:
         if (smoothed < _effectiveBottomAngle) {
+          // Stamp BOTTOM entry for the dwell gate at BOTTOM → ASCENDING.
+          // Captured here (not on the next frame) so dwell measurement
+          // starts the moment we cross the depth threshold.
+          _bottomEntryTs = input.now;
           nextState = RepState.bottom;
         } else if (smoothed > _activeThresholds.startAngle) {
           nextState = RepState.idle;
           _resetPerRepState();
         }
       case RepState.bottom:
-        // Transition to ascending only when hip is actually rising.
-        // In screen coordinates Y=0 is top, so rising = Y decreasing.
-        if (hipY != null && _prevHipY != null && hipY < _prevHipY!) {
+        // Transition to ascending only when (a) hip is actually rising AND
+        // (b) the user has held BOTTOM for at least [kSquatBottomDwellMs].
+        // The dwell gate filters single-frame sit-down/stand-up patterns
+        // that previously committed reps with no real bottom phase. The
+        // hip-rising gate remains the velocity signal — both must clear.
+        // Screen coords: Y=0 is top, so rising = Y decreasing.
+        final bottomDwellOk =
+            _bottomEntryTs != null &&
+            input.now.difference(_bottomEntryTs!).inMilliseconds >=
+                kSquatBottomDwellMs;
+        if (bottomDwellOk &&
+            hipY != null &&
+            _prevHipY != null &&
+            hipY < _prevHipY!) {
           // Arm the analyzer's per-frame hip+shoulder Y accumulator —
           // hip-lead is evaluated over the first 30% of ASCENDING.
           _form.onAscendingStart();
@@ -324,7 +345,16 @@ class SquatStrategy extends ExerciseStrategy {
           errors = [...errors, ...completionErrors];
           _maybeUpdateLongFemur();
           _emitRepExtremes();
-          repCommitted = true;
+          // Half-squat veto (2026-05-15): a rep that never reached the
+          // effective bottom angle still emits feedback ("Go deeper") but
+          // does NOT increment the counter. Pre-2026-05-15 the rep would
+          // commit unconditionally — the depth signal was *informational*
+          // rather than *gating*. The veto preserves the feedback path so
+          // the user still hears the cue but turns the half-squat into a
+          // miss instead of a counted partial. FSM still returns to IDLE
+          // so the user can re-attempt without a stale ASCENDING state.
+          final missedDepth = completionErrors.contains(FormError.squatDepth);
+          repCommitted = !missedDepth;
           nextState = RepState.idle;
           _resetPerRepState();
         }
@@ -349,6 +379,7 @@ class SquatStrategy extends ExerciseStrategy {
     _prevHipY = null;
     _minAngleThisRep = null;
     _maxAngleThisRep = null;
+    _bottomEntryTs = null;
     _form.reset();
   }
 
@@ -357,6 +388,7 @@ class SquatStrategy extends ExerciseStrategy {
     _prevHipY = null;
     _minAngleThisRep = null;
     _maxAngleThisRep = null;
+    _bottomEntryTs = null;
     _repMinAngles.clear();
     _longFemurDetected = false;
     _longFemurEmitted = false;
@@ -402,6 +434,7 @@ class SquatStrategy extends ExerciseStrategy {
     _prevHipY = null;
     _minAngleThisRep = null;
     _maxAngleThisRep = null;
+    _bottomEntryTs = null;
   }
 
   /// Long-femur adaptation: if the user consistently bottoms between

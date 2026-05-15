@@ -1,0 +1,220 @@
+[2026-05-15T02:05:16.697588] pose.quality_warn: missing_landmarks ids=23,24,25,26,27,28 conf=0.00,0.00,0.00,0.00,0.00,0.00 nearedge=true inference_ms=47
+[2026-05-15T02:05:13.446307] pose.quality_warn: missing_landmarks ids=28 conf=0.29 nearedge=true inference_ms=12
+[2026-05-15T02:05:13.293668] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:13.209888] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:13.131447] squat.frame_metrics: fsm=idle angle=166.1 l_hip=1.00 l_knee=0.97 l_ankle=0.86 r_hip=1.00 r_knee=0.97 r_ankle=0.64
+[2026-05-15T02:05:12.727122] squat.frame_metrics: fsm=idle angle=150.0 l_hip=1.00 l_knee=0.97 l_ankle=0.90 r_hip=1.00 r_knee=0.96 r_ankle=0.71
+[2026-05-15T02:05:12.330968] squat.frame_metrics: fsm=descending angle=160.1 l_hip=1.00 l_knee=0.99 l_ankle=0.93 r_hip=1.00 r_knee=0.98 r_ankle=0.81
+[2026-05-15T02:05:12.081004] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:12.001484] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:11.923381] squat.frame_metrics: fsm=idle angle=161.3 l_hip=1.00 l_knee=0.99 l_ankle=0.93 r_hip=1.00 r_knee=0.98 r_ankle=0.79
+[2026-05-15T02:05:11.923249] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:11.855006] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:11.763761] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:11.684930] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:11.597632] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:11.523511] squat.frame_metrics: fsm=idle angle=157.2 l_hip=1.00 l_knee=0.97 l_ankle=0.90 r_hip=1.00 r_knee=0.96 r_ankle=0.76
+[2026-05-15T02:05:11.523253] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:11.440116] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:11.363410] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=58.29 end=163.49 samples=4
+[2026-05-15T02:05:11.116463] squat.frame_metrics: fsm=idle angle=169.7 l_hip=1.00 l_knee=0.99 l_ankle=0.95 r_hip=1.00 r_knee=0.98 r_ankle=0.83
+[2026-05-15T02:05:10.798388] squat.hip_lead: rep=8 ratio=0.773 ascending_frame_count=11 threshold=1.4
+[2026-05-15T02:05:10.798233] squat.rep: rep=8 variant=bodyweight long_femur=false lean_deg=1.46 knee_shift=0.5776 heel_lift=0.1828 quality=0.900 min_knee=51.51 max_knee=164.97
+[2026-05-15T02:05:10.717601] squat.frame_metrics: fsm=ascending angle=166.4 l_hip=1.00 l_knee=0.98 l_ankle=0.91 r_hip=0.99 r_knee=0.95 r_ankle=0.73
+[2026-05-15T02:05:10.313237] squat.frame_metrics: fsm=ascending angle=107.4 l_hip=0.99 l_knee=0.94 l_ankle=0.78 r_hip=0.98 r_knee=0.91 r_ankle=0.61
+[2026-05-15T02:05:09.912618] squat.frame_metrics: fsm=ascending angle=65.7 l_hip=0.99 l_knee=0.97 l_ankle=0.79 r_hip=0.94 r_knee=0.92 r_ankle=0.62
+[2026-05-15T02:05:09.433486] squat.frame_metrics: fsm=ascending angle=49.7 l_hip=0.99 l_knee=0.97 l_ankle=0.78 r_hip=0.97 r_knee=0.92 r_ankle=0.57
+[2026-05-15T02:05:09.355469] pose.quality_warn: missing_landmarks ids=27,28 conf=0.13,0.08 nearedge=true inference_ms=18
+[2026-05-15T02:05:09.030061] squat.frame_metrics: fsm=bottom angle=56.0 l_hip=0.99 l_knee=0.93 l_ankle=0.61 r_hip=0.97 r_knee=0.85 r_ankle=0.45
+[2026-05-15T02:05:08.549838] squat.frame_metrics: fsm=bottom angle=73.8 l_hip=1.00 l_knee=0.96 l_ankle=0.87 r_hip=0.99 r_knee=0.93 r_ankle=0.66
+[2026-05-15T02:05:08.145056] squat.frame_metrics: fsm=descending angle=131.0 l_hip=0.99 l_knee=0.95 l_ankle=0.89 r_hip=0.97 r_knee=0.87 r_ankle=0.68
+[2026-05-15T02:05:07.991182] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:07.908464] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:07.836506] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:07.744960] squat.frame_metrics: fsm=idle angle=162.5 l_hip=0.99 l_knee=0.96 l_ankle=0.81 r_hip=0.99 r_knee=0.93 r_ankle=0.65
+[2026-05-15T02:05:07.744812] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:07.667626] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:07.584051] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:07.348104] squat.frame_metrics: fsm=idle angle=160.7 l_hip=1.00 l_knee=0.98 l_ankle=0.87 r_hip=1.00 r_knee=0.95 r_ankle=0.69
+[2026-05-15T02:05:07.032791] squat.hip_lead: rep=7 ratio=null ascending_frame_count=4 threshold=1.4
+[2026-05-15T02:05:07.032640] squat.rep: rep=7 variant=bodyweight long_femur=false lean_deg=5.91 knee_shift=0.5257 heel_lift=0.1190 quality=0.900 min_knee=84.38 max_knee=166.15
+[2026-05-15T02:05:06.945848] squat.frame_metrics: fsm=ascending angle=164.1 l_hip=0.99 l_knee=0.97 l_ankle=0.86 r_hip=1.00 r_knee=0.95 r_ankle=0.69
+[2026-05-15T02:05:06.545200] squat.frame_metrics: fsm=ascending angle=148.7 l_hip=0.99 l_knee=0.98 l_ankle=0.84 r_hip=0.98 r_knee=0.94 r_ankle=0.68
+[2026-05-15T02:05:06.164620] squat.frame_metrics: fsm=bottom angle=70.0 l_hip=0.99 l_knee=0.95 l_ankle=0.84 r_hip=0.98 r_knee=0.91 r_ankle=0.62
+[2026-05-15T02:05:04.736275] squat.frame_metrics: fsm=bottom angle=89.8 l_hip=1.00 l_knee=0.98 l_ankle=0.91 r_hip=0.99 r_knee=0.96 r_ankle=0.82
+[2026-05-15T02:05:04.334702] squat.frame_metrics: fsm=descending angle=142.5 l_hip=0.99 l_knee=0.95 l_ankle=0.90 r_hip=0.98 r_knee=0.92 r_ankle=0.76
+[2026-05-15T02:05:04.177399] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:04.092638] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:04.011944] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:03.932472] squat.frame_metrics: fsm=idle angle=160.0 l_hip=1.00 l_knee=0.98 l_ankle=0.91 r_hip=0.99 r_knee=0.95 r_ankle=0.75
+[2026-05-15T02:05:03.932311] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:03.853213] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:03.770492] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:03.694955] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:03.614603] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:03.535771] squat.frame_metrics: fsm=idle angle=161.9 l_hip=0.99 l_knee=0.98 l_ankle=0.92 r_hip=0.99 r_knee=0.95 r_ankle=0.76
+[2026-05-15T02:05:03.535600] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:03.449190] squat.thresholds_resolved: tier=1 source=calibrated sensitivity=high start=158.49 bottom=59.47 end=163.49 samples=3
+[2026-05-15T02:05:03.126284] squat.frame_metrics: fsm=idle angle=162.3 l_hip=1.00 l_knee=0.98 l_ankle=0.92 r_hip=1.00 r_knee=0.97 r_ankle=0.73
+[2026-05-15T02:05:02.894855] squat.hip_lead: rep=6 ratio=0.686 ascending_frame_count=12 threshold=1.4
+[2026-05-15T02:05:02.894713] squat.rep: rep=6 variant=bodyweight long_femur=false lean_deg=2.24 knee_shift=0.5953 heel_lift=0.1066 quality=0.900 min_knee=64.20 max_knee=160.26
+[2026-05-15T02:05:02.728295] squat.frame_metrics: fsm=ascending angle=153.5 l_hip=1.00 l_knee=0.99 l_ankle=0.93 r_hip=1.00 r_knee=0.98 r_ankle=0.83
+[2026-05-15T02:05:02.336873] squat.frame_metrics: fsm=ascending angle=98.0 l_hip=0.99 l_knee=0.93 l_ankle=0.74 r_hip=0.96 r_knee=0.86 r_ankle=0.54
+[2026-05-15T02:05:01.926006] squat.frame_metrics: fsm=ascending angle=68.5 l_hip=1.00 l_knee=0.94 l_ankle=0.58 r_hip=0.99 r_knee=0.90 r_ankle=0.47
+[2026-05-15T02:05:01.529084] squat.frame_metrics: fsm=ascending angle=64.1 l_hip=1.00 l_knee=0.98 l_ankle=0.82 r_hip=1.00 r_knee=0.98 r_ankle=0.75
+[2026-05-15T02:05:01.122902] squat.frame_metrics: fsm=bottom angle=61.6 l_hip=1.00 l_knee=0.97 l_ankle=0.77 r_hip=0.99 r_knee=0.95 r_ankle=0.63
+[2026-05-15T02:05:00.728293] squat.frame_metrics: fsm=bottom angle=68.0 l_hip=1.00 l_knee=0.94 l_ankle=0.72 r_hip=0.99 r_knee=0.91 r_ankle=0.44
+[2026-05-15T02:05:00.318854] squat.frame_metrics: fsm=descending angle=115.4 l_hip=0.99 l_knee=0.88 l_ankle=0.76 r_hip=0.96 r_knee=0.74 r_ankle=0.42
+[2026-05-15T02:04:59.918961] squat.frame_metrics: fsm=descending angle=146.6 l_hip=1.00 l_knee=0.97 l_ankle=0.92 r_hip=0.99 r_knee=0.95 r_ankle=0.71
+[2026-05-15T02:04:59.918795] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=151.59 bottom=65.86 end=156.59 reps=5
+[2026-05-15T02:04:59.837228] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=151.59 bottom=65.86 end=156.59 reps=5
+[2026-05-15T02:04:59.762967] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=151.59 bottom=65.86 end=156.59 reps=5
+[2026-05-15T02:04:59.677036] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=151.59 bottom=65.86 end=156.59 reps=5
+[2026-05-15T02:04:59.600674] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=151.59 bottom=65.86 end=156.59 reps=5
+[2026-05-15T02:04:59.512401] squat.frame_metrics: fsm=idle angle=157.3 l_hip=1.00 l_knee=0.98 l_ankle=0.91 r_hip=1.00 r_knee=0.97 r_ankle=0.75
+[2026-05-15T02:04:59.512255] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=151.59 bottom=65.86 end=156.59 reps=5
+[2026-05-15T02:04:59.440027] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=151.59 bottom=65.86 end=156.59 reps=5
+[2026-05-15T02:04:59.358685] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=151.59 bottom=65.86 end=156.59 reps=5
+[2026-05-15T02:04:59.279551] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=151.59 bottom=65.86 end=156.59 reps=5
+[2026-05-15T02:04:59.112634] squat.frame_metrics: fsm=idle angle=163.5 l_hip=1.00 l_knee=0.99 l_ankle=0.96 r_hip=1.00 r_knee=0.98 r_ankle=0.86
+[2026-05-15T02:04:58.711684] squat.frame_metrics: fsm=idle angle=164.8 l_hip=1.00 l_knee=0.98 l_ankle=0.89 r_hip=1.00 r_knee=0.96 r_ankle=0.67
+[2026-05-15T02:04:58.711636] squat.hip_lead: rep=5 ratio=0.867 ascending_frame_count=13 threshold=1.4
+[2026-05-15T02:04:58.711508] squat.rep: rep=5 variant=bodyweight long_femur=false lean_deg=3.43 knee_shift=0.6137 heel_lift=0.1312 quality=0.900 min_knee=67.08 max_knee=164.28
+[2026-05-15T02:04:58.312477] squat.frame_metrics: fsm=ascending angle=152.6 l_hip=0.99 l_knee=0.96 l_ankle=0.85 r_hip=0.97 r_knee=0.93 r_ankle=0.63
+[2026-05-15T02:04:57.920965] squat.frame_metrics: fsm=ascending angle=90.9 l_hip=0.99 l_knee=0.90 l_ankle=0.55 r_hip=0.98 r_knee=0.90 r_ankle=0.45
+[2026-05-15T02:04:57.506918] squat.frame_metrics: fsm=ascending angle=64.3 l_hip=1.00 l_knee=0.98 l_ankle=0.83 r_hip=1.00 r_knee=0.97 r_ankle=0.74
+[2026-05-15T02:04:57.110584] squat.frame_metrics: fsm=ascending angle=60.3 l_hip=1.00 l_knee=0.99 l_ankle=0.83 r_hip=1.00 r_knee=0.98 r_ankle=0.69
+[2026-05-15T02:04:56.703799] squat.frame_metrics: fsm=bottom angle=62.8 l_hip=1.00 l_knee=0.96 l_ankle=0.61 r_hip=1.00 r_knee=0.94 r_ankle=0.47
+[2026-05-15T02:04:56.307786] squat.frame_metrics: fsm=bottom angle=75.8 l_hip=1.00 l_knee=0.97 l_ankle=0.85 r_hip=0.99 r_knee=0.93 r_ankle=0.62
+[2026-05-15T02:04:55.899510] squat.frame_metrics: fsm=descending angle=126.8 l_hip=0.99 l_knee=0.96 l_ankle=0.90 r_hip=0.98 r_knee=0.88 r_ankle=0.70
+[2026-05-15T02:04:55.740896] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.91 bottom=64.30 end=155.91 reps=4
+[2026-05-15T02:04:55.665386] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.91 bottom=64.30 end=155.91 reps=4
+[2026-05-15T02:04:55.577678] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.91 bottom=64.30 end=155.91 reps=4
+[2026-05-15T02:04:55.500985] squat.frame_metrics: fsm=idle angle=152.7 l_hip=1.00 l_knee=0.98 l_ankle=0.94 r_hip=1.00 r_knee=0.97 r_ankle=0.77
+[2026-05-15T02:04:55.500824] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.91 bottom=64.30 end=155.91 reps=4
+[2026-05-15T02:04:55.420251] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.91 bottom=64.30 end=155.91 reps=4
+[2026-05-15T02:04:55.349588] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.91 bottom=64.30 end=155.91 reps=4
+[2026-05-15T02:04:55.258889] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.91 bottom=64.30 end=155.91 reps=4
+[2026-05-15T02:04:55.177644] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.91 bottom=64.30 end=155.91 reps=4
+[2026-05-15T02:04:55.095053] squat.frame_metrics: fsm=idle angle=165.0 l_hip=1.00 l_knee=0.98 l_ankle=0.94 r_hip=1.00 r_knee=0.97 r_ankle=0.79
+[2026-05-15T02:04:55.094899] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.91 bottom=64.30 end=155.91 reps=4
+[2026-05-15T02:04:55.022387] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.91 bottom=64.30 end=155.91 reps=4
+[2026-05-15T02:04:54.938717] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.91 bottom=64.30 end=155.91 reps=4
+[2026-05-15T02:04:54.695125] squat.frame_metrics: fsm=idle angle=159.0 l_hip=1.00 l_knee=0.98 l_ankle=0.94 r_hip=1.00 r_knee=0.97 r_ankle=0.82
+[2026-05-15T02:04:54.376174] squat.hip_lead: rep=4 ratio=0.737 ascending_frame_count=9 threshold=1.4
+[2026-05-15T02:04:54.376039] squat.rep: rep=4 variant=bodyweight long_femur=false lean_deg=0.36 knee_shift=0.7987 heel_lift=0.1031 quality=0.900 min_knee=54.80 max_knee=161.93
+[2026-05-15T02:04:54.303110] squat.frame_metrics: fsm=ascending angle=159.8 l_hip=1.00 l_knee=0.99 l_ankle=0.91 r_hip=1.00 r_knee=0.98 r_ankle=0.76
+[2026-05-15T02:04:53.893579] squat.frame_metrics: fsm=ascending angle=98.8 l_hip=0.99 l_knee=0.88 l_ankle=0.68 r_hip=0.95 r_knee=0.82 r_ankle=0.44
+[2026-05-15T02:04:53.811322] pose.quality_warn: missing_landmarks ids=28 conf=0.25 nearedge=true inference_ms=12
+[2026-05-15T02:04:53.332673] squat.frame_metrics: fsm=ascending angle=54.1 l_hip=1.00 l_knee=0.97 l_ankle=0.76 r_hip=0.99 r_knee=0.94 r_ankle=0.65
+[2026-05-15T02:04:52.928132] squat.frame_metrics: fsm=bottom angle=51.6 l_hip=1.00 l_knee=0.98 l_ankle=0.78 r_hip=1.00 r_knee=0.97 r_ankle=0.65
+[2026-05-15T02:04:52.447736] squat.frame_metrics: fsm=bottom angle=67.0 l_hip=1.00 l_knee=0.95 l_ankle=0.70 r_hip=0.99 r_knee=0.90 r_ankle=0.48
+[2026-05-15T02:04:52.045115] squat.frame_metrics: fsm=descending angle=101.1 l_hip=1.00 l_knee=0.95 l_ankle=0.84 r_hip=0.99 r_knee=0.94 r_ankle=0.57
+[2026-05-15T02:04:51.644583] squat.frame_metrics: fsm=descending angle=147.8 l_hip=0.99 l_knee=0.97 l_ankle=0.93 r_hip=0.99 r_knee=0.95 r_ankle=0.78
+[2026-05-15T02:04:51.644419] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:51.563643] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:51.488806] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:51.404671] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:51.324091] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:51.248436] squat.frame_metrics: fsm=idle angle=153.3 l_hip=1.00 l_knee=0.99 l_ankle=0.95 r_hip=1.00 r_knee=0.98 r_ankle=0.83
+[2026-05-15T02:04:51.248271] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:51.163103] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:51.089194] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:51.003419] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:50.927021] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:50.846568] squat.frame_metrics: fsm=idle angle=155.6 l_hip=1.00 l_knee=0.98 l_ankle=0.94 r_hip=1.00 r_knee=0.98 r_ankle=0.83
+[2026-05-15T02:04:50.846223] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:50.762454] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:50.677347] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:50.604694] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=150.57 bottom=65.81 end=155.57 reps=3
+[2026-05-15T02:04:50.453863] squat.frame_metrics: fsm=idle angle=155.3 l_hip=1.00 l_knee=0.98 l_ankle=0.92 r_hip=1.00 r_knee=0.97 r_ankle=0.77
+[2026-05-15T02:04:50.039440] squat.frame_metrics: fsm=idle angle=158.5 l_hip=1.00 l_knee=0.97 l_ankle=0.87 r_hip=0.99 r_knee=0.95 r_ankle=0.71
+[2026-05-15T02:04:50.039392] squat.hip_lead: rep=3 ratio=0.771 ascending_frame_count=7 threshold=1.4
+[2026-05-15T02:04:50.039269] squat.rep: rep=3 variant=bodyweight long_femur=false lean_deg=null knee_shift=0.5810 heel_lift=0.1069 quality=0.900 min_knee=56.15 max_knee=165.82
+[2026-05-15T02:04:49.637104] squat.frame_metrics: fsm=ascending angle=111.0 l_hip=0.99 l_knee=0.95 l_ankle=0.80 r_hip=0.98 r_knee=0.90 r_ankle=0.60
+[2026-05-15T02:04:49.239463] squat.frame_metrics: fsm=ascending angle=69.4 l_hip=1.00 l_knee=0.97 l_ankle=0.67 r_hip=0.99 r_knee=0.96 r_ankle=0.52
+[2026-05-15T02:04:48.839513] squat.frame_metrics: fsm=bottom angle=56.8 l_hip=1.00 l_knee=0.97 l_ankle=0.68 r_hip=0.99 r_knee=0.95 r_ankle=0.55
+[2026-05-15T02:04:48.429750] squat.frame_metrics: fsm=bottom angle=59.4 l_hip=1.00 l_knee=0.96 l_ankle=0.71 r_hip=0.99 r_knee=0.94 r_ankle=0.50
+[2026-05-15T02:04:48.035837] squat.frame_metrics: fsm=descending angle=71.5 l_hip=0.99 l_knee=0.97 l_ankle=0.88 r_hip=0.95 r_knee=0.92 r_ankle=0.75
+[2026-05-15T02:04:47.628312] squat.frame_metrics: fsm=descending angle=140.5 l_hip=0.99 l_knee=0.96 l_ankle=0.86 r_hip=0.98 r_knee=0.88 r_ankle=0.66
+[2026-05-15T02:04:47.628163] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:47.548952] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:47.470146] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:47.394216] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:47.309907] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:47.228030] squat.frame_metrics: fsm=idle angle=165.8 l_hip=0.99 l_knee=0.98 l_ankle=0.91 r_hip=0.98 r_knee=0.94 r_ankle=0.76
+[2026-05-15T02:04:47.227875] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:47.144433] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:47.070337] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:46.993940] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:46.907023] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:46.831357] squat.frame_metrics: fsm=idle angle=165.9 l_hip=0.99 l_knee=0.97 l_ankle=0.85 r_hip=0.99 r_knee=0.97 r_ankle=0.70
+[2026-05-15T02:04:46.831187] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:46.743742] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:46.668582] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:46.587806] squat.thresholds_resolved: tier=2 source=autoCalibrated sensitivity=high start=147.95 bottom=68.14 end=152.95 reps=2
+[2026-05-15T02:04:46.426785] squat.frame_metrics: fsm=idle angle=167.5 l_hip=1.00 l_knee=0.99 l_ankle=0.92 r_hip=1.00 r_knee=0.98 r_ankle=0.80
+[2026-05-15T02:04:46.028073] squat.frame_metrics: fsm=idle angle=164.2 l_hip=1.00 l_knee=0.99 l_ankle=0.92 r_hip=1.00 r_knee=0.97 r_ankle=0.74
+[2026-05-15T02:04:46.027985] squat.hip_lead: rep=2 ratio=0.979 ascending_frame_count=19 threshold=1.4
+[2026-05-15T02:04:46.027845] squat.rep: rep=2 variant=bodyweight long_femur=false lean_deg=4.73 knee_shift=0.5366 heel_lift=0.1078 quality=0.900 min_knee=64.59 max_knee=157.20
+[2026-05-15T02:04:45.625788] squat.frame_metrics: fsm=ascending angle=150.1 l_hip=1.00 l_knee=0.98 l_ankle=0.91 r_hip=0.99 r_knee=0.97 r_ankle=0.74
+[2026-05-15T02:04:45.226427] squat.frame_metrics: fsm=ascending angle=94.4 l_hip=0.99 l_knee=0.93 l_ankle=0.72 r_hip=0.97 r_knee=0.90 r_ankle=0.53
+[2026-05-15T02:04:45.141426] pose.quality_warn: missing_landmarks ids=28 conf=0.30 nearedge=true inference_ms=16
+[2026-05-15T02:04:44.820628] squat.frame_metrics: fsm=ascending angle=79.9 l_hip=1.00 l_knee=0.97 l_ankle=0.76 r_hip=0.99 r_knee=0.97 r_ankle=0.63
+[2026-05-15T02:04:44.420420] squat.frame_metrics: fsm=ascending angle=62.4 l_hip=1.00 l_knee=0.97 l_ankle=0.57 r_hip=1.00 r_knee=0.95 r_ankle=0.43
+[2026-05-15T02:04:44.019769] squat.frame_metrics: fsm=ascending angle=62.8 l_hip=1.00 l_knee=0.96 l_ankle=0.60 r_hip=0.99 r_knee=0.93 r_ankle=0.44
+[2026-05-15T02:04:43.614411] squat.frame_metrics: fsm=bottom angle=70.9 l_hip=1.00 l_knee=0.97 l_ankle=0.70 r_hip=0.99 r_knee=0.95 r_ankle=0.52
+[2026-05-15T02:04:43.216170] squat.frame_metrics: fsm=bottom angle=85.2 l_hip=1.00 l_knee=0.97 l_ankle=0.79 r_hip=0.98 r_knee=0.93 r_ankle=0.51
+[2026-05-15T02:04:42.809314] squat.frame_metrics: fsm=descending angle=135.2 l_hip=1.00 l_knee=0.98 l_ankle=0.93 r_hip=0.99 r_knee=0.94 r_ankle=0.77
+[2026-05-15T02:04:42.412434] squat.frame_metrics: fsm=descending angle=156.7 l_hip=1.00 l_knee=0.99 l_ankle=0.95 r_hip=1.00 r_knee=0.98 r_ankle=0.84
+[2026-05-15T02:04:42.017575] squat.frame_metrics: fsm=descending angle=158.2 l_hip=1.00 l_knee=0.97 l_ankle=0.90 r_hip=1.00 r_knee=0.97 r_ankle=0.75
+[2026-05-15T02:04:41.690975] squat.thresholds_resolved: tier=3 source=global sensitivity=high start=165.00 bottom=88.00 end=163.00
+[2026-05-15T02:04:41.611561] squat.frame_metrics: fsm=idle angle=157.4 l_hip=1.00 l_knee=0.98 l_ankle=0.91 r_hip=1.00 r_knee=0.97 r_ankle=0.76
+[2026-05-15T02:04:41.201796] squat.frame_metrics: fsm=idle angle=157.7 l_hip=1.00 l_knee=0.99 l_ankle=0.95 r_hip=1.00 r_knee=0.97 r_ankle=0.83
+[2026-05-15T02:04:41.132415] squat.hip_lead: rep=1 ratio=0.732 ascending_frame_count=15 threshold=1.4
+[2026-05-15T02:04:41.132154] squat.rep: rep=1 variant=bodyweight long_femur=false lean_deg=7.60 knee_shift=0.5566 heel_lift=0.1021 quality=0.900 min_knee=61.68 max_knee=158.70
+[2026-05-15T02:04:40.810719] squat.frame_metrics: fsm=ascending angle=155.5 l_hip=1.00 l_knee=0.98 l_ankle=0.93 r_hip=1.00 r_knee=0.97 r_ankle=0.78
+[2026-05-15T02:04:40.405870] squat.frame_metrics: fsm=ascending angle=113.3 l_hip=0.99 l_knee=0.95 l_ankle=0.83 r_hip=0.98 r_knee=0.93 r_ankle=0.66
+[2026-05-15T02:04:40.160244] pose.quality_warn: missing_landmarks ids=28 conf=0.22 nearedge=true inference_ms=13
+[2026-05-15T02:04:40.005407] squat.frame_metrics: fsm=ascending angle=72.3 l_hip=0.99 l_knee=0.93 l_ankle=0.60 r_hip=0.97 r_knee=0.91 r_ankle=0.41
+[2026-05-15T02:04:39.600103] squat.frame_metrics: fsm=ascending angle=56.9 l_hip=0.99 l_knee=0.95 l_ankle=0.65 r_hip=0.98 r_knee=0.90 r_ankle=0.52
+[2026-05-15T02:04:39.200515] squat.frame_metrics: fsm=bottom angle=60.0 l_hip=1.00 l_knee=0.96 l_ankle=0.72 r_hip=0.98 r_knee=0.92 r_ankle=0.54
+[2026-05-15T02:04:38.958086] pose.quality_warn: missing_landmarks ids=28 conf=0.24 nearedge=true inference_ms=15
+[2026-05-15T02:04:38.560156] squat.frame_metrics: fsm=bottom angle=70.2 l_hip=1.00 l_knee=0.98 l_ankle=0.86 r_hip=0.99 r_knee=0.95 r_ankle=0.61
+[2026-05-15T02:04:38.152649] squat.frame_metrics: fsm=descending angle=114.3 l_hip=1.00 l_knee=0.96 l_ankle=0.89 r_hip=0.99 r_knee=0.88 r_ankle=0.65
+[2026-05-15T02:04:37.753940] squat.frame_metrics: fsm=descending angle=144.2 l_hip=1.00 l_knee=0.98 l_ankle=0.93 r_hip=0.99 r_knee=0.96 r_ankle=0.76
+[2026-05-15T02:04:37.350512] squat.frame_metrics: fsm=descending angle=159.9 l_hip=1.00 l_knee=0.99 l_ankle=0.94 r_hip=1.00 r_knee=0.98 r_ankle=0.83
+[2026-05-15T02:04:36.945070] squat.frame_metrics: fsm=descending angle=158.5 l_hip=1.00 l_knee=0.97 l_ankle=0.91 r_hip=1.00 r_knee=0.97 r_ankle=0.78
+[2026-05-15T02:04:36.543821] squat.frame_metrics: fsm=descending angle=160.6 l_hip=1.00 l_knee=0.98 l_ankle=0.94 r_hip=1.00 r_knee=0.97 r_ankle=0.82
+[2026-05-15T02:04:36.543759] squat.thresholds_resolved: tier=3 source=global sensitivity=high start=165.00 bottom=88.00 end=163.00
+[2026-05-15T02:04:36.543602] squat.anatomical_long_femur: median_ratio=0.600 threshold=0.6
+[2026-05-15T02:04:36.143871] squat.frame_metrics: fsm=ascending angle=151.1 l_hip=1.00 l_knee=0.99 l_ankle=0.95 r_hip=1.00 r_knee=0.99 r_ankle=0.88
+[2026-05-15T02:04:35.743752] squat.frame_metrics: fsm=ascending angle=85.3 l_hip=1.00 l_knee=0.98 l_ankle=0.90 r_hip=0.99 r_knee=0.96 r_ankle=0.74
+[2026-05-15T02:04:35.342715] squat.frame_metrics: fsm=ascending angle=100.9 l_hip=0.99 l_knee=0.95 l_ankle=0.72 r_hip=0.99 r_knee=0.92 r_ankle=0.56
+[2026-05-15T02:04:34.858114] squat.frame_metrics: fsm=ascending angle=103.3 l_hip=0.98 l_knee=0.93 l_ankle=0.61 r_hip=0.97 r_knee=0.87 r_ankle=0.44
+[2026-05-15T02:04:34.694751] pose.quality_warn: missing_landmarks ids=27,28 conf=0.06,0.05 nearedge=true inference_ms=12
+[2026-05-15T02:04:34.375220] squat.frame_metrics: fsm=ascending angle=63.8 l_hip=0.99 l_knee=0.96 l_ankle=0.83 r_hip=0.95 r_knee=0.89 r_ankle=0.62
+[2026-05-15T02:04:33.975166] squat.frame_metrics: fsm=ascending angle=125.5 l_hip=0.99 l_knee=0.90 l_ankle=0.70 r_hip=0.98 r_knee=0.77 r_ankle=0.42
+[2026-05-15T02:04:33.576] squat.frame_metrics: fsm=ascending angle=151.4 l_hip=0.99 l_knee=0.95 l_ankle=0.85 r_hip=0.99 r_knee=0.89 r_ankle=0.62
+[2026-05-15T02:04:33.174184] squat.frame_metrics: fsm=ascending angle=157.5 l_hip=0.99 l_knee=0.97 l_ankle=0.88 r_hip=0.99 r_knee=0.95 r_ankle=0.74
+[2026-05-15T02:04:32.778153] squat.frame_metrics: fsm=ascending angle=157.4 l_hip=0.99 l_knee=0.92 l_ankle=0.75 r_hip=0.99 r_knee=0.89 r_ankle=0.56
+[2026-05-15T02:04:32.372901] squat.frame_metrics: fsm=ascending angle=158.2 l_hip=0.99 l_knee=0.95 l_ankle=0.82 r_hip=0.99 r_knee=0.93 r_ankle=0.61
+[2026-05-15T02:04:31.970248] squat.frame_metrics: fsm=ascending angle=121.5 l_hip=0.98 l_knee=0.87 l_ankle=0.67 r_hip=0.94 r_knee=0.73 r_ankle=0.42
+[2026-05-15T02:04:31.891912] pose.quality_warn: missing_landmarks ids=28 conf=0.24 nearedge=true inference_ms=19
+[2026-05-15T02:04:31.409848] squat.frame_metrics: fsm=ascending angle=62.9 l_hip=0.97 l_knee=0.96 l_ankle=0.83 r_hip=0.92 r_knee=0.90 r_ankle=0.65
+[2026-05-15T02:04:31.005486] squat.frame_metrics: fsm=bottom angle=67.2 l_hip=0.99 l_knee=0.96 l_ankle=0.79 r_hip=0.97 r_knee=0.92 r_ankle=0.64
+[2026-05-15T02:04:30.605318] squat.frame_metrics: fsm=descending angle=102.8 l_hip=1.00 l_knee=0.93 l_ankle=0.77 r_hip=0.99 r_knee=0.82 r_ankle=0.49
+[2026-05-15T02:04:30.207349] squat.frame_metrics: fsm=descending angle=137.5 l_hip=0.99 l_knee=0.93 l_ankle=0.78 r_hip=0.98 r_knee=0.82 r_ankle=0.43
+[2026-05-15T02:04:29.873603] squat.frame_metrics: fsm=descending angle=150.8 l_hip=0.99 l_knee=0.98 l_ankle=0.94 r_hip=0.98 r_knee=0.93 r_ankle=0.79
+[2026-05-15T02:04:28.311344] squat.frame_metrics: fsm=descending angle=161.0 l_hip=1.00 l_knee=0.99 l_ankle=0.94 r_hip=0.99 r_knee=0.98 r_ankle=0.85
+[2026-05-15T02:04:27.915725] squat.frame_metrics: fsm=descending angle=153.6 l_hip=1.00 l_knee=0.96 l_ankle=0.90 r_hip=0.99 r_knee=0.95 r_ankle=0.67
+[2026-05-15T02:04:27.914766] squat.thresholds_resolved: tier=3 source=global sensitivity=high start=165.00 bottom=88.00 end=163.00
+[2026-05-15T02:04:21.538909] pose.quality_warn: missing_landmarks ids=28 conf=0.27 nearedge=true inference_ms=22
+[2026-05-15T02:04:20.090301] pose.quality_warn: missing_landmarks ids=27,28 conf=0.21,0.23 nearedge=true inference_ms=20
+[2026-05-15T02:04:18.966803] pose.quality_warn: missing_landmarks ids=27 conf=0.29 nearedge=true inference_ms=20
+[2026-05-15T02:04:16.235722] pose.quality_warn: missing_landmarks ids=27,28 conf=0.28,0.27 nearedge=true inference_ms=19
+[2026-05-15T02:04:15.116296] pose.quality_warn: missing_landmarks ids=27,28 conf=0.03,0.02 nearedge=true inference_ms=22
+[2026-05-15T02:04:13.957391] pose.quality_warn: missing_landmarks ids=25,27,28 conf=0.17,0.08,0.25 nearedge=false inference_ms=1181
+[2026-05-15T02:04:11.364434] squat_debug.session_start: ts=2026-05-15T02:04:11.363835 exercise=squat variant=bodyweight long_femur=false start_angle=160.0 bottom_angle=90.0 end_angle=160.0 lean_warn_bodyweight=45.0 lean_warn_hbbs=50.0 knee_shift_warn=0.3 heel_lift_warn=0.03
+[2026-05-15T02:04:11.363710] squat_debug.session_active: ring_buffer=2000 frame_metrics@3.0Hz
+[2026-05-15T02:03:09.491161] app.bootstrap: DB opened; migration outcome=noLegacyFile

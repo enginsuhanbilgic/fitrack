@@ -36,12 +36,13 @@
 ///
 /// PROVENANCE — sideLeft / sideRight buckets
 /// ─────────────────────────────────────────
-/// Source: diagnostic session 2026-04-28, left-arm side view, --from-frames
-/// mode (FSM thresholds were misconfigured so no rep.extremes were emitted;
-/// reps were detected from raw angle_raw signal via local-min/max detector).
-/// n=7 raw reps, 5 kept after 3.5×MAD rejection. Personal medians: peak=108.4°,
-/// start=167.0°. Permissive level omitted — geometrically invalid for this
-/// user's ROM (peakExit would exceed startAngle with +38° tolerance).
+/// Source: diagnostic session 2026-05-15, right-arm side view, --from-frames
+/// mode (Curl Debug Session tile; tier 3 / source=global / sensitivity=high
+/// enforced for the full session so every rep ran against fixed baselines).
+/// n=15 raw reps, 13 kept after 3.5×MAD rejection. Personal medians:
+/// peak=55.0°, start=164.6°. ICC=0.000 (single session — second session
+/// recommended to bound inter-session variance). Aliased to sideLeft via
+/// bilateral-symmetry argument (see sideRightAnchor comment below).
 library;
 
 import 'pipeline_rom_defaults.dart';
@@ -55,23 +56,25 @@ class CurlRomDefaults {
   // fallback sentinel; the `forView` resolver returns null for it so
   // callers cascade to the next ROM tier.
 
-  // ── Side-left anchor (derived 2026-04-28, --from-frames mode) ────────────
-  // Source: diagnostic session 2026-04-28 (left-arm, side view).
-  // 7 reps detected via local-min/max frame-signal detector; 5 kept after
-  // 3.5×MAD outlier rejection. Personal medians: peak=108.4°, start=167.0°.
-  // ICC=0.000 (single session), eff_n=5. Mirror-inverted session logged as
-  // sideRight due to a known home-screen mapping bug — angles are identical
-  // by bilateral symmetry so these constants apply to both views.
+  // ── Side-left anchor (derived 2026-05-15, --from-frames mode) ────────────
+  // Source: Curl Debug Session 2026-05-15 (right-arm, side view, tier 3 /
+  // source=global / sensitivity=high). 15 reps detected via local-min/max
+  // frame-signal detector; 13 kept after 3.5×MAD outlier rejection.
+  // Personal medians: peak=55.0°, start=164.6°. ICC=0.000 (single session),
+  // eff_n=13. Right-arm session applied to sideLeft anchor under the
+  // bilateral-symmetry argument (2D sagittal projection is mirror-identical
+  // for healthy subjects; ~2–5° handedness asymmetry sits well inside the
+  // tolerance margins). sideRightAnchor below is a const alias.
   //
   // Values represent the **High anchor**. Medium is derived by applying the
   // telemetry-specific looseness deltas (-3, +8, +8) inside
   // `RomThresholds._applyTelemetrySensitivity`.
 
   static const CurlRomThresholdSet sideLeftAnchor = CurlRomThresholdSet(
-    startAngle: 162.0,
-    peakAngle: 128.4,
-    peakExitAngle: 143.4,
-    endAngle: 148.4,
+    startAngle: 157.6,
+    peakAngle: 85.0,
+    peakExitAngle: 95.0,
+    endAngle: 137.6,
   );
 
   // ── Side-right anchor (aliases sideLeft — bilateral symmetry) ──────────

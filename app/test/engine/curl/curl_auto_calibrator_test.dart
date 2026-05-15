@@ -33,36 +33,55 @@ void main() {
     });
   });
 
-  group('cumulative averaging', () {
-    test('two reps produce the exact arithmetic mean of extremes', () {
-      c.recordRepExtremes(60, 160);
-      c.recordRepExtremes(70, 170);
-      final t = c.currentThresholds!;
-      // Expected bucket extremes: min=65, max=165.
-      // peak = 65 + 15 = 80
-      // start = 165 - 10 = 155
-      // end   = 165 - 25 = 140
-      expect(t.peakAngle, closeTo(80, 1e-9));
-      expect(t.startAngle, closeTo(155, 1e-9));
-      expect(t.endAngle, closeTo(140, 1e-9));
-    });
+  group('min/max anchor over rolling window (post-2026-05-15)', () {
+    test(
+      'two reps: peak anchors on deepest min, start/end on most-extended max',
+      () {
+        c.recordRepExtremes(60, 160);
+        c.recordRepExtremes(70, 170);
+        final t = c.currentThresholds!;
+        // Post-2026-05-15: anchor = deepest min (60°) and most-extended max (170°),
+        // NOT the arithmetic mean. Margins unchanged.
+        // peak  = min(60, 70) + 15 = 75
+        // start = max(160, 170) - 10 = 160
+        // end   = max(160, 170) - 25 = 145
+        expect(t.peakAngle, closeTo(75, 1e-9));
+        expect(t.startAngle, closeTo(160, 1e-9));
+        expect(t.endAngle, closeTo(145, 1e-9));
+      },
+    );
 
-    test('three reps produce the arithmetic mean of the three values', () {
+    test('three reps: anchor stays at the demonstrated best, not the mean', () {
       c.recordRepExtremes(60, 160);
       c.recordRepExtremes(70, 170);
       c.recordRepExtremes(80, 180);
       final t = c.currentThresholds!;
-      // Avg min = 70, avg max = 170.
-      // peak = 70 + 15 = 85
-      expect(t.peakAngle, closeTo(85, 1e-9));
-      expect(t.startAngle, closeTo(160, 1e-9));
-      expect(t.endAngle, closeTo(145, 1e-9));
+      // Anchor = min(60, 70, 80) = 60 and max(160, 170, 180) = 180.
+      // peak  = 60 + 15 = 75
+      // start = 180 - 10 = 170
+      // end   = 180 - 25 = 155
+      expect(t.peakAngle, closeTo(75, 1e-9));
+      expect(t.startAngle, closeTo(170, 1e-9));
+      expect(t.endAngle, closeTo(155, 1e-9));
+    });
+
+    test('shallow reps DO NOT drift the threshold shallower', () {
+      // The whole point of the 2026-05-15 anchor change: shallow reps
+      // can't loosen the threshold. Under the old running-mean shape,
+      // three shallow follow-ups would have pulled peakAngle up to ~78°.
+      c.recordRepExtremes(55, 165); // Deep rep — sets the anchor.
+      c.recordRepExtremes(75, 165); // Shallow.
+      c.recordRepExtremes(78, 165); // Shallow.
+      c.recordRepExtremes(72, 165); // Shallow.
+      final t = c.currentThresholds!;
+      // peak still anchored on 55° (the deepest), not the mean of [55,75,78,72]=70.
+      expect(t.peakAngle, closeTo(55 + 15, 1e-9)); // 70°, not ~85°.
     });
   });
 
   group('MAD outlier rejection', () {
     test(
-      'extreme min outlier is ignored; running avg stays near prior mean',
+      'extreme min outlier is ignored; peak anchor stays at the demonstrated deepest',
       () {
         // Seed a stable 8-rep min window around ~60.
         for (var i = 0; i < 8; i++) {
@@ -72,9 +91,32 @@ void main() {
         // Inject an extreme outlier on min (e.g. 10° — wrist-level noise).
         c.recordRepExtremes(10, 165);
         final after = c.currentThresholds!.peakAngle;
-        // peak = avgMin + 15. Outlier would push avgMin downward by ~5°+;
-        // MAD rejection keeps it flat.
+        // peak = min(samples) + 15. Without MAD, the 10° outlier would
+        // become the new min and drop peakAngle by ~50°. MAD rejects it,
+        // so the anchor stays at the prior deepest demonstrated rep.
         expect(after, closeTo(before, 0.5));
+      },
+    );
+
+    test(
+      'extreme min outlier on the small side is rejected; min anchor unchanged',
+      () {
+        // Symmetric case: an outlier *deeper* than legitimate range should
+        // also be MAD-rejected, so the threshold anchor doesn't suddenly
+        // tighten on a single noisy frame. Under min/max anchoring this
+        // matters MORE than under mean anchoring — a rejected single deep
+        // sample would otherwise re-anchor the threshold to a noise spike.
+        final minSeed = [60.0, 61.0, 62.0, 60.0, 61.0, 62.0, 60.0, 61.0];
+        for (var i = 0; i < 8; i++) {
+          c.recordRepExtremes(minSeed[i], 165);
+        }
+        final peakBefore = c.currentThresholds!.peakAngle;
+        // Inject an implausibly-deep outlier (could be a wrist-level
+        // landmark glitch). MAD should reject it.
+        c.recordRepExtremes(-20, 165);
+        final peakAfter = c.currentThresholds!.peakAngle;
+        // Anchor unchanged — outlier never entered _minSamples.
+        expect(peakAfter, closeTo(peakBefore, 1e-9));
       },
     );
 
@@ -84,12 +126,16 @@ void main() {
       for (var i = 0; i < 8; i++) {
         c.recordRepExtremes(60 + (i.isEven ? 0.2 : -0.2), maxSeed[i]);
       }
-      final avgMaxBefore = c.currentThresholds!.startAngle + 10;
-      // Inject: max inside the MAD band (accepted), min extreme (rejected).
-      c.recordRepExtremes(5, 167);
-      final avgMaxAfter = c.currentThresholds!.startAngle + 10;
-      // Max dimension moved (accepted); min dimension stayed flat (rejected).
-      expect(avgMaxAfter, greaterThan(avgMaxBefore));
+      // startAngle = max(samples) - 10, so max(samples) = startAngle + 10.
+      // Before injection: max of seed = 167.
+      final maxBefore = c.currentThresholds!.startAngle + 10;
+      // Inject: max inside the MAD band (accepted at 168°, slightly above
+      // the prior window max of 167), min extreme (rejected).
+      c.recordRepExtremes(5, 168);
+      final maxAfter = c.currentThresholds!.startAngle + 10;
+      // Max dimension accepted AND higher than prior best → anchor moves
+      // upward. Min dimension rejected → peak anchor stays flat.
+      expect(maxAfter, greaterThan(maxBefore));
     });
 
     test('both-dimension outlier does NOT advance repCount', () {
@@ -132,7 +178,7 @@ void main() {
       expect(c.currentThresholds, isNull);
     });
 
-    test('post-reset accumulation does not bleed into the new average', () {
+    test('post-reset accumulation does not bleed into the new anchor', () {
       c.recordRepExtremes(60, 165);
       c.recordRepExtremes(62, 163);
       c.reset();
@@ -140,9 +186,13 @@ void main() {
       c.recordRepExtremes(80, 150);
       c.recordRepExtremes(82, 152);
       final t = c.currentThresholds!;
-      // Avg min = 81, avg max = 151.
-      // peak = 81 + 15 = 96
-      expect(t.peakAngle, closeTo(96, 1e-9));
+      // Anchor over post-reset window: min(80, 82) = 80, max(150, 152) = 152.
+      // peak  = 80 + 15 = 95   (NOT 95 from pre-reset 60° rep — that's gone)
+      // start = 152 - 10 = 142
+      // end   = 152 - 25 = 127
+      expect(t.peakAngle, closeTo(95, 1e-9));
+      expect(t.startAngle, closeTo(142, 1e-9));
+      expect(t.endAngle, closeTo(127, 1e-9));
     });
   });
 }

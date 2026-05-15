@@ -9,25 +9,37 @@
 /// squat-typed return values. Documented as a deliberate mirror: if either
 /// implementation is fixed, fix both. A future refactor into a generic
 /// `RomAutoCalibrator<T>` is an acknowledged but deferred opportunity.
+///
+/// ANCHORING (2026-05-15)
+/// ──────────────────────
+/// Pre-2026-05-15 the calibrator anchored thresholds on the running mean of
+/// MAD-accepted min/max samples — structural drift: shallow reps loosened
+/// the threshold which let more shallow reps pass.
+///
+/// Post-2026-05-15 the anchor is the deepest / most-extended sample within
+/// the MAD-accepted rolling window ([kProfileOutlierWindow] = 8 reps):
+///   * bottomAngle anchor = min(_minSamples) → user's deepest demonstrated rep
+///   * startAngle / endAngle anchor = max(_maxSamples) → user's most extended rep
+///
+/// Margins inside [SquatRomThresholdSet.fromBucket] are UNCHANGED — only the
+/// anchor moves from "average" to "demonstrated best within recent window."
+/// Rolling-window so genuine fatigue across a long set gradually relaxes the
+/// anchor.
 library;
+
+import 'dart:math' as math;
 
 import '../../core/constants.dart';
 import '../../core/squat_rom_defaults.dart';
 import '../curl/mad_outlier.dart' as mad_local;
 
 class SquatAutoCalibrator {
-  /// Running average of the deepest knee flexion seen each rep.
-  double? _minAvg;
-
-  /// Running average of the most extended knee angle seen each rep.
-  double? _maxAvg;
-
   int _repCount = 0;
-  int _minAcceptedCount = 0;
-  int _maxAcceptedCount = 0;
 
-  /// Per-dimension windows feeding MAD outlier rejection. Bounded by
-  /// [kProfileOutlierWindow] — same window size [SquatRomBucket] uses.
+  /// Per-dimension windows feeding both MAD outlier rejection AND the
+  /// min/max anchor calculation. Bounded by [kProfileOutlierWindow].
+  /// Post-2026-05-15: `currentThresholds` reads min/max of these directly
+  /// instead of a parallel running average.
   final List<double> _minSamples = [];
   final List<double> _maxSamples = [];
 
@@ -35,29 +47,16 @@ class SquatAutoCalibrator {
   /// through MAD outlier rejection — a rep that produces a new deepest
   /// squat angle may pair with a perfectly normal standing-extension angle,
   /// so rejecting both in lockstep would discard bucket-expanding data.
-  /// Only accepted samples update the running average; [_repCount] advances
-  /// when at least one dimension was kept.
+  /// [_repCount] advances when at least one dimension was kept.
   void recordRepExtremes(double min, double max) {
     final minOutlier = mad_local.isMadOutlier(_minSamples, min);
     final maxOutlier = mad_local.isMadOutlier(_maxSamples, max);
 
     if (!minOutlier) {
-      _minAcceptedCount++;
-      if (_minAcceptedCount == 1) {
-        _minAvg = min;
-      } else {
-        _minAvg = _minAvg! + (min - _minAvg!) / _minAcceptedCount;
-      }
       _appendRecent(_minSamples, min);
     }
 
     if (!maxOutlier) {
-      _maxAcceptedCount++;
-      if (_maxAcceptedCount == 1) {
-        _maxAvg = max;
-      } else {
-        _maxAvg = _maxAvg! + (max - _maxAvg!) / _maxAcceptedCount;
-      }
       _appendRecent(_maxSamples, max);
     }
 
@@ -73,15 +72,23 @@ class SquatAutoCalibrator {
 
   /// Emits thresholds when conditions are met:
   ///   - ≥ 2 reps observed
+  ///   - Both sample windows non-empty
   ///   - ROM excursion (max − min) ≥ [kSquatMinViableRomDegrees]
   /// Otherwise null — caller should fall back to globals.
+  ///
+  /// Anchor is the deepest observed min and most-extended observed max
+  /// within the rolling window (NOT the running mean — see file-level
+  /// ANCHORING doc-block).
   SquatRomThresholdSet? get currentThresholds {
     if (_repCount < 2) return null;
-    final rom = _maxAvg! - _minAvg!;
+    if (_minSamples.isEmpty || _maxSamples.isEmpty) return null;
+    final minBest = _minSamples.reduce(math.min);
+    final maxBest = _maxSamples.reduce(math.max);
+    final rom = maxBest - minBest;
     if (rom < kSquatMinViableRomDegrees) return null;
     return SquatRomThresholdSet.fromBucket(
-      observedMinKneeAngle: _minAvg!,
-      observedMaxKneeAngle: _maxAvg!,
+      observedMinKneeAngle: minBest,
+      observedMaxKneeAngle: maxBest,
     );
   }
 
@@ -91,11 +98,7 @@ class SquatAutoCalibrator {
   /// the previously-observed range may no longer apply because the user has
   /// rested between sets and their depth/extension may shift.
   void reset() {
-    _minAvg = null;
-    _maxAvg = null;
     _repCount = 0;
-    _minAcceptedCount = 0;
-    _maxAcceptedCount = 0;
     _minSamples.clear();
     _maxSamples.clear();
   }

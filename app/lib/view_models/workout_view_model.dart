@@ -16,6 +16,7 @@ import '../engine/curl/curl_rom_profile.dart';
 import '../engine/curl/rep_boundary_detector.dart';
 import '../engine/landmark_smoother.dart';
 import '../engine/rep_counter.dart';
+import '../engine/setup_framing_check.dart';
 import '../engine/squat/squat_auto_calibrator.dart';
 // Prefix-import to keep squat profile types distinct at every call site —
 // helps grep across the VM since both exercises have similarly-named
@@ -264,6 +265,14 @@ class WorkoutViewModel extends ChangeNotifier {
   /// unaffected. See [_onFormErrors] for the gate.
   TtsVerbosity _ttsVerbosity = TtsVerbosity.medium;
 
+  /// User Form Tolerance Percent in `[0, 100]`. Read from
+  /// [PreferencesRepository.getFormTolerancePercent] during [init] and
+  /// frozen for the session. Scales the curl form-audit dead-band layer
+  /// only — does NOT affect rep counting, quality scoring, or
+  /// post-session audit summaries. See `FormThresholds.withTolerance` for
+  /// the interpolation formula.
+  int _formTolerancePercent = kDefaultFormTolerancePercent;
+
   /// Wall-clock timestamp of the most recent `pose.frame_metrics` emit.
   /// Throttles emission to roughly [kDebugFrameMetricsHz] regardless of
   /// the camera's frame rate. Null until the first debug-session frame.
@@ -336,6 +345,9 @@ class WorkoutViewModel extends ChangeNotifier {
 
   // SETUP_CHECK.
   int _setupOkFrames = 0;
+  // Last framing verdict surfaced to UI during SETUP_CHECK. Null until the
+  // first setup frame is evaluated. See `setup_framing_check.dart`.
+  String? _setupFramingHint;
   Map<int, Color> _landmarkColors = {};
 
   // COUNTDOWN.
@@ -486,6 +498,14 @@ class WorkoutViewModel extends ChangeNotifier {
       LM.leftHip,
       LM.rightHip,
     ],
+    // Backward lean shares the same geometric story (shoulder vs hip vertical
+    // alignment) so it highlights the same landmark set as forward lean.
+    FormError.excessiveBackwardLean: [
+      LM.leftShoulder,
+      LM.rightShoulder,
+      LM.leftHip,
+      LM.rightHip,
+    ],
     FormError.forwardKneeShift: [LM.leftKnee, LM.rightKnee],
     FormError.heelLift: [LM.leftHeel, LM.rightHeel],
     // Hip-lead manifests as hips rising faster than shoulders — the user's
@@ -533,6 +553,7 @@ class WorkoutViewModel extends ChangeNotifier {
   String? get error => _error;
   WorkoutPhase get phase => _phase;
   int get setupOkFrames => _setupOkFrames;
+  String? get setupFramingHint => _setupFramingHint;
   Map<int, Color> get landmarkColors => _landmarkColors;
   int get countdownValue => _countdownValue;
   List<PoseLandmark> get landmarks => _landmarks;
@@ -618,6 +639,17 @@ class WorkoutViewModel extends ChangeNotifier {
         _feedbackSensitivity = await _preferencesRepository
             .getFeedbackSensitivity();
         _ttsVerbosity = await _preferencesRepository.getTtsVerbosity();
+        // Form Tolerance Percent — snapshot once. Same pattern as TTS
+        // verbosity: mid-session Settings changes do not affect an
+        // in-flight workout. Scales the curl form-audit dead-band layer
+        // via the FormThresholds.withTolerance factory wired into the
+        // RepCounter constructor below.
+        _formTolerancePercent = await _preferencesRepository
+            .getFormTolerancePercent();
+        TelemetryLog.instance.log(
+          'form_tolerance.session_start',
+          'percent=$_formTolerancePercent',
+        );
         // Diagnostic flag — snapshot once, identical to other curl prefs.
         // A mid-session toggle in Settings has no effect on this run (matches
         // the squat long-femur "snapshot-on-construction" rule).
@@ -692,14 +724,36 @@ class WorkoutViewModel extends ChangeNotifier {
         // launch or after a reset — `_resolveSquatThresholds` handles the
         // null path via Tier 2 (auto-cal) or Tier 3 (cold-start).
         _squatProfile = await _profileRepository.loadSquat();
+        // Unified global diagnostic toggle (2026-05-15). Same pref the curl
+        // branch reads above — all three exercises now respond to a single
+        // "Disable auto-calibration" Settings switch. Squat resolver
+        // short-circuits to `SquatRomThresholdSet.anchor` (unmodified
+        // High anchor, no sensitivity post-pass) when this flag is true.
+        _diagnosticDisableAutoCalibration = await _preferencesRepository
+            .getDiagnosticDisableAutoCalibration();
+        if (_diagnosticDisableAutoCalibration) {
+          TelemetryLog.instance.log(
+            'diagnostic.mode_active',
+            'squat auto-calibration disabled — every rep will run on source=global',
+          );
+        }
         if (kSquatDebugSessionEnabled) {
           _isSquatDebugSession = await _preferencesRepository
               .getSquatDebugSession();
           if (_isSquatDebugSession) {
+            // Parity with curl debug-session contract: when a squat debug
+            // session is active, every rep MUST run against unmodified
+            // tier-3 globals so the derivation pipeline gets a clean
+            // baseline. Enforcement lives inside `_resolveSquatThresholds`
+            // — that resolver checks `_isSquatDebugSession` and short-
+            // circuits to `SquatRomThresholdSet.anchor` (the unmodified
+            // High anchor, no sensitivity post-pass). Mirrors the curl
+            // resolver's `globalUnmodified` short-circuit at line ~789.
             TelemetryLog.instance.setCap(kSquatDebugRingBufferSize);
             TelemetryLog.instance.log(
               'squat_debug.session_active',
-              'ring_buffer=$kSquatDebugRingBufferSize '
+              'silent observation mode — feedback suppressed; '
+                  'ring_buffer=$kSquatDebugRingBufferSize '
                   'frame_metrics@${kSquatDebugFrameMetricsHz}Hz',
             );
             TelemetryLog.instance.log(
@@ -708,6 +762,7 @@ class WorkoutViewModel extends ChangeNotifier {
                   'exercise=${exercise.name} '
                   'variant=${_squatVariant.name} '
                   'long_femur=$_squatLongFemurLifter '
+                  'sensitivity=${_feedbackSensitivity.name} '
                   'start_angle=$kSquatStartAngle '
                   'bottom_angle=$kSquatBottomAngle '
                   'end_angle=$kSquatEndAngle '
@@ -716,10 +771,29 @@ class WorkoutViewModel extends ChangeNotifier {
                   'knee_shift_warn=$kSquatKneeShiftWarnRatio '
                   'heel_lift_warn=$kSquatHeelLiftWarnRatio',
             );
+            // Diagnostic marker — mirrors the curl path so derivation
+            // scripts can split sessions on the same event regardless of
+            // exercise.
+            TelemetryLog.instance.log(
+              'diagnostic.mode_active',
+              'auto-calibration disabled — every rep will run on source=global',
+            );
           }
         }
       } else if (exercise == ExerciseType.pushUp) {
         _pushUpProfile = await _profileRepository.loadPushUp();
+        // Unified global diagnostic toggle (2026-05-15). Same pref the
+        // curl and squat branches read — when true, the resolver line
+        // below (`pushUpThresholds:` in the RepCounter constructor)
+        // selects `PushUpRomThresholds.defaults` over the saved profile.
+        _diagnosticDisableAutoCalibration = await _preferencesRepository
+            .getDiagnosticDisableAutoCalibration();
+        if (_diagnosticDisableAutoCalibration) {
+          TelemetryLog.instance.log(
+            'diagnostic.mode_active',
+            'push-up calibrated profile bypassed — every rep will run on defaults',
+          );
+        }
       }
       _repCounter = RepCounter(
         exercise: exercise,
@@ -732,7 +806,7 @@ class WorkoutViewModel extends ChangeNotifier {
         // .agent_brain/SKILLS.md, 2026-05-14). The user's `_feedbackSensitivity`
         // affects ROM gates only — form audit always runs at the biomechanical
         // bar regardless of tier.
-        curlFormThresholds: FormThresholds.medium,
+        curlFormThresholds: FormThresholds.withTolerance(_formTolerancePercent),
         squatVariant: _squatVariant,
         squatLongFemurLifter: _squatLongFemurLifter,
         squatFormThresholds: SquatFormThresholds.defaults,
@@ -753,8 +827,18 @@ class WorkoutViewModel extends ChangeNotifier {
         // Medium. Mirrors the resolver shape in `_resolveThresholds` (curl)
         // and `_resolveSquatThresholds` so push-up participates in the same
         // uniform-sensitivity contract.
+        //
+        // Global diagnostic toggle (`_diagnosticDisableAutoCalibration`):
+        // bypasses the saved profile and forces `PushUpRomThresholds.defaults`
+        // so the user can test the cold-start defaults and form audit
+        // against their actual form. Sensitivity is still applied so the
+        // user's selected level is honored. Snapshot-on-construction: a
+        // mid-session Settings toggle does NOT affect an in-flight workout.
         pushUpThresholds:
-            (_pushUpProfile?.thresholds ?? PushUpRomThresholds.defaults)
+            (_diagnosticDisableAutoCalibration
+                    ? PushUpRomThresholds.defaults
+                    : (_pushUpProfile?.thresholds ??
+                          PushUpRomThresholds.defaults))
                 .applySensitivity(_feedbackSensitivity),
         onPushUpRepCommit: _handlePushUpRepCommit,
       );
@@ -1348,12 +1432,57 @@ class WorkoutViewModel extends ChangeNotifier {
     // `calibrationChosenSide == null`; `pickCalibrationSide()` then arms
     // the detector and starts the timeout. This lets the user read the
     // prompt without the timeout already eating into their session.
+    //
+    // 2026-05-15 fast-path: when the caller (home-screen tile OR Settings
+    // recalibrate) has already committed to a side via [curlSide], skip the
+    // in-overlay picker and arm the detector immediately. Without this the
+    // user picks twice (home → "Right" → calibration → "Right" again), and
+    // — worse — the Settings path used to default to ExerciseSide.both and
+    // let the analyzer pick by landmark confidence, which consistently
+    // chose the right arm regardless of user intent.
+    //
+    // `curlSide` is camera-frame (ExerciseSide.right = right side of frame
+    // = user's physical LEFT arm). `_profileSideForCalibration` applies the
+    // identical mapping used inside `CurlStrategy._profileSideForRep` so
+    // the calibration bucket key matches the workout-side bucket key.
+    final preChosenSide = _profileSideForCalibration(curlSide);
+    if (preChosenSide != null) {
+      _calibrationChosenSide = preChosenSide;
+      _calibrationDetector = RepBoundaryDetector();
+      _calibrationSub = _calibrationDetector!.extremes.listen(
+        _onCalibrationRep,
+      );
+      TelemetryLog.instance.log(
+        'calibration.start',
+        'phase entered preChosenSide=${preChosenSide.name} '
+            'source=curlSide(${curlSide.name})',
+      );
+      _tts.speak(
+        'Curl through your full natural range, $kCalibrationMinReps times.',
+      );
+      _startCalibrationTimeout();
+      notifyListeners();
+      return;
+    }
     TelemetryLog.instance.log(
       'calibration.start',
       'phase entered awaiting_side_pick=true',
     );
     notifyListeners();
   }
+
+  /// Camera-frame [ExerciseSide] → user-frame [ProfileSide] for calibration
+  /// bucket keying. Returns null for [ExerciseSide.both], which means "no
+  /// pre-pick" and the in-overlay picker remains the source of truth.
+  ///
+  /// Mirrors `CurlStrategy._profileSideForRep` exactly — both must apply
+  /// the same convention or the calibration bucket the user creates won't
+  /// be the bucket the workout reads later.
+  ProfileSide? _profileSideForCalibration(ExerciseSide side) => switch (side) {
+    ExerciseSide.left => ProfileSide.left,
+    ExerciseSide.right => ProfileSide.right,
+    ExerciseSide.both => null,
+  };
 
   void _startCalibrationTimeout() {
     _calibrationTimeoutTimer?.cancel();
@@ -1408,7 +1537,6 @@ class WorkoutViewModel extends ChangeNotifier {
 
   void _completeCalibration() {
     _calibrationTimeoutTimer?.cancel();
-    final lockedView = _detectedCurlView;
     final chosenSide = _calibrationChosenSide;
     if (chosenSide == null) {
       // Defensive: detector should never emit before pickCalibrationSide()
@@ -1416,6 +1544,20 @@ class WorkoutViewModel extends ChangeNotifier {
       // it's a bug — fail loudly rather than guess a side.
       _failCalibration('Calibration completed before a side was picked.');
       return;
+    }
+    // `view` keys the bucket alongside `side`. The detector's auto-view is
+    // also what `_resolveThresholds` uses at workout time, so we MUST agree
+    // with it here for the calibrated bucket to be found later. If the
+    // detector hasn't locked a side-view (still `unknown` or fell back to
+    // `front`), derive it from the user's pick — better a coherent storage
+    // key than a degenerate one. This is the fallback only; under normal
+    // operation `_detectedCurlView` is already locked by setupCheck.
+    var lockedView = _detectedCurlView;
+    if (lockedView == CurlCameraView.unknown ||
+        lockedView == CurlCameraView.front) {
+      lockedView = chosenSide == ProfileSide.left
+          ? CurlCameraView.sideLeft
+          : CurlCameraView.sideRight;
     }
     final avgMin =
         _calibrationCollected.map((r) => r.minAngle).reduce((a, b) => a + b) /
@@ -1445,8 +1587,7 @@ class WorkoutViewModel extends ChangeNotifier {
     profile.upsertBucket(chosenBucket);
 
     var duplicatedToOther = false;
-    if (!_calibrationSecondPassActive &&
-        _shouldDuplicateToOtherSide(chosenSide, lockedView)) {
+    if (_shouldDuplicateToOtherSide(chosenSide, lockedView)) {
       final otherSide = chosenSide == ProfileSide.left
           ? ProfileSide.right
           : ProfileSide.left;
@@ -1460,7 +1601,6 @@ class WorkoutViewModel extends ChangeNotifier {
     TelemetryLog.instance.log(
       'calibration.complete',
       'view=${lockedView.name} side=${chosenSide.name} '
-          'pass=${_calibrationSecondPassActive ? "second" : "first"} '
           'duplicated_to_other=$duplicatedToOther '
           'avgMin=${avgMin.toStringAsFixed(1)} '
           'avgMax=${avgMax.toStringAsFixed(1)}',
@@ -1482,17 +1622,14 @@ class WorkoutViewModel extends ChangeNotifier {
       sidesLabel: sidesLabel,
     );
 
-    if (!_calibrationSecondPassActive) {
-      // First pass — offer the optional second-side calibration. The host
-      // renders an explicit Yes/No card; the legacy 2 s auto-dismiss is
-      // moved into `declineSecondSideCalibration()`.
-      _calibrationOfferSecondSide = true;
-      notifyListeners();
-      return;
-    }
-
-    // Second pass: the user already opted in for the other side, so the
-    // legacy 2 s auto-dismiss exit fires.
+    // Scope is now auto-derived from the data, not asked of the user:
+    //   - One arm calibrated  → `_shouldDuplicateToOtherSide` cloned the
+    //     bucket above → effectively *global*.
+    //   - Both arms previously calibrated → the duplicate guard refused
+    //     → the existing opposite-side bucket is preserved → *per-side*.
+    // The legacy "Calibrate the other arm too? Yes / No use globally"
+    // prompt was redundant UX — both outcomes are derivable from the
+    // profile state. Auto-dismiss the summary after 2 s on every pass.
     notifyListeners();
     Timer(const Duration(seconds: 2), () {
       _calibrationSummary = null;
@@ -1606,8 +1743,6 @@ class WorkoutViewModel extends ChangeNotifier {
   void retryCalibration() {
     _disposeCalibrationResources();
     _calibrationChosenSide = null;
-    _calibrationOfferSecondSide = false;
-    _calibrationSecondPassActive = false;
     _enterCalibration();
   }
 
@@ -1616,29 +1751,22 @@ class WorkoutViewModel extends ChangeNotifier {
     _exitCalibration(toPhase: WorkoutPhase.setupCheck);
   }
 
-  // ── Curl side-pick contract (Global Calibration) ─────────
+  // ── Curl side-pick contract ───────────────────────────────
   //
-  // Calibration for biceps curl is an explicit two-step contract:
+  // Calibration for biceps curl is single-pass: the user taps Left or
+  // Right at the start, the chosen-side bucket is built from collected
+  // reps, and — if no calibrated opposite-side bucket already exists —
+  // the result is duplicated to the other side so both arms resolve to
+  // calibrated thresholds (effective "global" behavior). If the opposite
+  // side is already calibrated, the duplicate guard preserves it and the
+  // calibration becomes "per-side." The user therefore never needs to
+  // choose scope explicitly — the data answers it.
   //
-  //   1. User taps Left or Right at the start of calibration. Until that
-  //      tap, no detector is armed and the timeout is not running — only
-  //      the side-pick panel is shown.
-  //   2. After the chosen side completes, we offer "calibrate the other
-  //      side too?" via [calibrationOfferSecondSide]. Saying No keeps the
-  //      duplicated bucket from pass 1; saying Yes starts a second pass
-  //      ([_calibrationSecondPassActive]) that overwrites only the
-  //      opposite-side bucket.
-  //
-  // The duplicate-at-save approach keeps the engine resolver
-  // (`_resolveThresholds`) free of fallback logic — both side-keys hold
-  // a real bucket after pass 1, and `ThresholdSource.calibrated` flows
-  // through diagnostics/telemetry uniformly.
+  // To calibrate the second arm with its own data, the user re-enters
+  // calibration from Settings and picks the other side.
   ProfileSide? _calibrationChosenSide;
-  bool _calibrationOfferSecondSide = false;
-  bool _calibrationSecondPassActive = false;
 
   ProfileSide? get calibrationChosenSide => _calibrationChosenSide;
-  bool get calibrationOfferSecondSide => _calibrationOfferSecondSide;
 
   /// Called when the user taps Left or Right in the side-pick panel.
   /// Arms the [RepBoundaryDetector] and starts the calibration timeout —
@@ -1651,64 +1779,12 @@ class WorkoutViewModel extends ChangeNotifier {
     _calibrationChosenSide = side;
     _calibrationDetector = RepBoundaryDetector();
     _calibrationSub = _calibrationDetector!.extremes.listen(_onCalibrationRep);
-    TelemetryLog.instance.log(
-      'calibration.side_picked',
-      'side=${side.name} pass=first',
-    );
+    TelemetryLog.instance.log('calibration.side_picked', 'side=${side.name}');
     _tts.speak(
       'Curl through your full natural range, $kCalibrationMinReps times.',
     );
     _startCalibrationTimeout();
     notifyListeners();
-  }
-
-  /// User accepted the optional "calibrate the other side too?" prompt.
-  /// Re-arms detector + timeout for a second pass that will replace ONLY
-  /// the opposite-side bucket.
-  void acceptSecondSideCalibration() {
-    final picked = _calibrationChosenSide;
-    if (picked == null) return;
-    if (!_calibrationOfferSecondSide) return;
-    final other = picked == ProfileSide.left
-        ? ProfileSide.right
-        : ProfileSide.left;
-    _calibrationOfferSecondSide = false;
-    _calibrationSecondPassActive = true;
-    _calibrationChosenSide = other;
-    _calibrationCollected.clear();
-    _calibrationReps = 0;
-    _calibrationCurrentAngle = null;
-    _calibrationError = null;
-    _calibrationSecondsRemaining = kCalibrationTimeoutSec;
-    _disposeCalibrationResources();
-    _calibrationDetector = RepBoundaryDetector();
-    _calibrationSub = _calibrationDetector!.extremes.listen(_onCalibrationRep);
-    TelemetryLog.instance.log(
-      'calibration.side_picked',
-      'side=${other.name} pass=second',
-    );
-    _tts.speak('Now the other arm — $kCalibrationMinReps reps.');
-    _startCalibrationTimeout();
-    notifyListeners();
-  }
-
-  /// User declined the "other side?" prompt. Runs the original
-  /// post-summary exit path (the 2 s timer behavior was relocated here
-  /// from `_completeCalibration`).
-  void declineSecondSideCalibration() {
-    _calibrationOfferSecondSide = false;
-    _calibrationSummary = null;
-    TelemetryLog.instance.log(
-      'calibration.second_side_declined',
-      'side=${_calibrationChosenSide?.name ?? "unknown"}',
-    );
-    if (forceCalibration) {
-      _disposeCalibrationResources();
-      _shouldExitAfterCalibration = true;
-      notifyListeners();
-      return;
-    }
-    _exitCalibration(toPhase: WorkoutPhase.setupCheck);
   }
 
   /// True iff duplicating the just-saved bucket into the opposite side
@@ -1819,17 +1895,65 @@ class WorkoutViewModel extends ChangeNotifier {
     final view = _repCounter.updateSetupView(result);
     if (view != _detectedCurlView) _detectedCurlView = view;
 
-    final angle =
-        angleDeg(
-          result.landmark(LM.leftShoulder),
-          result.landmark(LM.leftElbow),
-          result.landmark(LM.leftWrist),
-        ) ??
-        angleDeg(
-          result.landmark(LM.rightShoulder),
-          result.landmark(LM.rightElbow),
-          result.landmark(LM.rightWrist),
-        );
+    // Side-aware elbow-angle selection (2026-05-15).
+    //
+    // Pre-2026-05-15 this was `leftElbow ?? rightElbow`, which silently fell
+    // through to the right arm whenever the left arm's landmarks were
+    // momentarily missing — and in a typical side-view recording one arm is
+    // ALWAYS partially occluded by the torso, so the fall-through path was
+    // effectively the default. Net effect: even when the user explicitly
+    // picked "Left", calibration kept measuring the right arm.
+    //
+    // New convention: once the user has committed to a side, prefer that
+    // side's elbow angle. If that side's landmarks are unavailable on a
+    // given frame, fall through to the opposite arm rather than dropping
+    // the frame — this preserves calibration throughput on noisy frames
+    // while keeping the dominant signal anchored to the chosen arm. The
+    // detector's 3-sample direction-confirmation gate handles per-frame
+    // jitter from the fallback path.
+    //
+    // When no side is picked yet (`_calibrationChosenSide == null`, in-overlay
+    // picker still up) the prior left-first behavior is retained so the live
+    // angle display has something to render while the user reads the prompt.
+    final chosen = _calibrationChosenSide;
+    final double? angle;
+    if (chosen == ProfileSide.left) {
+      angle =
+          angleDeg(
+            result.landmark(LM.leftShoulder),
+            result.landmark(LM.leftElbow),
+            result.landmark(LM.leftWrist),
+          ) ??
+          angleDeg(
+            result.landmark(LM.rightShoulder),
+            result.landmark(LM.rightElbow),
+            result.landmark(LM.rightWrist),
+          );
+    } else if (chosen == ProfileSide.right) {
+      angle =
+          angleDeg(
+            result.landmark(LM.rightShoulder),
+            result.landmark(LM.rightElbow),
+            result.landmark(LM.rightWrist),
+          ) ??
+          angleDeg(
+            result.landmark(LM.leftShoulder),
+            result.landmark(LM.leftElbow),
+            result.landmark(LM.leftWrist),
+          );
+    } else {
+      angle =
+          angleDeg(
+            result.landmark(LM.leftShoulder),
+            result.landmark(LM.leftElbow),
+            result.landmark(LM.leftWrist),
+          ) ??
+          angleDeg(
+            result.landmark(LM.rightShoulder),
+            result.landmark(LM.rightElbow),
+            result.landmark(LM.rightWrist),
+          );
+    }
 
     if (angle != null) _calibrationDetector?.onAngle(angle);
     _landmarks = smoothed;
@@ -2357,7 +2481,25 @@ class WorkoutViewModel extends ChangeNotifier {
       if (!leftResting && !rightResting) allVisible = false;
     }
 
+    // Industry-standard "Frame Check": after landmarks pass confidence and
+    // curl posture, verify the camera is at a usable height/distance. A
+    // too-high or too-low lens keystones the torso and silently breaks
+    // angle-based rep counting — surfacing the failure here prevents the
+    // user from starting a set the analyzer cannot read. Curl-only for
+    // now; squat/push-up have their own view-specific framing needs.
+    if (allVisible && exercise.isCurl) {
+      final framing = evaluateSetupFraming(
+        result,
+        minConfidence: setupConfidence,
+      );
+      _setupFramingHint = framing.hint;
+      if (!framing.ok) allVisible = false;
+    } else if (!exercise.isCurl) {
+      _setupFramingHint = null;
+    }
+
     if (allVisible) {
+      _setupFramingHint = null;
       _setupOkFrames++;
       if (_setupOkFrames >= kSetupCheckFrames) {
         _phase = WorkoutPhase.countdown;
@@ -2416,6 +2558,7 @@ class WorkoutViewModel extends ChangeNotifier {
       _tts.stop();
       _phase = WorkoutPhase.setupCheck;
       _setupOkFrames = 0;
+      _setupFramingHint = null;
       _countdownValue = kCountdownSeconds;
       _landmarks = smoothed;
       notifyListeners();
@@ -2500,8 +2643,11 @@ class WorkoutViewModel extends ChangeNotifier {
       if (snapshot.formErrors.isNotEmpty) _onFormErrors(snapshot.formErrors);
       // Rep-commit TTS: one short number per counted rep. Guarded against set
       // reset (where reps rolls back to 0). Suppressed during a debug
-      // session — the user explicitly opted into silent observation.
-      final isDebugSilent = kCurlDebugSessionEnabled && _isCurlDebugSession;
+      // session — the user explicitly opted into silent observation. Squat
+      // mirrors the curl contract.
+      final isDebugSilent =
+          (kCurlDebugSessionEnabled && _isCurlDebugSession) ||
+          (kSquatDebugSessionEnabled && _isSquatDebugSession);
       if (!isDebugSilent && snapshot.reps > _snapshot.reps) {
         _tts.speak('${snapshot.reps}');
       }
@@ -2577,13 +2723,15 @@ class WorkoutViewModel extends ChangeNotifier {
 
   // ── Form feedback coordinator ─────────────────────────
   void _onFormErrors(List<FormError> errors) {
-    // Curl debug session: silent observation. Skip cooldown bookkeeping,
-    // TTS, and visual highlights entirely — the analyzer's per-rep
-    // telemetry still fires (we want the data), but nothing reaches the
-    // user. `_formErrorCounts` is intentionally NOT incremented either,
-    // so the post-session summary doesn't show inflated counts that
-    // never had a chance to be seen and corrected mid-set.
-    if (kCurlDebugSessionEnabled && _isCurlDebugSession) {
+    // Debug session (curl OR squat): silent observation. Skip cooldown
+    // bookkeeping, TTS, and visual highlights entirely — the analyzer's
+    // per-rep telemetry still fires (we want the data), but nothing
+    // reaches the user. `_formErrorCounts` is intentionally NOT
+    // incremented either, so the post-session summary doesn't show
+    // inflated counts that never had a chance to be seen and corrected
+    // mid-set. Squat mirrors the curl contract.
+    if ((kCurlDebugSessionEnabled && _isCurlDebugSession) ||
+        (kSquatDebugSessionEnabled && _isSquatDebugSession)) {
       return;
     }
     final now = DateTime.now();
@@ -2869,6 +3017,34 @@ class WorkoutViewModel extends ChangeNotifier {
   }
 
   SquatRomThresholdSet _resolveSquatThresholds(int repIndexInSet) {
+    // Diagnostic short-circuit: every rep gets unmodified tier-3 globals
+    // so the `squat.rep` log is uniformly tagged
+    // `source=global tier=3 diagnostic=true`. Skips both the calibrated-
+    // profile path and the auto-cal path. Mirrors the curl resolver's
+    // `diagnosticDisableAutoCalibration` short-circuit at line ~789.
+    //
+    // Triggered by EITHER the debug-session pref (silent observation mode,
+    // ring buffer expanded, frame-metrics emitted) OR the Settings-level
+    // unified "Disable auto-calibration" toggle (feedback still ON, ring
+    // buffer untouched — same threshold contract, different UX). As of
+    // 2026-05-15 that toggle is global — one switch, all three exercises.
+    //
+    // No sensitivity post-pass — debug sessions collect baseline data
+    // against the unmodified High anchor the derivation script expects.
+    // Applying sensitivity would make the measurements circular.
+    final squatDiagnosticActive =
+        (kSquatDebugSessionEnabled && _isSquatDebugSession) ||
+        _diagnosticDisableAutoCalibration;
+    if (squatDiagnosticActive) {
+      final t = SquatRomThresholdSet.anchor;
+      _logSquatThresholdsResolved(
+        tier: 3,
+        source: 'global',
+        thresholds: t,
+        extra: 'diagnostic=true',
+      );
+      return t;
+    }
     // Tier 1 — personal profile.
     final profile = _squatProfile;
     if (profile != null && profile.isCalibrated) {
@@ -2960,6 +3136,8 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.squatDepth => 'Go deeper',
     FormError.trunkTibia => 'Keep your chest up',
     FormError.excessiveForwardLean => 'Chest up — keep your back tall',
+    FormError.excessiveBackwardLean =>
+      'Stop leaning back — stack ribs over hips',
     FormError.heelLift => 'Drive your heels into the floor',
     FormError.hipLead => 'Lead with your chest',
     // forwardKneeShift intentionally has a fallback string — TTS suppression

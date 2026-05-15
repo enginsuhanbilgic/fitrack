@@ -58,6 +58,9 @@ void main() {
     });
 
     test('high on legacy-tier view (unknown): tighter start, lower peak', () {
+      // Tier-3 looseness deltas (2026-05-15 retune):
+      //   medium = high + (dStart, dPeak, dEnd) = high + (-8, +12, -6)
+      // Therefore: high - medium = (+8, -12, +6).
       final med = RomThresholds.global(
         CurlCameraView.unknown,
         FeedbackSensitivity.medium,
@@ -67,8 +70,9 @@ void main() {
         FeedbackSensitivity.high,
       );
 
-      expect(high.startAngle, closeTo(med.startAngle + 5.0, 0.01));
-      expect(high.peakAngle, closeTo(med.peakAngle - 10.0, 0.01));
+      expect(high.startAngle, closeTo(med.startAngle + 8.0, 0.01));
+      expect(high.peakAngle, closeTo(med.peakAngle - 12.0, 0.01));
+      expect(high.endAngle, closeTo(med.endAngle + 6.0, 0.01));
     });
 
     test('peakExitAngle always equals peakAngle + kCurlPeakExitGap', () {

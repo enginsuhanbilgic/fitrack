@@ -1,0 +1,233 @@
+[2026-05-15T01:48:52.953758] pose.quality_warn: missing_landmarks ids=11,13,15 conf=0.03,0.01,0.01 nearedge=true inference_ms=38
+[2026-05-15T01:48:51.829480] pose.quality_warn: missing_landmarks ids=14,16 conf=0.03,0.01 nearedge=true inference_ms=36
+[2026-05-15T01:48:50.703842] pose.quality_warn: missing_landmarks ids=11,13,15 conf=0.11,0.04,0.01 nearedge=true inference_ms=35
+[2026-05-15T01:48:49.582140] pose.quality_warn: missing_landmarks ids=11,13,15 conf=0.11,0.02,0.01 nearedge=true inference_ms=37
+[2026-05-15T01:48:48.496167] pose.quality_warn: missing_landmarks ids=13,15 conf=0.06,0.00 nearedge=true inference_ms=37
+[2026-05-15T01:48:47.374333] pose.quality_warn: missing_landmarks ids=16 conf=0.06 nearedge=true inference_ms=36
+[2026-05-15T01:48:46.236582] pose.quality_warn: missing_landmarks ids=14,16 conf=0.11,0.04 nearedge=true inference_ms=21
+[2026-05-15T01:48:45.180548] pose.quality_warn: missing_landmarks ids=16 conf=0.06 nearedge=true inference_ms=15
+[2026-05-15T01:48:43.895030] pose.frame_metrics: fsm=concentric angle_raw=165.3 l_sh=1.00 l_el=0.99 l_wr=0.98 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=1.00
+[2026-05-15T01:48:43.413904] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:43.342607] pose.frame_metrics: fsm=idle angle_raw=156.8 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:43.342342] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:43.254476] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:43.180727] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:43.092806] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:43.012448] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:42.931343] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:42.770376] pose.frame_metrics: fsm=idle angle_raw=166.5 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:42.373970] rep.side_metrics: rep=15 side=right view=sideRight lean_deg=2.71 shoulder_drift_ratio=0.0878 elbow_drift_ratio=0.0481 elbow_drift_signed=0.0481 back_lean_deg=0.34 shrug_ratio=0.0146 elbow_rise_ratio=0.0930 rep_quality=0.750 concentric_ms=958 source=global
+[2026-05-15T01:48:42.373905] rep.arm_resolved: rep=15 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.98 right_conf=2.99 pose_facing=right arm_match=true
+[2026-05-15T01:48:42.373738] rep.extremes: rep=15 side=right view=sideRight min=58.8 max=155.9 rom=97.0 min_at_peak=69.1 concentric_ms=958 source=global result=diagnosticSkipped
+[2026-05-15T01:48:42.207211] pose.frame_metrics: fsm=eccentric angle_raw=153.0 l_sh=1.00 l_el=0.99 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:41.646651] pose.frame_metrics: fsm=peak angle_raw=74.6 l_sh=0.99 l_el=0.96 l_wr=0.97 l_hip=0.96 r_sh=1.00 r_el=0.98 r_wr=1.00 r_hip=0.97
+[2026-05-15T01:48:41.088540] pose.frame_metrics: fsm=peak angle_raw=55.1 l_sh=0.99 l_el=0.94 l_wr=0.97 l_hip=0.97 r_sh=1.00 r_el=0.98 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:40.528031] pose.frame_metrics: fsm=peak angle_raw=68.4 l_sh=0.99 l_el=0.98 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:39.956564] pose.frame_metrics: fsm=concentric angle_raw=80.2 l_sh=1.00 l_el=0.99 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:39.481314] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:39.403615] pose.frame_metrics: fsm=idle angle_raw=158.8 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:39.403407] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:39.321964] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:39.247771] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:39.156443] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:39.092427] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:38.836096] pose.frame_metrics: fsm=idle angle_raw=163.4 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:38.517050] rep.side_metrics: rep=14 side=right view=sideRight lean_deg=7.71 shoulder_drift_ratio=0.1519 elbow_drift_ratio=0.0525 elbow_drift_signed=0.0525 back_lean_deg=1.26 shrug_ratio=0.0345 elbow_rise_ratio=0.0744 rep_quality=0.850 concentric_ms=1136 source=global
+[2026-05-15T01:48:38.517013] rep.arm_resolved: rep=14 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.99 right_conf=2.99 pose_facing=right arm_match=true
+[2026-05-15T01:48:38.516853] rep.extremes: rep=14 side=right view=sideRight min=59.1 max=156.4 rom=97.3 min_at_peak=67.1 concentric_ms=1136 source=global result=diagnosticSkipped
+[2026-05-15T01:48:38.274766] pose.frame_metrics: fsm=eccentric angle_raw=145.8 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:37.708150] pose.frame_metrics: fsm=peak angle_raw=63.0 l_sh=1.00 l_el=0.98 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:37.152345] pose.frame_metrics: fsm=peak angle_raw=54.4 l_sh=0.99 l_el=0.96 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.98 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:36.590592] pose.frame_metrics: fsm=concentric angle_raw=74.2 l_sh=0.99 l_el=0.98 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:36.024812] pose.frame_metrics: fsm=concentric angle_raw=149.5 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:35.945749] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:35.869098] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:35.789306] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:35.708600] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:35.623760] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:35.464701] pose.frame_metrics: fsm=idle angle_raw=165.7 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:35.080040] rep.side_metrics: rep=13 side=right view=sideRight lean_deg=6.88 shoulder_drift_ratio=0.1260 elbow_drift_ratio=0.2041 elbow_drift_signed=0.2041 back_lean_deg=0.00 shrug_ratio=0.0208 elbow_rise_ratio=0.0529 rep_quality=0.846 concentric_ms=807 source=global
+[2026-05-15T01:48:35.080001] rep.arm_resolved: rep=13 declared_side=right declared_view=sideRight resolved_arm=left committed_side=right left_conf=2.98 right_conf=2.98 pose_facing=right arm_match=false
+[2026-05-15T01:48:35.079752] rep.extremes: rep=13 side=right view=sideRight min=66.7 max=152.4 rom=85.6 min_at_peak=66.7 concentric_ms=807 source=global result=diagnosticSkipped
+[2026-05-15T01:48:34.907358] pose.frame_metrics: fsm=eccentric angle_raw=163.2 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:34.339634] pose.frame_metrics: fsm=peak angle_raw=70.3 l_sh=0.99 l_el=0.95 l_wr=0.98 l_hip=0.96 r_sh=1.00 r_el=0.98 r_wr=1.00 r_hip=0.97
+[2026-05-15T01:48:33.774680] pose.frame_metrics: fsm=peak angle_raw=83.1 l_sh=0.99 l_el=0.97 l_wr=0.98 l_hip=0.97 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:33.216351] pose.frame_metrics: fsm=concentric angle_raw=92.5 l_sh=1.00 l_el=0.99 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:32.731634] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:32.655743] pose.frame_metrics: fsm=idle angle_raw=157.3 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.98
+[2026-05-15T01:48:32.655565] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:32.573391] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:32.092717] pose.frame_metrics: fsm=idle angle_raw=155.7 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:32.008575] rep.side_metrics: rep=12 side=right view=sideRight lean_deg=4.81 shoulder_drift_ratio=0.1002 elbow_drift_ratio=0.0624 elbow_drift_signed=0.0624 back_lean_deg=2.83 shrug_ratio=0.0772 elbow_rise_ratio=0.0748 rep_quality=0.850 concentric_ms=1036 source=global
+[2026-05-15T01:48:32.008542] rep.arm_resolved: rep=12 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.98 right_conf=2.98 pose_facing=right arm_match=true
+[2026-05-15T01:48:32.008374] rep.extremes: rep=12 side=right view=sideRight min=61.5 max=158.6 rom=97.1 min_at_peak=68.5 concentric_ms=1036 source=global result=diagnosticSkipped
+[2026-05-15T01:48:31.527788] pose.frame_metrics: fsm=eccentric angle_raw=123.4 l_sh=1.00 l_el=0.99 l_wr=0.95 l_hip=0.97 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.97
+[2026-05-15T01:48:30.966086] pose.frame_metrics: fsm=peak angle_raw=61.9 l_sh=0.99 l_el=0.95 l_wr=0.97 l_hip=0.97 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:30.406795] pose.frame_metrics: fsm=concentric angle_raw=73.5 l_sh=0.99 l_el=0.96 l_wr=0.98 l_hip=0.97 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:29.840704] pose.frame_metrics: fsm=concentric angle_raw=139.7 l_sh=1.00 l_el=0.99 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:29.607175] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:29.523094] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:29.443812] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:29.357371] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:29.283789] pose.frame_metrics: fsm=idle angle_raw=164.7 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:28.802808] rep.side_metrics: rep=11 side=right view=sideRight lean_deg=7.35 shoulder_drift_ratio=0.1294 elbow_drift_ratio=0.0738 elbow_drift_signed=0.0738 back_lean_deg=0.53 shrug_ratio=0.0648 elbow_rise_ratio=0.0647 rep_quality=0.850 concentric_ms=1037 source=global
+[2026-05-15T01:48:28.802768] rep.arm_resolved: rep=11 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.99 right_conf=2.99 pose_facing=right arm_match=true
+[2026-05-15T01:48:28.802559] rep.extremes: rep=11 side=right view=sideRight min=54.8 max=158.7 rom=103.9 min_at_peak=66.5 concentric_ms=1037 source=global result=diagnosticSkipped
+[2026-05-15T01:48:28.721881] pose.frame_metrics: fsm=eccentric angle_raw=158.7 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:28.156345] pose.frame_metrics: fsm=peak angle_raw=94.0 l_sh=0.99 l_el=0.98 l_wr=0.97 l_hip=0.96 r_sh=1.00 r_el=0.97 r_wr=0.99 r_hip=0.95
+[2026-05-15T01:48:27.597106] pose.frame_metrics: fsm=peak angle_raw=69.0 l_sh=0.99 l_el=0.96 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:27.029744] pose.frame_metrics: fsm=peak angle_raw=57.0 l_sh=0.99 l_el=0.96 l_wr=0.98 l_hip=0.97 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:26.471366] pose.frame_metrics: fsm=concentric angle_raw=136.9 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:25.991616] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:25.906973] pose.frame_metrics: fsm=idle angle_raw=156.5 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:25.906789] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:25.828713] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:25.750733] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:25.670840] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:25.589996] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:25.346292] pose.frame_metrics: fsm=idle angle_raw=166.7 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:25.024488] rep.side_metrics: rep=10 side=right view=sideRight lean_deg=1.78 shoulder_drift_ratio=0.0462 elbow_drift_ratio=0.0584 elbow_drift_signed=0.0584 back_lean_deg=0.27 shrug_ratio=0.0426 elbow_rise_ratio=0.0513 rep_quality=0.850 concentric_ms=788 source=global
+[2026-05-15T01:48:25.024449] rep.arm_resolved: rep=10 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.99 right_conf=2.99 pose_facing=right arm_match=true
+[2026-05-15T01:48:25.024253] rep.extremes: rep=10 side=right view=sideRight min=53.1 max=157.5 rom=104.4 min_at_peak=68.5 concentric_ms=788 source=global result=diagnosticSkipped
+[2026-05-15T01:48:24.785627] pose.frame_metrics: fsm=eccentric angle_raw=131.6 l_sh=0.99 l_el=0.99 l_wr=0.94 l_hip=0.96 r_sh=1.00 r_el=0.99 r_wr=0.98 r_hip=0.97
+[2026-05-15T01:48:24.222320] pose.frame_metrics: fsm=peak angle_raw=67.4 l_sh=1.00 l_el=0.98 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:23.657240] pose.frame_metrics: fsm=peak angle_raw=50.7 l_sh=0.99 l_el=0.95 l_wr=0.98 l_hip=0.97 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:23.095481] pose.frame_metrics: fsm=concentric angle_raw=74.3 l_sh=1.00 l_el=0.98 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:22.557887] pose.frame_metrics: fsm=concentric angle_raw=141.8 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:22.557549] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:22.022536] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:21.950549] pose.frame_metrics: fsm=idle angle_raw=164.4 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:21.950115] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:21.172026] rep.side_metrics: rep=9 side=right view=sideRight lean_deg=1.24 shoulder_drift_ratio=0.0342 elbow_drift_ratio=0.0543 elbow_drift_signed=0.0543 back_lean_deg=1.24 shrug_ratio=0.0176 elbow_rise_ratio=0.0783 rep_quality=0.750 concentric_ms=889 source=global
+[2026-05-15T01:48:21.171992] rep.arm_resolved: rep=9 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.98 right_conf=2.99 pose_facing=right arm_match=true
+[2026-05-15T01:48:21.171819] rep.extremes: rep=9 side=right view=sideRight min=53.4 max=159.9 rom=106.6 min_at_peak=69.4 concentric_ms=889 source=global result=diagnosticSkipped
+[2026-05-15T01:48:21.098212] pose.frame_metrics: fsm=eccentric angle_raw=156.1 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:20.527162] pose.frame_metrics: fsm=peak angle_raw=80.7 l_sh=0.99 l_el=0.98 l_wr=0.98 l_hip=0.96 r_sh=1.00 r_el=0.98 r_wr=0.99 r_hip=0.96
+[2026-05-15T01:48:19.968233] pose.frame_metrics: fsm=peak angle_raw=53.0 l_sh=0.99 l_el=0.95 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:19.405211] pose.frame_metrics: fsm=peak angle_raw=62.6 l_sh=0.99 l_el=0.96 l_wr=0.97 l_hip=0.97 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:18.840493] pose.frame_metrics: fsm=concentric angle_raw=124.5 l_sh=1.00 l_el=0.99 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.98
+[2026-05-15T01:48:18.439930] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:18.361728] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:18.278280] pose.frame_metrics: fsm=idle angle_raw=165.5 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:18.278127] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:18.206276] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:18.120472] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:18.038642] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:17.955745] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:17.878754] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:17.723732] pose.frame_metrics: fsm=idle angle_raw=163.9 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:17.319201] rep.side_metrics: rep=8 side=right view=sideRight lean_deg=2.86 shoulder_drift_ratio=0.0861 elbow_drift_ratio=0.0547 elbow_drift_signed=0.0547 back_lean_deg=0.85 shrug_ratio=0.0805 elbow_rise_ratio=0.0705 rep_quality=0.850 concentric_ms=1362 source=global
+[2026-05-15T01:48:17.319168] rep.arm_resolved: rep=8 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.99 right_conf=2.99 pose_facing=right arm_match=true
+[2026-05-15T01:48:17.319039] rep.extremes: rep=8 side=right view=sideRight min=57.8 max=159.9 rom=102.1 min_at_peak=66.0 concentric_ms=1362 source=global result=diagnosticSkipped
+[2026-05-15T01:48:17.155562] pose.frame_metrics: fsm=eccentric angle_raw=154.3 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:16.588421] pose.frame_metrics: fsm=peak angle_raw=81.6 l_sh=1.00 l_el=0.97 l_wr=0.98 l_hip=0.97 r_sh=1.00 r_el=0.98 r_wr=1.00 r_hip=0.97
+[2026-05-15T01:48:16.034701] pose.frame_metrics: fsm=peak angle_raw=53.0 l_sh=0.99 l_el=0.95 l_wr=0.97 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:15.466940] pose.frame_metrics: fsm=concentric angle_raw=101.0 l_sh=0.99 l_el=0.97 l_wr=0.96 l_hip=0.96 r_sh=1.00 r_el=0.98 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:14.912513] pose.frame_metrics: fsm=concentric angle_raw=140.0 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:14.427098] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:14.342026] pose.frame_metrics: fsm=idle angle_raw=156.3 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:13.864322] rep.side_metrics: rep=7 side=right view=sideRight lean_deg=5.66 shoulder_drift_ratio=0.1014 elbow_drift_ratio=0.0544 elbow_drift_signed=0.0544 back_lean_deg=5.66 shrug_ratio=0.0655 elbow_rise_ratio=0.0605 rep_quality=1.000 concentric_ms=804 source=global
+[2026-05-15T01:48:13.864282] rep.arm_resolved: rep=7 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.98 right_conf=2.98 pose_facing=right arm_match=true
+[2026-05-15T01:48:13.864072] rep.extremes: rep=7 side=right view=sideRight min=66.9 max=157.6 rom=90.7 min_at_peak=67.9 concentric_ms=804 source=global result=diagnosticSkipped
+[2026-05-15T01:48:13.783795] pose.frame_metrics: fsm=eccentric angle_raw=168.4 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:12.336212] pose.frame_metrics: fsm=peak angle_raw=74.7 l_sh=0.99 l_el=0.98 l_wr=0.98 l_hip=0.97 r_sh=1.00 r_el=0.98 r_wr=1.00 r_hip=0.97
+[2026-05-15T01:48:11.772698] pose.frame_metrics: fsm=peak angle_raw=65.6 l_sh=0.99 l_el=0.97 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:11.214070] pose.frame_metrics: fsm=concentric angle_raw=61.7 l_sh=0.99 l_el=0.96 l_wr=0.98 l_hip=0.97 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:10.653214] pose.frame_metrics: fsm=concentric angle_raw=138.2 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.98
+[2026-05-15T01:48:10.486929] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:10.405802] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:10.328035] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:10.250152] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:10.169312] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:10.093289] pose.frame_metrics: fsm=idle angle_raw=166.2 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:10.092961] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:10.003616] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:09.522110] pose.frame_metrics: fsm=idle angle_raw=160.1 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:09.449787] rep.side_metrics: rep=6 side=right view=sideRight lean_deg=1.41 shoulder_drift_ratio=0.0673 elbow_drift_ratio=0.0611 elbow_drift_signed=-0.0611 back_lean_deg=0.90 shrug_ratio=0.0643 elbow_rise_ratio=0.0664 rep_quality=0.850 concentric_ms=1212 source=global
+[2026-05-15T01:48:09.449748] rep.arm_resolved: rep=6 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.97 right_conf=2.98 pose_facing=right arm_match=true
+[2026-05-15T01:48:09.449573] rep.extremes: rep=6 side=right view=sideRight min=65.6 max=160.0 rom=94.4 min_at_peak=65.6 concentric_ms=1212 source=global result=diagnosticSkipped
+[2026-05-15T01:48:08.964124] pose.frame_metrics: fsm=eccentric angle_raw=121.5 l_sh=1.00 l_el=0.99 l_wr=0.96 l_hip=0.97 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.97
+[2026-05-15T01:48:08.400913] pose.frame_metrics: fsm=peak angle_raw=59.2 l_sh=0.99 l_el=0.97 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:07.850612] pose.frame_metrics: fsm=concentric angle_raw=87.0 l_sh=0.99 l_el=0.97 l_wr=0.97 l_hip=0.96 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.97
+[2026-05-15T01:48:07.275178] pose.frame_metrics: fsm=concentric angle_raw=116.4 l_sh=0.99 l_el=0.99 l_wr=0.96 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.98
+[2026-05-15T01:48:06.871477] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:06.795163] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:06.718631] pose.frame_metrics: fsm=idle angle_raw=159.3 l_sh=1.00 l_el=0.99 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:06.718438] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:06.154015] pose.frame_metrics: fsm=idle angle_raw=168.9 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:06.153959] rep.side_metrics: rep=5 side=right view=sideRight lean_deg=3.86 shoulder_drift_ratio=0.0825 elbow_drift_ratio=0.0556 elbow_drift_signed=-0.0556 back_lean_deg=0.00 shrug_ratio=0.0686 elbow_rise_ratio=0.0890 rep_quality=0.850 concentric_ms=1846 source=global
+[2026-05-15T01:48:06.153925] rep.arm_resolved: rep=5 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.98 right_conf=2.98 pose_facing=right arm_match=true
+[2026-05-15T01:48:06.153756] rep.extremes: rep=5 side=right view=sideRight min=67.5 max=159.2 rom=91.7 min_at_peak=67.5 concentric_ms=1846 source=global result=diagnosticSkipped
+[2026-05-15T01:48:05.589726] pose.frame_metrics: fsm=eccentric angle_raw=125.0 l_sh=0.99 l_el=0.99 l_wr=0.95 l_hip=0.96 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.97
+[2026-05-15T01:48:05.026504] pose.frame_metrics: fsm=peak angle_raw=68.3 l_sh=0.99 l_el=0.97 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:04.465477] pose.frame_metrics: fsm=concentric angle_raw=55.7 l_sh=0.99 l_el=0.96 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:03.903495] pose.frame_metrics: fsm=concentric angle_raw=112.9 l_sh=0.99 l_el=0.99 l_wr=0.95 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.98
+[2026-05-15T01:48:03.337562] pose.frame_metrics: fsm=concentric angle_raw=160.1 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:03.179901] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:03.103689] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:03.020045] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:48:02.782597] pose.frame_metrics: fsm=idle angle_raw=156.8 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:48:02.461106] rep.side_metrics: rep=4 side=right view=sideRight lean_deg=7.03 shoulder_drift_ratio=0.1623 elbow_drift_ratio=0.2715 elbow_drift_signed=0.2715 back_lean_deg=0.38 shrug_ratio=0.0733 elbow_rise_ratio=0.0413 rep_quality=0.778 concentric_ms=1849 source=global
+[2026-05-15T01:48:02.461068] rep.arm_resolved: rep=4 declared_side=right declared_view=sideRight resolved_arm=left committed_side=right left_conf=2.99 right_conf=2.99 pose_facing=right arm_match=false
+[2026-05-15T01:48:02.460865] rep.extremes: rep=4 side=right view=sideRight min=52.3 max=156.7 rom=104.3 min_at_peak=52.3 concentric_ms=1849 source=global result=diagnosticSkipped
+[2026-05-15T01:48:02.217322] pose.frame_metrics: fsm=eccentric angle_raw=147.2 l_sh=1.00 l_el=1.00 l_wr=1.00 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:48:01.655225] pose.frame_metrics: fsm=peak angle_raw=74.8 l_sh=0.99 l_el=0.98 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:01.091262] pose.frame_metrics: fsm=peak angle_raw=55.8 l_sh=0.99 l_el=0.96 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:48:00.529955] pose.frame_metrics: fsm=concentric angle_raw=46.4 l_sh=0.99 l_el=0.96 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:47:59.978112] pose.frame_metrics: fsm=concentric angle_raw=103.5 l_sh=1.00 l_el=0.99 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:47:59.405237] pose.frame_metrics: fsm=concentric angle_raw=159.3 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:47:58.843594] pose.frame_metrics: fsm=concentric angle_raw=157.5 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:47:58.843416] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:58.286346] pose.frame_metrics: fsm=idle angle_raw=147.8 l_sh=1.00 l_el=0.99 l_wr=0.98 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:47:58.286294] rep.side_metrics: rep=3 side=right view=sideRight lean_deg=4.91 shoulder_drift_ratio=0.0997 elbow_drift_ratio=0.0886 elbow_drift_signed=-0.0886 back_lean_deg=2.76 shrug_ratio=0.0063 elbow_rise_ratio=0.0863 rep_quality=0.750 concentric_ms=1684 source=global
+[2026-05-15T01:47:58.286253] rep.arm_resolved: rep=3 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.99 right_conf=2.99 pose_facing=right arm_match=true
+[2026-05-15T01:47:58.286105] rep.extremes: rep=3 side=right view=sideRight min=61.5 max=158.4 rom=96.9 min_at_peak=63.8 concentric_ms=1684 source=global result=diagnosticSkipped
+[2026-05-15T01:47:57.729155] pose.frame_metrics: fsm=eccentric angle_raw=108.4 l_sh=1.00 l_el=0.99 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:47:57.153452] pose.frame_metrics: fsm=peak angle_raw=65.1 l_sh=0.99 l_el=0.96 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:47:56.593890] pose.frame_metrics: fsm=peak angle_raw=55.9 l_sh=0.99 l_el=0.98 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:47:56.034780] pose.frame_metrics: fsm=concentric angle_raw=95.4 l_sh=1.00 l_el=0.99 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.97
+[2026-05-15T01:47:55.471588] pose.frame_metrics: fsm=concentric angle_raw=155.1 l_sh=1.00 l_el=1.00 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:47:54.909707] pose.frame_metrics: fsm=concentric angle_raw=157.7 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:47:54.909356] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:54.348604] pose.frame_metrics: fsm=idle angle_raw=157.0 l_sh=1.00 l_el=1.00 l_wr=0.98 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:47:54.348426] rep.side_metrics: rep=2 side=right view=sideRight lean_deg=5.25 shoulder_drift_ratio=0.1029 elbow_drift_ratio=0.0375 elbow_drift_signed=0.0375 back_lean_deg=0.00 shrug_ratio=0.0373 elbow_rise_ratio=0.0843 rep_quality=1.000 concentric_ms=1285 source=global
+[2026-05-15T01:47:54.348382] rep.arm_resolved: rep=2 declared_side=right declared_view=sideRight resolved_arm=right committed_side=right left_conf=2.97 right_conf=2.98 pose_facing=right arm_match=true
+[2026-05-15T01:47:54.348197] rep.extremes: rep=2 side=right view=sideRight min=56.0 max=159.2 rom=103.3 min_at_peak=56.0 concentric_ms=1285 source=global result=diagnosticSkipped
+[2026-05-15T01:47:53.792753] pose.frame_metrics: fsm=eccentric angle_raw=98.5 l_sh=1.00 l_el=0.99 l_wr=0.99 l_hip=0.97 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.97
+[2026-05-15T01:47:53.220002] pose.frame_metrics: fsm=peak angle_raw=57.2 l_sh=0.99 l_el=0.96 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:47:52.664469] pose.frame_metrics: fsm=concentric angle_raw=112.6 l_sh=0.99 l_el=0.96 l_wr=0.94 l_hip=0.93 r_sh=1.00 r_el=0.97 r_wr=1.00 r_hip=0.96
+[2026-05-15T01:47:52.102259] pose.frame_metrics: fsm=concentric angle_raw=91.2 l_sh=1.00 l_el=0.99 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:47:51.617700] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:51.541457] pose.frame_metrics: fsm=idle angle_raw=156.2 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:47:51.541165] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:51.453071] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:51.375412] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:51.294653] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:51.218816] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:51.134284] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:51.053998] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:50.973136] pose.frame_metrics: fsm=idle angle_raw=166.7 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=1.00 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=1.00
+[2026-05-15T01:47:50.495951] rep.side_metrics: rep=1 side=right view=sideRight lean_deg=1.90 shoulder_drift_ratio=0.1092 elbow_drift_ratio=0.2866 elbow_drift_signed=0.2866 back_lean_deg=0.00 shrug_ratio=0.0486 elbow_rise_ratio=0.0000 rep_quality=0.763 concentric_ms=642 source=global
+[2026-05-15T01:47:50.495819] rep.arm_resolved: rep=1 declared_side=right declared_view=sideRight resolved_arm=left committed_side=right left_conf=2.97 right_conf=2.95 pose_facing=right arm_match=false
+[2026-05-15T01:47:50.495562] rep.extremes: rep=1 side=right view=sideRight min=50.5 max=118.3 rom=67.7 min_at_peak=57.1 concentric_ms=642 source=global result=diagnosticSkipped
+[2026-05-15T01:47:50.411085] pose.frame_metrics: fsm=eccentric angle_raw=152.4 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:47:49.850470] pose.frame_metrics: fsm=peak angle_raw=89.5 l_sh=1.00 l_el=0.99 l_wr=1.00 l_hip=0.99 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:47:49.285496] pose.frame_metrics: fsm=peak angle_raw=55.3 l_sh=0.99 l_el=0.96 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:47:48.727381] pose.frame_metrics: fsm=peak angle_raw=53.2 l_sh=0.98 l_el=0.95 l_wr=0.98 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:47:48.168036] pose.frame_metrics: fsm=concentric angle_raw=80.1 l_sh=1.00 l_el=0.99 l_wr=0.99 l_hip=0.98 r_sh=1.00 r_el=0.99 r_wr=1.00 r_hip=0.98
+[2026-05-15T01:47:48.000740] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:47.602829] pose.frame_metrics: fsm=idle angle_raw=150.9 l_sh=1.00 l_el=1.00 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=1.00 r_hip=0.99
+[2026-05-15T01:47:47.033379] pose.frame_metrics: fsm=concentric angle_raw=165.3 l_sh=1.00 l_el=0.99 l_wr=0.99 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:47:46.870329] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:46.785803] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:46.730280] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:46.637495] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:46.548645] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:46.471938] pose.frame_metrics: fsm=idle angle_raw=166.5 l_sh=1.00 l_el=0.99 l_wr=0.98 l_hip=0.99 r_sh=1.00 r_el=1.00 r_wr=0.98 r_hip=0.99
+[2026-05-15T01:47:45.943811] pose.frame_metrics: fsm=concentric angle_raw=154.4 l_sh=1.00 l_el=0.99 l_wr=0.98 l_hip=0.99 r_sh=1.00 r_el=0.99 r_wr=0.99 r_hip=0.99
+[2026-05-15T01:47:44.754167] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:44.325996] pose.frame_metrics: fsm=idle angle_raw=160.6 l_sh=1.00 l_el=0.98 l_wr=0.97 l_hip=0.97 r_sh=1.00 r_el=0.99 r_wr=0.98 r_hip=0.98
+[2026-05-15T01:47:44.324551] curl.thresholds_resolved: tier=3 source=global sensitivity=high start=160.00 peak=70.00 peakExit=85.00 end=140.00 diagnostic=true
+[2026-05-15T01:47:34.909077] diagnostic.mode_active: auto-calibration disabled — every rep will run on source=global
+[2026-05-15T01:47:34.909024] curl_debug.session_start: ts=2026-05-15T01:47:34.908994 exercise=bicepsCurlSide side=right view=sideRight sensitivity=high thresholds_start=159.0 thresholds_peak=136.4 thresholds_peak_exit=151.4 thresholds_end=156.4 use_telemetry_defaults=true use_pipeline_defaults=false
+[2026-05-15T01:47:34.908444] curl_debug.session_active: silent observation mode — feedback suppressed; frame_metrics @ 2.0Hz; ring_buffer=2000

@@ -63,7 +63,13 @@ enum FormError {
   // `FormError.values.byName('trunkTibia')`. Not emitted by new code.
   trunkTibia, // (legacy) trunk-tibia parallelism deviation > 15°
   // Squat — added 2026-04-25 (Squat Master Rebuild)
-  excessiveForwardLean, // trunk-from-vertical > kSquatLeanWarnDeg (45° BW / 50° HBBS)
+  excessiveForwardLean, // trunk-from-vertical > kSquatLeanWarnDeg (30° BW / 35° HBBS as of 2026-05-15)
+  // Backward overextension at the bottom — lumbar hyperextension risk.
+  // Added 2026-05-15 alongside the squat form-feedback retune. Fires when
+  // signed lean is more negative than -kSquatBackwardLeanWarnDeg. Mirrors
+  // the forward-lean wiring but with no long-femur boost (anatomical
+  // long-femur lifters tend to lean MORE forward, not more backward).
+  excessiveBackwardLean,
   forwardKneeShift, // (knee_x − ankle_x) / femur_len > kSquatKneeShiftWarnRatio — informational, no TTS
   heelLift, // (foot_index_y − heel_y) / leg_len > kSquatHeelLiftWarnRatio
   /// Hip-lead — "Stripper Squat" / "Good Morning Squat". During the first

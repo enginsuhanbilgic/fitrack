@@ -43,25 +43,44 @@ void main() {
     });
   });
 
-  group('SquatAutoCalibrator — running averages', () {
-    test('running avg shifts toward subsequent samples', () {
-      final c = SquatAutoCalibrator();
-      // Rep 1 seeds the averages.
-      c.recordRepExtremes(80, 170);
-      // Rep 2 pulls each toward the new sample: avg_min = (80+90)/2 = 85.
-      c.recordRepExtremes(90, 180);
-      final t = c.currentThresholds!;
-      // start = 175 - 10 = 165.
-      // bottom = 85 + 5 = 90.
-      // end = 175 - 5 = 170.
-      expect(t.startAngle, closeTo(165, 1e-9));
-      expect(t.bottomAngle, closeTo(90, 1e-9));
-      expect(t.endAngle, closeTo(170, 1e-9));
-    });
-  });
+  group(
+    'SquatAutoCalibrator — min/max anchor over rolling window (post-2026-05-15)',
+    () {
+      test(
+        'anchor uses deepest min and most-extended max, not running average',
+        () {
+          final c = SquatAutoCalibrator();
+          c.recordRepExtremes(80, 170);
+          c.recordRepExtremes(90, 180);
+          final t = c.currentThresholds!;
+          // Post-2026-05-15: anchor on min(80, 90) = 80 and max(170, 180) = 180,
+          // NOT the running mean. Margins unchanged.
+          // start  = 180 - kSquatProfileStartMargin
+          // bottom = 80  + kSquatProfileBottomMargin
+          // end    = 180 - kSquatProfileEndMargin
+          expect(t.startAngle, closeTo(180 - kSquatProfileStartMargin, 1e-9));
+          expect(t.bottomAngle, closeTo(80 + kSquatProfileBottomMargin, 1e-9));
+          expect(t.endAngle, closeTo(180 - kSquatProfileEndMargin, 1e-9));
+        },
+      );
+
+      test('shallow reps DO NOT drift the bottom threshold shallower', () {
+        // The structural fix: under min-anchor a deep rep early in the set
+        // locks the floor; later shallow reps cannot loosen it.
+        final c = SquatAutoCalibrator();
+        c.recordRepExtremes(55, 170); // Deep — sets the anchor.
+        c.recordRepExtremes(80, 170); // Shallow.
+        c.recordRepExtremes(85, 170); // Shallow.
+        c.recordRepExtremes(82, 170); // Shallow.
+        final t = c.currentThresholds!;
+        // bottom anchored on 55° (deepest), not mean of [55, 80, 85, 82] = 75.5.
+        expect(t.bottomAngle, closeTo(55 + kSquatProfileBottomMargin, 1e-9));
+      });
+    },
+  );
 
   group('SquatAutoCalibrator — MAD outlier rejection per-dimension', () {
-    test('a min-side outlier does not pollute the running average', () {
+    test('a min-side outlier is rejected and does not anchor the threshold', () {
       final c = SquatAutoCalibrator();
       // Seed a stable window — need ≥4 samples for MAD to engage.
       // Each rep's max=170 is constant → MAD returns false (mad==0 guard),
@@ -71,13 +90,14 @@ void main() {
       c.recordRepExtremes(82, 170);
       c.recordRepExtremes(83, 170);
       c.recordRepExtremes(84, 170);
-      // Now window is [80,81,82,83,84] — wildly outlier on min=30°.
-      final avgBefore = c.currentThresholds!.bottomAngle;
+      // Window is [80, 81, 82, 83, 84] — inject a wildly-outlier min=30°.
+      // Under min/max anchoring this matters MORE than under mean anchoring:
+      // if MAD failed to reject, 30° would become the new min and drop
+      // bottomAngle by ~50°. MAD rejection keeps the anchor at min(80..84)=80.
+      final bottomBefore = c.currentThresholds!.bottomAngle;
       c.recordRepExtremes(30, 170);
-      final avgAfter = c.currentThresholds!.bottomAngle;
-      // The min-side outlier was rejected, so the bottomAngle (derived
-      // from _minAvg) should be unchanged.
-      expect(avgAfter, closeTo(avgBefore, 1e-9));
+      final bottomAfter = c.currentThresholds!.bottomAngle;
+      expect(bottomAfter, closeTo(bottomBefore, 1e-9));
     });
 
     test('outlier on one dimension does not block the other', () {
@@ -95,17 +115,20 @@ void main() {
       final bottomBefore = c.currentThresholds!.bottomAngle;
 
       // min=30° is far outside [79, 82] — MAD will reject. max=170 is
-      // squarely in the [169, 171] distribution → accepted.
+      // squarely in the [169, 171] distribution → accepted (but already
+      // matches the prior window max, so max(samples) doesn't move).
       c.recordRepExtremes(30, 170);
 
       final endAfter = c.currentThresholds!.endAngle;
       final bottomAfter = c.currentThresholds!.bottomAngle;
 
-      // Min side rejected → _minAvg unchanged → bottomAngle unchanged.
+      // Min side rejected → bottomAngle anchor unchanged.
       expect(bottomAfter, closeTo(bottomBefore, 1e-9));
-      // Max side accepted → running avg shifts toward 170 (already near
-      // 170, so the shift is small but possibly non-zero).
-      expect(endAfter, closeTo(endBefore, 0.2));
+      // Max side accepted at 170 but the prior window max was already 171,
+      // so max(samples) stays at 171 → endAngle unchanged. Under
+      // min/max anchoring (NOT running mean) the new sample only moves
+      // the threshold if it sets a new extremum.
+      expect(endAfter, closeTo(endBefore, 1e-9));
     });
   });
 

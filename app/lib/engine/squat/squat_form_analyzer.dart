@@ -276,15 +276,26 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     }
 
     // Lean — signed; positive = forward, negative = backward.
+    //
+    // 2026-05-15: backward lean is now tracked AND cued. Pre-2026-05-15
+    // `_signedLeanDeg` returned negative values for backward lean but the
+    // analyzer filtered `lean > 0` at both the tracking site and the cue
+    // site — erasing lumbar-hyperextension risk along with benign
+    // counterbalance lean. Backward lean fires when `lean < -kSquatBackwardLeanWarnDeg`.
     final lean = _signedLeanDeg(current, side);
     if (lean != null) {
-      // Track magnitude of forward lean only — backward lean doesn't
-      // contribute to the peak (and doesn't fire the error).
-      if (lean > 0 && (_maxLeanDeg == null || lean > _maxLeanDeg!)) {
-        _maxLeanDeg = lean;
+      // Track magnitude of the WORSE-direction lean for the per-rep peak.
+      // Stored as a positive magnitude so `_lastRepLeanDeg` consumers see
+      // a single number regardless of direction; direction is implied by
+      // which FormError was emitted during the rep.
+      final absLean = lean.abs();
+      if (_maxLeanDeg == null || absLean > _maxLeanDeg!) {
+        _maxLeanDeg = absLean;
       }
       if (lean > _leanWarnDeg) {
         errors.add(FormError.excessiveForwardLean);
+      } else if (lean < -kSquatBackwardLeanWarnDeg) {
+        errors.add(FormError.excessiveBackwardLean);
       }
     }
 

@@ -992,7 +992,7 @@ class _TrainTab extends StatelessWidget {
                 title: ExerciseType.squat.label,
                 subtitle: 'Side view · stand 2 m away at waist height',
                 badgeColor: squatBadgeColor,
-                onTap: () => onStartWorkout(ExerciseType.squat),
+                onTap: () => _startNormalSquat(context),
               ),
               const SizedBox(height: 10),
               _ExerciseCard(
@@ -1010,6 +1010,16 @@ class _TrainTab extends StatelessWidget {
                   subtitle:
                       'Silent observation — logs frame metrics for tuning',
                   onTap: () => _showCurlDebugSidePicker(context),
+                ),
+              ],
+              if (kSquatDebugSessionEnabled) ...[
+                const SizedBox(height: 10),
+                _ExerciseCard(
+                  icon: Icons.bug_report_outlined,
+                  title: 'Squat Debug Session',
+                  subtitle:
+                      'Silent observation — logs frame metrics for tuning',
+                  onTap: () => _startSquatDebugSession(context),
                 ),
               ],
             ]),
@@ -1050,6 +1060,32 @@ class _TrainTab extends StatelessWidget {
     await prefs.setCurlDebugSession(true);
     if (!context.mounted) return;
     await onStartWorkout(ExerciseType.bicepsCurlSide, curlSide: side);
+  }
+
+  /// Normal squat entry. Defensively clears any stale `squat_debug_session`
+  /// pref left over from a prior debug launch so a normal workout always
+  /// runs with feedback ON. Squat is bilateral — no side picker.
+  Future<void> _startNormalSquat(BuildContext context) async {
+    if (!context.mounted) return;
+    if (kSquatDebugSessionEnabled) {
+      final prefs = AppServicesScope.read(context).preferencesRepository;
+      await prefs.setSquatDebugSession(false);
+      if (!context.mounted) return;
+    }
+    await onStartWorkout(ExerciseType.squat);
+  }
+
+  /// "Squat Debug Session" entry. Mirrors [_showCurlDebugSidePicker] but
+  /// without a side picker since squat is a bilateral sagittal-plane
+  /// movement. Flips the `squat_debug_session` preference to `true` so the
+  /// view-model reads it during `init()` and forces tier 3 / source=global
+  /// / silent observation mode for the session.
+  Future<void> _startSquatDebugSession(BuildContext context) async {
+    if (!context.mounted) return;
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setSquatDebugSession(true);
+    if (!context.mounted) return;
+    await onStartWorkout(ExerciseType.squat);
   }
 
   Future<ExerciseSide?> _showSideFacingPicker(BuildContext context) {

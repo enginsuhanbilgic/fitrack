@@ -188,6 +188,8 @@ class _RepCounterDisplayState extends State<RepCounterDisplay> {
     FormError.squatDepth => 'Go deeper',
     FormError.trunkTibia => 'Keep your chest up',
     FormError.excessiveForwardLean => 'Chest up — keep your back tall',
+    FormError.excessiveBackwardLean =>
+      'Stop leaning back — stack ribs over hips',
     FormError.heelLift => 'Drive your heels into the floor',
     FormError.forwardKneeShift => 'Knees tracking forward',
     FormError.hipSag => 'Keep your body straight',

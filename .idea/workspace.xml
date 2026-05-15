@@ -8,17 +8,29 @@
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/GLOSSARY.md" beforeDir="false" afterPath="$PROJECT_DIR$/GLOSSARY.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/core/constants.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/constants.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/curl_rom_defaults.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/curl_rom_defaults.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/core/form_thresholds.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/form_thresholds.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/core/squat_form_thresholds.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/squat_form_thresholds.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/rom_thresholds.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/rom_thresholds.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/squat_rom_defaults.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/squat_rom_defaults.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/core/types.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/core/types.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/curl/curl_side_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/curl/curl_side_form_analyzer.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/engine/form_auditor.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/form_auditor.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/squat/squat_auto_calibrator.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/squat/squat_auto_calibrator.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/squat/squat_form_analyzer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/squat/squat_form_analyzer.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/engine/squat/squat_strategy.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/engine/squat/squat_strategy.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/home_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/settings_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/summary_screen.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/screens/workout_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/services/db/preferences_repository.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/services/db/preferences_repository.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/view_models/workout_view_model.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/core/form_thresholds_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/core/form_thresholds_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/core/squat_form_thresholds_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/core/squat_form_thresholds_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/test/engine/form_auditor_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/form_auditor_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_pushup_thresholds_from_telemetry.py" beforeDir="false" afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_pushup_thresholds_from_telemetry.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_thresholds_from_telemetry.py" beforeDir="false" afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_thresholds_from_telemetry.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/dataset_analysis/tests/test_derive_pushup.py" beforeDir="false" afterPath="$PROJECT_DIR$/tools/dataset_analysis/tests/test_derive_pushup.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/rep_counter_display.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/widgets/summary/summary_form_issues_card.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/widgets/summary/summary_form_issues_card.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/core/rom_thresholds_sensitivity_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/core/rom_thresholds_sensitivity_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/engine/curl/curl_auto_calibrator_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/curl/curl_auto_calibrator_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/engine/squat/squat_auto_calibrator_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/engine/squat/squat_auto_calibrator_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/test/view_models/calibration_side_pick_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/app/test/view_models/calibration_side_pick_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_squat_thresholds_from_telemetry.py" beforeDir="false" afterPath="$PROJECT_DIR$/tools/dataset_analysis/scripts/derive_squat_thresholds_from_telemetry.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

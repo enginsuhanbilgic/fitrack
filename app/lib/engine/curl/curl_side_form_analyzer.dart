@@ -302,31 +302,50 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     if (ref == null) return errors;
 
     final useLeft = _activeArmIsLeft;
-    final useRight = !useLeft;
 
-    final torsoLen = _computeTorsoLen(current, useLeft, useRight);
+    final torsoLen = _computeTorsoLen(current, useLeft);
     if (torsoLen == null || torsoLen < 0.01) return errors;
 
     // Lateral torso swing — check whichever shoulder is visible.
+    //
+    // Dead-band: below the effective dead-band the lateral shift is
+    // indistinguishable from ML-Kit jitter on a clean rep. We still record
+    // the magnitude into `_maxSwingRatio` (telemetry sees the truth) but
+    // suppress the cue. Above the dead-band but below the audit threshold,
+    // the user's "minimal movement budget" applies — natural body shift
+    // during heavy curls passes through silently. The effective dead-band
+    // is `kFormMinMovementSwingRatio` at tolerance=0 and widens toward
+    // `swingThreshold` as the user opens the Form Tolerance slider; see
+    // `FormThresholds._effectiveDeadband`.
     final swing = useLeft
         ? horizontalShift(ref, current, LM.leftShoulder)
         : horizontalShift(ref, current, LM.rightShoulder);
     if (swing != null) {
       final ratio = swing / torsoLen;
       if (ratio > _maxSwingRatio) _maxSwingRatio = ratio;
-      if (ratio > _formThresholds.swingThreshold) {
+      if (ratio > _formThresholds.effectiveSwingDeadband &&
+          ratio > _formThresholds.swingThreshold) {
         errors.add(FormError.torsoSwing);
       }
     }
 
     // Forward trunk lean angle — side-view sagittal projection.
+    //
+    // Dead-band: pose-estimation noise on the shoulder-hip vector is
+    // ~1-2°. The effective dead-band (3° at tolerance=0, widening toward
+    // `torsoLeanThresholdDeg` as the user raises the Form Tolerance
+    // slider) is suppressed even if it crosses the audit threshold — a
+    // real lean-cheat is 15°+, so this only blocks the degenerate
+    // "threshold sits inside the noise" case that surfaced when
+    // kTorsoLeanThresholdDeg was 8°.
     final baseline = _baselineTorsoAngle;
     if (baseline != null) {
       final currentAngle = _torsoAngle(current, useLeft);
       if (currentAngle != null) {
         final delta = (currentAngle - baseline).abs();
         if (delta > _maxLeanDeltaDeg) _maxLeanDeltaDeg = delta;
-        if (delta > _formThresholds.torsoLeanThresholdDeg &&
+        if (delta > _formThresholds.effectiveLeanDeadband &&
+            delta > _formThresholds.torsoLeanThresholdDeg &&
             !errors.contains(FormError.torsoSwing)) {
           errors.add(FormError.torsoSwing);
         }
@@ -351,7 +370,10 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
         final disp = math.sqrt(dx * dx + dy * dy);
         final ratio = disp / torsoLen;
         if (ratio > _maxShoulderArcRatio) _maxShoulderArcRatio = ratio;
-        if (ratio > _formThresholds.swingThreshold) {
+        // Shoulder-arc shares the swing dead-band — both measure hip-relative
+        // displacement and have the same noise characteristics.
+        if (ratio > _formThresholds.effectiveSwingDeadband &&
+            ratio > _formThresholds.swingThreshold) {
           errors.add(FormError.shoulderArc);
         }
       }
@@ -399,7 +421,13 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
           // survives and the sign is lost at rep commit.
           _signedElbowDriftRatioAtMax = signedRatio;
         }
-        if (ratio > _formThresholds.driftThreshold) {
+        // Dead-band: elbow perpendicular-offset noise floor sits at ~0.04-0.06
+        // (shoulder/elbow landmarks are some of ML Kit's jitteriest in side
+        // view because both can occlude during peak flexion). 0.08 absorbs
+        // that noise without losing real cheats (typically 0.25+); tolerance
+        // slider widens this toward `driftThreshold`.
+        if (ratio > _formThresholds.effectiveDriftDeadband &&
+            ratio > _formThresholds.driftThreshold) {
           errors.add(FormError.elbowDrift);
         }
       }
@@ -422,7 +450,13 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
         final shrugValue = -dy; // positive = moving up
         final ratio = shrugValue / torsoLen;
         if (ratio > _maxShrugRatio) _maxShrugRatio = ratio;
-        if (ratio > _formThresholds.shrugThreshold) {
+        // Dead-band: natural scapular elevation during peak elbow flexion
+        // (3-4 cm on a ~50 cm torso) sits at ratio ~0.06-0.08. The 0.06
+        // baseline dead-band silences this baseline activity; the 0.20
+        // audit threshold catches real "shoulders to ears" cheats. The
+        // tolerance slider widens the silent budget toward `shrugThreshold`.
+        if (ratio > _formThresholds.effectiveShrugDeadband &&
+            ratio > _formThresholds.shrugThreshold) {
           errors.add(FormError.shoulderShrug);
         }
       }
@@ -437,7 +471,16 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
         // Facing left: backward lean is shoulder moving RIGHT (x increases) -> delta positive.
         final backLeanDeg = _facingRight! ? -delta : delta;
         if (backLeanDeg > _maxBackLeanDeg) _maxBackLeanDeg = backLeanDeg;
-        if (backLeanDeg > _formThresholds.backLeanThresholdDeg) {
+        // Back-lean shares the lean baseline dead-band — same pose-noise
+        // floor on the torso vector. With backLeanThresholdDeg back at
+        // 10°, the dead-band mostly enforces non-negativity gating (back
+        // lean can read 1-2° negative on jittery frames even with no real
+        // backward tilt). Note `effectiveBackLeanDeadband` uses the same
+        // baseline as forward lean but interpolates against the *back*
+        // lean threshold, so the two cues reach different effective
+        // values at tolerance=100.
+        if (backLeanDeg > _formThresholds.effectiveBackLeanDeadband &&
+            backLeanDeg > _formThresholds.backLeanThresholdDeg) {
           errors.add(FormError.backLean);
         }
       }
@@ -460,7 +503,13 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
         // Negative dy = elbow moved UP relative to shoulder (screen-Y decreases upward).
         final rise = (_baselineElbowRelY! - currentElbowRelY) / torsoLen;
         if (rise > _maxElbowRiseRatio) _maxElbowRiseRatio = rise;
-        if (rise > _formThresholds.elbowRiseThreshold) {
+        // Dead-band: at peak flexion the upper arm naturally tilts forward
+        // 5-10° even with strict form, producing rise ~0.08-0.12. The 0.08
+        // baseline dead-band ignores the bottom of that natural arc; the
+        // 0.22 audit threshold still catches real front-delt cheats
+        // (0.24-0.36). Tolerance slider widens toward `elbowRiseThreshold`.
+        if (rise > _formThresholds.effectiveRiseDeadband &&
+            rise > _formThresholds.elbowRiseThreshold) {
           errors.add(FormError.elbowRise);
         }
       }
@@ -820,7 +869,7 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     return leftTotal >= rightTotal;
   }
 
-  double? _computeTorsoLen(PoseResult current, bool useLeft, bool useRight) {
+  double? _computeTorsoLen(PoseResult current, bool useLeft) {
     if (useLeft) {
       return verticalDist(
         current.landmark(

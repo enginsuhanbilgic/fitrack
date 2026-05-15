@@ -134,7 +134,11 @@ class _Tee:
 # wasn't in scope. Keeping a Part-4-local regex avoids a backward-incompatible
 # edit to the curl script.
 _SQUAT_REP_RE = re.compile(
-    r"squat\.rep\s+"
+    # Note: ``squat.rep:`` is emitted with a trailing colon by
+    # ``TelemetryLog.log()`` (the standard event-name separator). The
+    # ``:?`` makes the colon optional so older logs without it (if any
+    # exist in test fixtures) still parse.
+    r"squat\.rep:?\s+"
     r"rep=\d+\s+"
     r"variant=(?P<variant>\S+)\s+"
     r"long_femur=(?P<long_femur>\S+).*?"

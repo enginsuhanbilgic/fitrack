@@ -152,6 +152,7 @@ String _labelFor(FormError err) => switch (err) {
   FormError.fatigue => 'Fatigue',
   FormError.squatDepth => 'Shallow Depth',
   FormError.excessiveForwardLean => 'Excessive Forward Lean',
+  FormError.excessiveBackwardLean => 'Excessive Backward Lean',
   FormError.heelLift => 'Heel Lift',
   FormError.forwardKneeShift => 'Forward Knee Shift',
   FormError.hipSag => 'Body Line Lost',

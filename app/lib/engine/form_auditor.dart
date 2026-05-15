@@ -179,6 +179,15 @@ class FormAuditor {
     // 2026-05-14). Resolved once per session for legibility — same value
     // regardless of `sensitivity`, which still drives ROM tier resolution
     // below.
+    //
+    // **Tolerance-invariant by design** (2026-05-15): post-session audit
+    // intentionally uses `FormThresholds.medium` (tolerance=0, strictest
+    // dead-band) regardless of the user's live-session Form Tolerance
+    // Percent. The audit summary describes what *really* happened during
+    // the rep stream, not what the user opted to hear. Do NOT thread the
+    // user's tolerance value through here — that would conflate "live
+    // coaching loudness" with "session-end ground-truth audit" and break
+    // cross-session comparability.
     const strictForm = FormThresholds.medium;
     // Cold-start fallback ROM gates — used only for reps that have no
     // calibrated bucket and no auto-cal snapshot to fall back on.

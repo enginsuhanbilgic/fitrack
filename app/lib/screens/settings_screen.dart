@@ -58,6 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _ttsEnabled = true;
   TtsVerbosity _ttsVerbosity = TtsVerbosity.medium;
   bool _hapticsEnabled = true;
+  int _formTolerancePercent = kDefaultFormTolerancePercent;
 
   @override
   void didChangeDependencies() {
@@ -96,6 +97,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final tts = await services.preferencesRepository.getTtsEnabled();
     final ttsVerbosity = await services.preferencesRepository.getTtsVerbosity();
     final haptics = await services.preferencesRepository.getHapticsEnabled();
+    final formTolerancePercent = await services.preferencesRepository
+        .getFormTolerancePercent();
     if (!mounted) return;
     setState(() {
       _profile = liveCurl;
@@ -109,6 +112,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _ttsEnabled = tts;
       _ttsVerbosity = ttsVerbosity;
       _hapticsEnabled = haptics;
+      _formTolerancePercent = formTolerancePercent;
       _demoEnabled = demoOn;
       _loading = false;
     });
@@ -215,6 +219,95 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (!mounted) return;
     setState(() => _ttsVerbosity = value);
+  }
+
+  /// Human-readable subtitle for the Form Tolerance slider (Option B
+  /// labeling, 2026-05-15): the slider keeps the `0 → 100` direction the
+  /// user expects from a percent control, but every band's wording spells
+  /// out direction explicitly so the percentage can't be misread as "fail
+  /// probability." Five bands at 0 / 25 / 50 / 75 / 100 mark the dial's
+  /// meaningful regions.
+  static String _formToleranceSubtitle(int percent) {
+    if (percent == 0) {
+      return "0% — Strict (today's default). All sub-fault motion warned.";
+    }
+    if (percent <= 25) {
+      return '$percent% — Mostly strict. Borderline form warned.';
+    }
+    if (percent < 75) {
+      return '$percent% — Balanced. Mid-range motion stays silent.';
+    }
+    if (percent < 100) {
+      return '$percent% — Relaxed. Only obvious form issues warned.';
+    }
+    return '100% — Most relaxed. Only clear faults trigger cues.';
+  }
+
+  /// Opens an AlertDialog explaining what the slider does and (more
+  /// importantly) what it does NOT do — see the Sensitivity vs Form Audit
+  /// doctrine in `.agent_brain/SKILLS.md`. The text exists to keep users
+  /// from confusing this dial with "Coaching strictness" (ROM sensitivity);
+  /// it answers in the help body the four questions that surfaced during
+  /// the 2026-05-15 planning conversation (direction, scope, independence,
+  /// what stays unaffected).
+  Future<void> _showFormToleranceHelp(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Curl form tolerance'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'WHAT IT DOES\n'
+            'Widens the silent budget before a form cue fires (lean, swing, '
+            'drift, shrug, elbow rise) on biceps curls.\n\n'
+            'WHAT THE NUMBERS MEAN\n'
+            "0% — Strict (today's default). Every borderline motion is "
+            'warned.\n'
+            '100% — Most relaxed. Only clear, biomechanically-real faults '
+            'trigger cues; minor postural shifts stay silent.\n'
+            'The audit threshold is the ceiling — a real cheat (e.g. a 30° '
+            'forward lean) fires at every setting. The slider widens '
+            'silence below that line, it never weakens it.\n\n'
+            'WHAT IT DOES NOT AFFECT\n'
+            '• Rep counting — that is "Coaching strictness," a separate '
+            'dial above.\n'
+            '• Rep quality scoring — your per-rep score always reads the '
+            'full motion, no matter where this slider sits.\n'
+            '• The post-session form summary — always shows the truth.\n\n'
+            'COACHING STRICTNESS vs FORM TOLERANCE\n'
+            'Coaching strictness controls *when a movement counts as a '
+            'rep.* Form tolerance controls *when the analyzer talks to '
+            'you about how that rep looked.* Two independent dials.\n\n'
+            'SCOPE\n'
+            'Biceps curl only today. Squat and push-up coming in a '
+            'follow-up.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Persist a new Form Tolerance Percent. Called from the Slider's
+  /// `onChangeEnd` so SQLite is not hit on every detent — live-preview
+  /// updates `_formTolerancePercent` via local `setState` during drag.
+  /// The repository clamps to `[0, 100]` on write; no need to pre-clamp
+  /// here (the Slider widget can only emit values inside its `[min, max]`
+  /// range anyway).
+  Future<void> _setFormTolerancePercent(int value) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setFormTolerancePercent(value);
+    TelemetryLog.instance.log(
+      'preferences.form_tolerance_changed',
+      'percent=$value',
+    );
+    if (!mounted) return;
+    setState(() => _formTolerancePercent = value);
   }
 
   Future<void> _setHapticsEnabled(bool value) async {
@@ -345,12 +438,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _recalibrate(ExerciseType exercise) async {
     if (!mounted) return;
+    // Curl is the only exercise where the user picks a side per calibration
+    // pass. Pre-session bottom-sheet matches the home-screen flow so the side
+    // is committed before WorkoutScreen mounts; the in-overlay picker becomes
+    // a fallback for the (now-rare) case where the VM enters calibration with
+    // `curlSide == both`. Without this, the previous Settings path defaulted
+    // to ExerciseSide.both and let the analyzer pick the arm by landmark
+    // confidence — which consistently selected the right arm regardless of
+    // user intent.
+    ExerciseSide curlSide = ExerciseSide.both;
+    if (exercise.isCurl) {
+      final picked = await _showSideFacingPickerForCalibration(context);
+      if (picked == null) return; // user dismissed sheet
+      if (!mounted) return;
+      curlSide = picked;
+    }
+    if (!mounted) return;
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            WorkoutScreen(exercise: exercise, forceCalibration: true),
+        builder: (_) => WorkoutScreen(
+          exercise: exercise,
+          forceCalibration: true,
+          curlSide: curlSide,
+        ),
       ),
+    );
+  }
+
+  /// Pre-session side picker for curl recalibration.
+  ///
+  /// Faithful clone of [_FtExercisesTab._showSideFacingPicker] in
+  /// `home_screen.dart` — same camera-frame ↔ user-frame mapping so the
+  /// "Left" tile maps to `ExerciseSide.right` (right-side-of-frame is the
+  /// user's physical LEFT arm under front-camera mirroring) and vice versa.
+  /// Do NOT "fix" the mapping — see the doc comments on the home-screen
+  /// version; a 2026-04-27 swap broke this and was reverted.
+  Future<ExerciseSide?> _showSideFacingPickerForCalibration(
+    BuildContext context,
+  ) {
+    final theme = Theme.of(context);
+    return showModalBottomSheet<ExerciseSide>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                child: Text(
+                  'Which arm to calibrate?',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.swipe_left),
+                title: const Text('Left'),
+                subtitle: const Text('Calibrate your left arm'),
+                // User's physical left arm = camera's right side =
+                // ExerciseSide.right. See home_screen.dart line 1125-1131.
+                onTap: () => Navigator.pop(ctx, ExerciseSide.right),
+              ),
+              ListTile(
+                leading: const Icon(Icons.swipe_right),
+                title: const Text('Right'),
+                subtitle: const Text('Calibrate your right arm'),
+                onTap: () => Navigator.pop(ctx, ExerciseSide.left),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -542,6 +709,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onSelectionChanged: (s) => _setFeedbackSensitivity(s.first),
                   ),
                 ),
+                // ── Curl form tolerance slider ──────────────────────────
+                // Scales the curl form-audit dead-band only. Does NOT
+                // affect rep counting, quality scoring, or post-session
+                // audit summaries (those always use the true magnitudes).
+                // At 0 the analyzer behaves bit-for-bit like the
+                // 2026-05-15 baseline; at 100 the dead-band collapses
+                // onto the audit threshold (cues only fire on clear
+                // faults). Title is curl-only-honest until the
+                // squat/push-up dead-band layer follow-up lands.
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Row(
+                    children: [
+                      const Text('Curl form tolerance'),
+                      IconButton(
+                        icon: const Icon(Icons.help_outline, size: 18),
+                        tooltip: 'About curl form tolerance',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () => _showFormToleranceHelp(context),
+                      ),
+                    ],
+                  ),
+                  subtitle: Text(_formToleranceSubtitle(_formTolerancePercent)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Slider(
+                    min: 0,
+                    max: 100,
+                    divisions: 20,
+                    label: '$_formTolerancePercent%',
+                    value: _formTolerancePercent.toDouble(),
+                    // Live preview during drag: cheap setState, no SQLite hit.
+                    onChanged: (v) =>
+                        setState(() => _formTolerancePercent = v.round()),
+                    // Persist only when the user releases the slider so the
+                    // DB isn't written 20 times per drag.
+                    onChangeEnd: (v) => _setFormTolerancePercent(v.round()),
+                  ),
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
@@ -642,10 +851,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
-                  title: const Text('Disable auto-calibration (curl)'),
+                  title: const Text('Disable auto-calibration'),
                   subtitle: const Text(
-                    'Forces every rep to use cold-start defaults. '
-                    'For tuning data collection only — turn off after.',
+                    'Forces curl, squat, and push-up to use cold-start '
+                    'defaults — bypasses calibrated profiles and (where '
+                    'applicable) in-session auto-cal. Feedback stays ON '
+                    'so you can test cues. Turn off after testing.',
                   ),
                   value: _diagnosticDisableAutoCalibration,
                   onChanged: _setDiagnosticDisableAutoCalibration,

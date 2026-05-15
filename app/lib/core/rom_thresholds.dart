@@ -54,24 +54,40 @@ class RomThresholds {
   });
 
   /// Tier-3 looseness deltas: `(dStart, dPeak, dEnd)` applied to the
-  /// High-anchored constants to reproduce today's Medium numbers exactly.
+  /// High-anchored constants to derive Medium thresholds.
   /// peakExit is re-derived from `peak + kCurlPeakExitGap`.
+  ///
+  /// Sign convention for "looser" (more reps count):
+  ///   dStart < 0  → user can begin CONCENTRIC from a shallower starting angle
+  ///   dPeak  > 0  → user need not flex as deeply to register peak
+  ///   dEnd   < 0  → user need not return as close to lockout to commit rep
+  ///
+  /// 2026-05-15 retune: previous `(-5, +10, 0)` left `endAngle` unchanged, so
+  /// Medium users still had to extend to ~140° to commit. Field reports
+  /// (reps not counting on controlled-but-not-locked-out returns) drove a
+  /// pull on dEnd. Also widened dStart so partial-extension between reps no
+  /// longer blocks IDLE→CONCENTRIC.
   static const (double, double, double) _tier3MediumLooseness = (
-    -5.0,
-    10.0,
-    0.0,
+    -8.0,
+    12.0,
+    -6.0,
   );
 
   /// Tier-1 (telemetry-derived) High anchor for curl, per view.
-  /// Reproduces today's `sideLeftStrict` / `sideRightStrict` exactly.
-  /// Looseness for Medium is `(-3, +8, +8)` — preserves today's `*Default`.
-  /// Applied via `_applyTelemetrySensitivity` (separate path, separate
-  /// floor mode) since telemetry tuples ship with curated tight gaps that
-  /// the strict bucket-derived floor would over-correct.
+  /// Looseness deltas for Medium — applied via `_applyTelemetrySensitivity`
+  /// (separate path, soft floor) since telemetry tuples ship with curated
+  /// tight gaps that the strict bucket-derived floor would over-correct.
+  ///
+  /// 2026-05-15 retune: previous `(-3, +8, +8)` pushed `endAngle` from the
+  /// telemetry High anchor (137.6°) to 145.6° on Medium — *tighter* than
+  /// High at the rep-commit boundary, which is exactly backwards for a
+  /// "gentler" tier and was the dominant cause of dropped reps on shallow
+  /// returns. New deltas flip dEnd negative so Medium commits below the
+  /// High anchor, matching the doctrinal "Medium is looser than High."
   static const (double, double, double) _telemetryMediumLooseness = (
-    -3.0,
-    8.0,
-    8.0,
+    -7.0,
+    12.0,
+    -4.0,
   );
 
   /// Apply the user's sensitivity selection to a High-anchored threshold set.

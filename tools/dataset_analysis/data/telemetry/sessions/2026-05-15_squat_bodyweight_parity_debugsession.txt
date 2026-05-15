@@ -1,0 +1,20 @@
+[2026-05-15T02:24:34.123802] pose.quality_warn: missing_landmarks ids=23,24,25,26,27,28 conf=0.00,0.00,0.00,0.00,0.00,0.00 nearedge=true inference_ms=32
+[2026-05-15T02:24:33.017054] pose.quality_warn: missing_landmarks ids=23,24,25,26,27,28 conf=0.00,0.00,0.00,0.00,0.00,0.00 nearedge=true inference_ms=49
+[2026-05-15T02:24:31.409973] pose.quality_warn: missing_landmarks ids=23,24,25,26,27,28 conf=0.16,0.08,0.12,0.05,0.07,0.04 nearedge=true inference_ms=50
+[2026-05-15T02:24:26.720574] pose.quality_warn: missing_landmarks ids=28 conf=0.30 nearedge=true inference_ms=20
+[2026-05-15T02:24:26.472061] squat.frame_metrics: fsm=descending angle=160.5 l_hip=1.00 l_knee=0.96 l_ankle=0.82 r_hip=1.00 r_knee=0.98 r_ankle=0.58
+[2026-05-15T02:24:24.635780] squat.rep: rep=12 variant=bodyweight long_femur=false lean_deg=7.94 knee_shift=0.8518 heel_lift=0.2531 quality=0.900 min_knee=61.02 max_knee=163.24
+[2026-05-15T02:24:20.458453] squat.rep: rep=11 variant=bodyweight long_femur=false lean_deg=6.66 knee_shift=0.9064 heel_lift=0.2442 quality=0.900 min_knee=58.61 max_knee=162.19
+[2026-05-15T02:24:13.546132] squat.rep: rep=10 variant=bodyweight long_femur=false lean_deg=2.71 knee_shift=0.5247 heel_lift=0.1534 quality=0.900 min_knee=59.01 max_knee=162.18
+[2026-05-15T02:24:10.493462] squat.rep: rep=9 variant=bodyweight long_femur=false lean_deg=6.41 knee_shift=0.6960 heel_lift=0.1784 quality=0.900 min_knee=46.05 max_knee=163.73
+[2026-05-15T02:24:06.721653] squat.rep: rep=8 variant=bodyweight long_femur=false lean_deg=4.30 knee_shift=0.5616 heel_lift=0.2115 quality=0.900 min_knee=50.52 max_knee=162.01
+[2026-05-15T02:24:03.512123] squat.rep: rep=7 variant=bodyweight long_femur=false lean_deg=6.31 knee_shift=0.5378 heel_lift=0.2504 quality=0.900 min_knee=58.22 max_knee=160.98
+[2026-05-15T02:24:00.050438] squat.rep: rep=6 variant=bodyweight long_femur=false lean_deg=2.49 knee_shift=0.6203 heel_lift=0.2476 quality=0.900 min_knee=60.31 max_knee=158.62
+[2026-05-15T02:23:56.765706] squat.rep: rep=5 variant=bodyweight long_femur=false lean_deg=7.97 knee_shift=0.5909 heel_lift=0.2316 quality=0.900 min_knee=61.64 max_knee=164.08
+[2026-05-15T02:23:52.983086] squat.rep: rep=4 variant=bodyweight long_femur=false lean_deg=5.99 knee_shift=0.8088 heel_lift=0.1995 quality=0.900 min_knee=54.90 max_knee=164.62
+[2026-05-15T02:23:48.968772] squat.rep: rep=3 variant=bodyweight long_femur=false lean_deg=1.92 knee_shift=0.6686 heel_lift=0.2692 quality=0.900 min_knee=47.84 max_knee=166.32
+[2026-05-15T02:23:45.032618] squat.rep: rep=2 variant=bodyweight long_femur=false lean_deg=1.89 knee_shift=0.9333 heel_lift=0.2811 quality=0.900 min_knee=47.62 max_knee=167.07
+[2026-05-15T02:23:41.263451] squat.rep: rep=1 variant=bodyweight long_femur=false lean_deg=10.47 knee_shift=0.5272 heel_lift=0.2206 quality=0.900 min_knee=58.40 max_knee=164.86
+[2026-05-15T02:23:26.481317] diagnostic.mode_active: auto-calibration disabled — every rep will run on source=global
+[2026-05-15T02:23:26.481007] squat_debug.session_start: ts=2026-05-15T02:23:26.480974 exercise=squat variant=bodyweight long_femur=false sensitivity=high start_angle=160.0 bottom_angle=90.0 end_angle=160.0
+[2026-05-15T02:23:26.480801] squat_debug.session_active: silent observation mode — feedback suppressed; ring_buffer=2000 frame_metrics@3.0Hz

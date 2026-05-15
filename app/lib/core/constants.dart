@@ -129,15 +129,31 @@ const double kSwingThreshold = 0.25;
 
 /// Forward trunk lean: change in torso-to-vertical angle (degrees) relative to
 /// rep-start baseline. Only evaluated in side views (sideLeft / sideRight) where
-/// the sagittal-plane projection is faithful. Reduced from 15° (2026-04-28) —
-/// field testing showed 15° was too permissive; 8° catches momentum-driven
-/// body swing while ignoring minor postural wobble (≤3–4°).
-const double kTorsoLeanThresholdDeg = 8.0;
+/// the sagittal-plane projection is faithful.
+///
+/// HISTORY:
+///   - 15° pre-2026-04-28 (too permissive, missed momentum cheats)
+///   - 8° 2026-04-28 → 2026-05-15 (over-tightened: fired on natural ~5-7°
+///     postural shift during heavy contraction, especially on the last reps
+///     of a set)
+///   - 12° 2026-05-15 retune: pairs with the new minimum-movement dead-band
+///     (kFormMinMovementLeanDeg) so micro-wobble below pose-noise can never
+///     fire, while genuine momentum-driven lean (typically 15-25°) is still
+///     flagged decisively.
+const double kTorsoLeanThresholdDeg = 12.0;
 
 /// Backward trunk lean threshold (degrees). Typically smaller than forward
 /// lean as hyperextension is more dangerous and clearly indicates cheat.
-/// Reduced from 10° (2026-04-28) alongside forward lean tightening.
-const double kBackLeanThresholdDeg = 6.0;
+///
+/// HISTORY:
+///   - 10° pre-2026-04-28
+///   - 6°  2026-04-28 → 2026-05-15 (caught natural counterbalance lean on
+///     heavier curls as "hyperextension"; constant false positives)
+///   - 10° 2026-05-15 retune: real lumbar-hyperextension cheats sit at
+///     15-25°; 10° still warns before the danger zone but no longer treats
+///     normal end-of-set counterbalance as a fault. Dead-band guard via
+///     kFormMinMovementLeanDeg handles the sub-noise floor.
+const double kBackLeanThresholdDeg = 10.0;
 
 /// Shoulder shrug: vertical (Y-axis) shoulder displacement / L_torso.
 /// A positive shrug (shoulder moving UP) > this fires `shoulderShrug`.
@@ -150,10 +166,73 @@ const double kBackLeanThresholdDeg = 6.0;
 /// from the 95th percentile of clean reps once diagnostic-mode telemetry
 /// produces a real distribution; this is a first-principles guard, not
 /// a final number.
-const double kShrugThreshold = 0.16;
+const double kShrugThreshold = 0.20;
 
 /// Elbow drift: ΔX_elbow / L_torso.
 const double kDriftThreshold = 0.20;
+
+// ── Form-audit minimum-movement dead-band (2026-05-15) ──
+// Two-layer guard: BELOW these magnitudes the analyzer treats the signal
+// as pose-estimation noise and does not even compare against the audit
+// threshold. ABOVE the audit threshold, the cue fires as before. The
+// intermediate band (dead-band < x < threshold) is the user's "minimal
+// movement budget" — natural breathing, scapular activity, postural
+// micro-shifts pass through silently.
+//
+// The values below are the **baseline floor** — the strictest possible
+// dead-band, equivalent to the 2026-05-15 hard-coded behavior. After
+// 2026-05-15 a user-controlled Form Tolerance Percent dial scales the
+// effective dead-band from this floor UP TO (but never above) the
+// corresponding audit threshold; see `FormThresholds.withTolerance` and
+// the Form-Audit Tolerance section of `.agent_brain/SKILLS.md`. Doctrine
+// compliance: the dial widens silence, never weakens the audit threshold,
+// so the "Sensitivity vs Form Audit" safety inversion can't recur.
+//
+// The audit thresholds themselves remain NOT user-tunable (same doctrine
+// as `curl_form_audit_defaults.dart`). The pose-noise floor encoded here
+// is a property of ML Kit + the 1€ filter, not user preference; the
+// tolerance dial only controls how much pre-threshold motion stays silent
+// ABOVE that floor.
+//
+// Floors derived from observed jitter in clean reps:
+//   - lateral shift / torso  ≈ 0.02-0.05 noise floor → 0.08 dead-band
+//   - lean delta              ≈ 1-2° noise floor    → 3° dead-band
+//   - shrug ratio             ≈ 0.03-0.05 floor     → 0.06 dead-band
+//   - drift ratio             ≈ 0.04-0.06 floor     → 0.08 dead-band
+//   - elbow-rise ratio        ≈ 0.04-0.07 floor     → 0.08 dead-band
+//
+// Each value sits at roughly 1/3 to 1/2 of its corresponding audit
+// threshold — large enough to absorb noise, small enough that real
+// faults (which sit at 1.5-3× the audit threshold) still trigger.
+
+/// Default Form Tolerance Percent for cold-start / never-touched users.
+/// `0` means "use the baseline dead-band exactly" — bit-for-bit identical
+/// to the 2026-05-15 hard-coded behavior. The slider in Settings can
+/// widen the dead-band from here up to the corresponding audit threshold.
+/// See `FormThresholds.withTolerance` for the formula.
+const int kDefaultFormTolerancePercent = 0;
+
+/// Below this swing ratio, no `torsoSwing` cue may fire even if other
+/// branches of the swing check would have triggered. Applies to lateral
+/// shift and shoulder-arc legs of the combined swing detector.
+const double kFormMinMovementSwingRatio = 0.08;
+
+/// Below this absolute lean delta (degrees), no forward-lean cue fires.
+/// Targets the same `torsoSwing` cue as the swing dead-band (lean and
+/// swing are co-emitted), and back-lean as a separate evaluation.
+const double kFormMinMovementLeanDeg = 3.0;
+
+/// Below this shrug ratio, no `shoulderShrug` cue fires.
+const double kFormMinMovementShrugRatio = 0.06;
+
+/// Below this drift ratio, no `elbowDrift` cue fires. Uses the absolute
+/// (unsigned) perpendicular projection magnitude.
+const double kFormMinMovementDriftRatio = 0.08;
+
+/// Below this elbow-rise ratio, no `elbowRise` cue fires. Sign convention
+/// matches `kElbowRiseThreshold` — only positive (upward) rise is gated;
+/// negative rise (elbow dropping) was never a fault.
+const double kFormMinMovementRiseRatio = 0.08;
 
 /// Elbow rise: (elbow_y − shoulder_y) relative upward shift / L_torso.
 /// Fires when the upper arm swings forward and the elbow lifts away from
@@ -166,7 +245,7 @@ const double kDriftThreshold = 0.20;
 /// producing constant warnings on textbook reps. 0.18 keeps real
 /// front-delt cheats (typical 0.24–0.36) flagged while permitting the
 /// natural arc. Same retune-from-real-data caveat as `kShrugThreshold`.
-const double kElbowRiseThreshold = 0.18;
+const double kElbowRiseThreshold = 0.22;
 
 // ── Sagittal sway (front view depth swing) ──────────────
 // Composite scale-invariant features over a 1€-filtered, baseline z-scored
@@ -324,6 +403,42 @@ const double kSetupCurlMinConfidence = 0.65;
 const double kSetupRestingArmMinDeg = 130.0;
 const double kSetupRestingArmMaxDeg = 185.0;
 
+// ── Setup Check — Camera framing (industry-standard "Frame Check") ──────────
+// Four-signal framing gate that runs during SETUP_CHECK for biceps curl.
+// Enforces the spec: "the whole arm — from the wrist at full extension up to
+// the head — must fit inside the frame, and the camera lens must sit at
+// mid-chest height." All signals use normalised landmark coordinates (0..1
+// of frame), so no frame dimensions are required.
+//
+// Signal 1 — Head visible with safe top margin.
+// `nose.y` must be greater than this value (i.e. below the very top edge).
+// The nose is the highest reliably-detected landmark and sits above the
+// shoulders — if it is in-frame with margin, the head is in-frame, and the
+// peak-curl fingertip position (which lands near the shoulder/head) has
+// vertical room. Below 0.04 means the head is clipping the top edge.
+const double kSetupHeadTopMargin = 0.04;
+
+// Signal 2 — Wrist visible with safe bottom margin at rest.
+// At setup the arm is extended downward, so the active wrist sits near the
+// hip. Its `y` must be less than this value (i.e. above the very bottom
+// edge). Below this margin the extended-arm bottom of the rep is clipping
+// the frame and the FSM will miss the END threshold.
+const double kSetupWristBottomMargin = 0.92;
+
+// Signal 3 — Camera lens at mid-chest height.
+// When the lens is level with mid-chest, the optical axis crosses the body
+// midway between shoulders and hips, so the shoulder-hip midpoint y projects
+// near the vertical center of the frame. Tolerance ±0.12 around 0.5 allows
+// some user-height variance while still catching obviously high/low phones.
+const double kSetupMidChestTarget = 0.5;
+const double kSetupMidChestTolerance = 0.12;
+
+// Signal 4 — Shoulder-hip tilt from vertical (degrees).
+// `atan2(|shoulder.x − hip.x|, |shoulder.y − hip.y|)`. A correctly-placed
+// side-view camera shows a near-vertical torso. Larger tilts mean the user
+// is leaning, the phone is rotated, or the camera is severely keystoning.
+const double kSetupTorsoTiltMaxDeg = 25.0;
+
 // ── Squat FSM thresholds (degrees) ──────────────────────
 /// IDLE → DESCENDING when knee angle drops below this.
 const double kSquatStartAngle = 160.0;
@@ -334,18 +449,24 @@ const double kSquatBottomAngle = 90.0;
 /// ASCENDING → IDLE when knee angle returns above this → rep++.
 const double kSquatEndAngle = 160.0;
 
-// ── Squat FSM thresholds — High sensitivity (research, 2026-05-13) ─
-/// Tightened gates for `FeedbackSensitivity.high`. Source: deep-research
-/// biomechanical spec (2026-05-13). Medium-sensitivity defaults (160/90/160)
-/// are preserved bit-for-bit; see [kSquatStartAngle] / [kSquatBottomAngle] /
-/// [kSquatEndAngle] above for the existing values.
+// ── Squat FSM thresholds — High sensitivity (telemetry-derived, 2026-05-15) ─
+/// **Downstream copy** of the High-anchored squat thresholds. The
+/// authoritative source is `SquatRomThresholdSet.anchor` in
+/// `squat_rom_defaults.dart` — these constants exist for backwards-compatible
+/// test references (see `test/core/squat_rom_thresholds_test.dart`) and any
+/// existing direct-constant consumers.
 ///
-/// Wired into the FSM via [SquatRomThresholdSet.forSensitivity] — these
-/// constants are unreferenced today and become live the first time a session
-/// runs at High sensitivity. Existing-user behavior at Medium is unchanged.
-const double kSquatStartAngleHigh = 165.0;
-const double kSquatBottomAngleHigh = 88.0;
-const double kSquatEndAngleHigh = 163.0;
+/// When retuning: update the literals in `squat_rom_defaults.dart` first,
+/// then mirror the same values here. The two MUST agree or
+/// `squat_rom_thresholds_test.dart` will fail.
+///
+/// Provenance: 2026-05-15 squat debug session (parity mode, tier 3, n=12
+/// kept reps). See `squat_rom_defaults.dart` file-level doc-block for full
+/// derivation context. Medium-sensitivity is computed at runtime via
+/// `SquatRomThresholdSet.applySensitivity` (deltas `-5, +2, -3`).
+const double kSquatStartAngleHigh = 166.4;
+const double kSquatBottomAngleHigh = 47.1;
+const double kSquatEndAngleHigh = 163.4;
 
 // ── Squat personal calibration ──────────────────────────
 /// Minimum reps required for squat personal calibration to commit. Mirrors
@@ -426,19 +547,59 @@ const double kPushUpProfileMinGateGap = 6.0;
 /// by new code — only to keep historic references compiling.
 const double kTrunkTibiaDeviation = 15.0;
 
-// ── Squat form thresholds (Squat Master Rebuild, 2026-04-25) ─────
+// ── Squat form thresholds (Squat Master Rebuild, 2026-04-25; retuned 2026-05-15) ─
 /// Lean threshold for bodyweight squat. Trunk-from-vertical > this fires
-/// `excessiveForwardLean`. Literature: Straub & Powers 2024 IJSPT (40°)
-/// + 5° measurement-noise margin for 2D RMSE (Heliyon 2024).
-const double kSquatLeanWarnDegBodyweight = 45.0;
+/// `excessiveForwardLean`.
+///
+/// HISTORY: Pre-2026-05-15 this was 45° — literature + 5° measurement-noise
+/// *additive* margin, which pushed cueing well past the actual-injury-risk
+/// zone (~30°). Retuned to 30° to cue 5° BEFORE the literature-cited risk
+/// threshold (Straub & Powers 2024 IJSPT ~35°) instead of 10° after it.
+/// Cueing should warn before the dangerous angle, not confirm it.
+const double kSquatLeanWarnDegBodyweight = 30.0;
 
-/// Lean threshold for high-bar back squat. Glassbrook 2017 + 5° margin.
-const double kSquatLeanWarnDegHBBS = 50.0;
+/// Lean threshold for high-bar back squat. Retuned 2026-05-15 from 50° to
+/// 35° on the same "cue before, not after" principle. Glassbrook 2017
+/// HBBS-specific risk threshold ≈40°; 35° gives a 5° early warning.
+const double kSquatLeanWarnDegHBBS = 35.0;
 
 /// Long-femur lifter boost — added to active lean threshold when the
 /// "Tall lifter" Settings toggle is on. Orthogonal to the auto long-femur
 /// detection (which relaxes the BOTTOM angle, not the lean threshold).
 const double kSquatLongFemurLeanBoost = 5.0;
+
+/// Minimum dwell time in the BOTTOM state (milliseconds) before
+/// BOTTOM → ASCENDING can fire. Added 2026-05-15.
+///
+/// Rationale: pre-2026-05-15 the BOTTOM→ASCENDING transition triggered the
+/// instant hip Y started decreasing (single-frame trigger at 30 fps). A
+/// "sit down once and immediately stand up" pattern entered BOTTOM for one
+/// frame and exited the next — no actual bottom phase, no real rep, but
+/// the FSM commited one anyway. Requiring 200ms of dwell rejects these
+/// flash transitions while staying well under any normal squat tempo
+/// (even a fast bodyweight rep pauses ≥300ms at the bottom).
+///
+/// Gates the *exit* of BOTTOM, not the entry — entering BOTTOM still fires
+/// on the first frame the knee angle clears `_effectiveBottomAngle`, so
+/// the user never feels "stuck waiting to bottom out." The dwell only
+/// affects when the ascent can commit a rep.
+const int kSquatBottomDwellMs = 200;
+
+/// Backward-lean threshold (degrees). Signed lean more negative than this
+/// (i.e., trunk leaning *backward* from vertical) fires
+/// `FormError.excessiveBackwardLean`. Added 2026-05-15.
+///
+/// Rationale: lumbar hyperextension at the bottom of a squat is a real
+/// injury vector that the prior analyzer ignored by design — `_signedLeanDeg`
+/// returned negative values for backward lean but `evaluate()` filtered
+/// `lean > 0` to "avoid false positives for users who lean back as they
+/// squat." That filter erased the dangerous case along with the benign one.
+/// 15° is below typical counterbalance backward lean (~5-10°) but well
+/// inside the lumbar-hyperextension risk zone (10-20°+).
+///
+/// No long-femur boost — long-femur lifters tend toward MORE forward lean,
+/// not more backward, so the boost is forward-only.
+const double kSquatBackwardLeanWarnDeg = 15.0;
 
 /// Forward knee shift threshold — `(knee_x − ankle_x) / femur_len_px`.
 /// (empirical-TBD): research docs disagreed 3× (Claude 0.30, Google 0.10).
@@ -756,9 +917,12 @@ const double kDebugFrameMetricsHz = 2.0;
 /// (frame metrics + arm-resolved + side-metrics + extremes per rep).
 const int kDebugRingBufferSize = 2000;
 
-/// Compile-time gate for squat debug sessions. Ships false.
-/// Set true only on dev builds when collecting squat threshold telemetry.
-const bool kSquatDebugSessionEnabled = false;
+/// Compile-time gate for squat debug sessions. Ships false in production.
+/// Currently `true` on dev builds — surfaces the home-screen "Squat Debug
+/// Session" tile and the Settings switch so squat threshold telemetry can
+/// be collected the same way as curl. Flip back to `false` before cutting
+/// a production build.
+const bool kSquatDebugSessionEnabled = true;
 
 /// Ring-buffer size for squat debug sessions.
 /// Overrides [kTelemetryRingSize] for the session lifetime; resetCap() restores it.
