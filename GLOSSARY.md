@@ -881,3 +881,16 @@ When a term is retired, move its entry here with a `→ replacement` line and th
 - When the brain's `WISDOM.md` adds a vocabulary-lock entry, mirror it in §1 or add a category here.
 - Every quarter, scan the last 3 months of commits for uncovered terms and backfill.
 - If this file and the code disagree, **the code wins** — but open a follow-up to decide which should change.
+
+> **Verification stamp — 2026-05-16 (deep brain reconciliation):** §4.1
+> (FormError table) spot-checked against `app/lib/core/constants.dart` and
+> `app/lib/core/types.dart` — every cited gate (`kPushUpStartAngle=150`,
+> `kPushUpEndAngle=160` hysteresis invariant, `kSquatBottomAngle=80`,
+> `kCurlPeakAngle=70`), every `FormError` case (incl. `kneeLedDescent` /
+> `kneeDominantPattern` cue-only, squat/push-up tempo+fatigue families), and
+> the two-valued `FeedbackSensitivity` all **match the code as written**.
+> GLOSSARY.md and SKILLS.md were found *current* — the same-PR Glossary Duty
+> held even though `STATE.md`/`STRUCTURE.md`/`ROADMAP.md`/`TECH_STACK.md` had
+> drifted ~4 weeks (those four were rebuilt this session). Lesson: vocabulary
+> discipline worked; snapshot discipline did not — see `WISDOM.md` 2026-05-16
+> "brain snapshot drift" entry.
