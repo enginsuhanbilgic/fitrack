@@ -113,6 +113,33 @@ start > peak_exit   AND   start > end   AND   end > peak_exit   AND   peak < sta
 A threshold set that violates any of these is **un-enterable** — the
 FSM can't transition through every state, so no reps are counted.
 
+### 2.3a Threshold gates (push-up) + hysteresis invariant
+
+| Term | Code constant | Trigger |
+|---|---|---|
+| **Push-up start angle** | `kPushUpStartAngle` = **150°** | IDLE → DESCENDING (elbow crosses below this) |
+| **Push-up bottom angle** | `kPushUpBottomAngle` = 90° | DESCENDING → BOTTOM (elbow crosses below this) |
+| **Push-up shallow-rep max** | `kPushUpShallowRepMaxAngle` = 130° | A reversal-before-bottom that reached at least this depth still counts as a shallow rep |
+| **Push-up end angle** | `kPushUpEndAngle` = 160° | ASCENDING → IDLE, increments rep count |
+
+**Push-up FSM Hysteresis Invariant** (hard rule, introduced 2026-05-16):
+`kPushUpStartAngle (150°) < kPushUpEndAngle (160°)` — strictly, by ≥ a
+gate-gap. The **rep-commit gate** (`endAngle`, ASCENDING→IDLE) and the
+**next-rep-arm gate** (`startAngle`, IDLE→DESCENDING) must never be equal.
+Before 2026-05-16 both were 160°; the absent dead-band let 1€-filtered elbow
+jitter at lockout re-arm a just-committed rep, double-counting one physical
+push-up (the *double-count bug*). The 10° dead-band makes lockout jitter
+unable to re-trigger. Mirrors curl's `start > end` and squat's
+`kSquatProfileStartMargin (10°) > kSquatProfileEndMargin (5°)`. Every tier
+transform (sensitivity post-pass, calibration derivation in
+`PushUpRomProfile.thresholds`) MUST preserve `startAngle < endAngle`;
+the calibration `end` gate is clamped to
+`[start + kPushUpProfileMinGateGap, max(start+gap, topAngle−gap)]` so the
+pre-fix `end = start` collapse is structurally impossible. Regression-guarded
+by `push_up_strategy_test.dart` (group *"lockout-jitter double-count
+regression"*) and `push_up_rom_profile_test.dart`. See WISDOM 2026-05-16,
+`SKILLS.md §6`.
+
 ### 2.4 Supporting guards
 
 | Term | Definition |
@@ -800,7 +827,8 @@ Vocabulary added alongside the push-up `pushup.rep` telemetry channel and its co
 | **`PushUpRepRecord`** | Python `dataclass` in `tools/dataset_analysis/scripts/derive_pushup_thresholds_from_telemetry.py`. Fields: `session_idx`, `min_elbow`, `max_elbow`. The parsed counterpart of one `pushup.rep` line. `session_idx` indexes the `curl_debug.session_start`-delimited block this rep was found in; pastes without markers all land in cluster 0 and the ICC design-effect correction collapses to deff=1.0. |
 | **Push-up telemetry derivation script** | `tools/dataset_analysis/scripts/derive_pushup_thresholds_from_telemetry.py`. Consumes `min_elbow` / `max_elbow` from the `pushup.rep` telemetry stream and emits a paste-ready Dart `PushUpRomThresholdSet` block per **sensitivity tier**. Percentile sweep diagonal: `high → P15/P85`, `medium → P10/P90 (recommended)`, `low → P5/P95` (future tier). Shallow gate at P25 of `min_elbow`. Uses HD percentiles, MAD 3.5× rejection per-dimension, BCa 95% CI (1 000 resamples), and ICC design-effect correction (session as cluster). Statistics helpers (`hd_percentile`, `bca_ci`, `design_effect`) imported from `derive_thresholds_from_telemetry.py` so a fix to the math lands in one place. Auto-saves to `data/telemetry/derived/<stem>_pushup_thresholds.txt` when invoked with a file path; stdin invocations are terminal-only. Enforces FSM invariant `startAngle > endAngle > bottomAngle` and flags violations with `⚠ INVARIANT VIOLATION`. |
 | **`PushUpRomDefaults.forSensitivity`** | Sensitivity-keyed cold-start ROM accessor on `app/lib/core/push_up_rom_defaults.dart`. Returns the `_high` tuple for `FeedbackSensitivity.high` and the `_medium` tuple for `.medium`. Replaces the prior "sensitivity does NOT affect push-up ROM gates" doc-block claim (lines 55-58 of the file's pre-2026-05-13 revision). Calibration overrides still apply per-user; sensitivity only shapes the **pre-calibration fallback**. `PushUpRomDefaults.defaults` is kept as a back-compat alias = `_medium` so existing call sites don't churn. Values shipped in this PR are still hand-tuned; the follow-up PR runs the derivation script on real telemetry and replaces them. |
-| **Universal session boundary marker** | `curl_debug.session_start`, emitted by `TelemetryLog` when a curl debug session opens. Reused as the **universal** session delimiter across all exercise derivation scripts (curl, squat, push-up). No exercise-specific `<exercise>_debug.session_start` marker exists in v1; push-up parsing uses `curl_debug.session_start` as the cluster boundary for ICC correction. Pastes without markers degrade gracefully to a single cluster (deff → 1.0). |
+| **Universal session boundary marker** | `curl_debug.session_start`, emitted by `TelemetryLog` when a curl debug session opens. Reused as the **universal** session delimiter across all exercise derivation scripts (curl, squat, push-up). No exercise-specific `<exercise>_debug.session_start` marker exists in v1; push-up parsing uses `curl_debug.session_start` as the cluster boundary for ICC correction. Pastes without markers degrade gracefully to a single cluster (deff → 1.0). **The Push-up Debug Session (2026-05-16) emits this exact marker** in addition to its own human-readable `pushup_debug.session_start` header, so a pasted push-up debug log is split correctly by `derive_pushup_thresholds_from_telemetry.py` (which does `text.split("curl_debug.session_start")`). |
+| **Push-up Debug Session** | Silent-observation mode for collecting push-up FSM-threshold telemetry, full parity with the Curl/Squat Debug Sessions. Gated by `kPushUpDebugSessionEnabled` (compile-time, dev-only). When active: suppresses all user-facing feedback (TTS, haptics, banners — via the `isDebugSilent` OR and the `_onFormErrors` early-return), forces `_resolvePushUpThresholds` to return `PushUpRomThresholds.defaults` **unmodified** (tier 3, no sensitivity post-pass — highest-priority override, checked before the global diagnostic toggle), raises the telemetry ring buffer to `kPushUpDebugRingBufferSize`, and emits `pushup_debug.session_active` / `pushup_debug.session_start` / the universal `curl_debug.session_start` / `diagnostic.mode_active` markers. Launched from the home-screen "Push-up Debug Session" tile (sets `pushup_debug_session` pref true) or toggled in Settings; the normal push-up tile (`_startNormalPushUp`) defensively clears the pref so a stale debug flag never leaks into a feedback-on workout. Snapshot-on-construction in `WorkoutViewModel._isPushUpDebugSession` (mid-session Settings toggling does not affect an in-flight workout). Pref persisted via `PreferencesRepository.get/setPushUpDebugSession` (SQLite + in-memory). Reset of the ring-buffer cap happens in `dispose()`. |
 
 ---
 

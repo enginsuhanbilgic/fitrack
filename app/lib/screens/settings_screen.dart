@@ -53,6 +53,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _squatLongFemurLifter = false;
   bool _diagnosticDisableAutoCalibration = false;
   bool _squatDebugSession = false;
+  bool _pushUpDebugSession = false;
   bool _demoEnabled = false;
   bool _demoBusy = false;
   ThemeMode _themeMode = ThemeMode.system;
@@ -93,6 +94,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final squatDebug = kSquatDebugSessionEnabled
         ? await services.preferencesRepository.getSquatDebugSession()
         : false;
+    final pushUpDebug = kPushUpDebugSessionEnabled
+        ? await services.preferencesRepository.getPushUpDebugSession()
+        : false;
     final themeMode = await services.preferencesRepository.getThemeMode();
     final feedbackSensitivity = await services.preferencesRepository
         .getFeedbackSensitivity();
@@ -109,6 +113,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _squatLongFemurLifter = longFemur;
       _diagnosticDisableAutoCalibration = diagnosticDisableAutoCal;
       _squatDebugSession = squatDebug;
+      _pushUpDebugSession = pushUpDebug;
       _themeMode = themeMode;
       _feedbackSensitivity = feedbackSensitivity;
       _ttsEnabled = tts;
@@ -417,6 +422,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (!mounted) return;
     setState(() => _squatDebugSession = value);
+  }
+
+  Future<void> _setPushUpDebugSession(bool value) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setPushUpDebugSession(value);
+    TelemetryLog.instance.log(
+      'preferences.pushup_debug_session_toggled',
+      'enabled=$value',
+    );
+    if (!mounted) return;
+    setState(() => _pushUpDebugSession = value);
   }
 
   Future<void> _setFeedbackSensitivity(FeedbackSensitivity sensitivity) async {
@@ -958,6 +974,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     value: _squatDebugSession,
                     onChanged: _setSquatDebugSession,
+                  ),
+                if (kPushUpDebugSessionEnabled)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Push-up debug session'),
+                    subtitle: const Text(
+                      'Silent observation: no TTS / haptics / banners. '
+                      'Logs frame-level pose metrics for threshold tuning. '
+                      'Turn on, run a session, paste Diagnostics, turn off.',
+                    ),
+                    value: _pushUpDebugSession,
+                    onChanged: _setPushUpDebugSession,
                   ),
               ],
             ),

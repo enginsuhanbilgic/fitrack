@@ -168,8 +168,37 @@ const double kBackLeanThresholdDeg = 10.0;
 /// a final number.
 const double kShrugThreshold = 0.20;
 
-/// Elbow drift: ΔX_elbow / L_torso.
-const double kDriftThreshold = 0.20;
+/// Elbow drift: torso-perpendicular elbow offset / L_torso.
+///
+/// 2026-05-16: 0.20→0.15 (~25% stricter). In side-view curls the elbow
+/// must stay pinned to the shoulder→hip line; leaving it is the front-delt
+/// cheat. The added false-positive risk from the tighter gate is absorbed
+/// by the per-rep sustained-frame gate (see [kDriftSustainedFraction] /
+/// [kDriftMinEvalFrames]) — a single noisy off-line frame no longer fires
+/// the cue. This is an AUDIT threshold (FIXED, never sensitivity-keyed per
+/// SKILLS "Sensitivity vs Form Audit"); the user-tunable dead-band stays
+/// at [kFormMinMovementDriftRatio] = 0.08 and is NOT touched here.
+const double kDriftThreshold = 0.15;
+
+/// Fraction of a rep's *evaluated* frames that must hold the elbow over
+/// the drift threshold before [FormError.elbowDrift] is emitted at rep
+/// commit. Mirrors [kSquatLeanSustainedFraction] verbatim — the proven,
+/// doctrine-clean sustained-frame template. A clean rep momentarily clips
+/// threshold for ~2-3 of ~20 evaluated frames (~0.10-0.15); a genuine
+/// off-line elbow holds it for the bulk of the rep (≫ 0.35).
+///
+/// FIXED value — NOT tier-keyed (the sustained gate is pure per-rep signal
+/// processing with no sensitivity branch, per SKILLS doctrine). PRELIMINARY
+/// — rides the existing `biceps_elbow_drift_signed`/`_ratio` telemetry
+/// columns for a future derivation pass; no new channel needed.
+const double kDriftSustainedFraction = 0.35;
+
+/// Minimum evaluated-frame count before the sustained-drift fraction is
+/// trusted. Below this floor the verdict fails OPEN (no fault emitted) —
+/// a too-short rep can't carry enough signal to grade. Mirrors
+/// [kSquatLeanMinEvalFrames] and the fail-open semantics of the other
+/// per-rep curl verdicts.
+const int kDriftMinEvalFrames = 6;
 
 // ── Form-audit minimum-movement dead-band (2026-05-15) ──
 // Two-layer guard: BELOW these magnitudes the analyzer treats the signal
@@ -549,17 +578,33 @@ const double kSquatProfileStartMargin = 10.0;
 const double kSquatProfileEndMargin = 5.0;
 
 // ── Push-up FSM thresholds (degrees) ────────────────────
-/// IDLE → DESCENDING when elbow angle drops below this.
-const double kPushUpStartAngle = 160.0;
+//
+// HYSTERESIS INVARIANT: kPushUpStartAngle < kPushUpEndAngle.
+// The rep-commit gate (endAngle, ASCENDING→IDLE) and the next-rep-arm gate
+// (startAngle, IDLE→DESCENDING) MUST NOT be equal. If they are, the
+// 1€-filtered elbow angle jittering a few degrees around lockout straddles
+// both gates: one physical rep commits, the filter dips, IDLE→DESCENDING
+// re-arms, and a phantom second rep commits (the original double-count bug).
+// A dead-band between the two gates means lockout jitter can never re-arm a
+// rep. This mirrors curl's `start > end` and squat's
+// kSquatProfileStartMargin(10°) > kSquatProfileEndMargin(5°) invariants.
+// Any tier transform (sensitivity post-pass, calibration derivation) MUST
+// preserve startAngle < endAngle.
+/// IDLE → DESCENDING when elbow angle drops below this. 10° below
+/// [kPushUpEndAngle] — the hysteresis dead-band that prevents lockout
+/// jitter from re-arming a just-committed rep. See invariant note above.
+const double kPushUpStartAngle = 150.0;
 
 /// DESCENDING → BOTTOM when elbow angle drops below this.
 const double kPushUpBottomAngle = 90.0;
 
 /// A push-up attempt that reverses above bottom but reaches at least this
 /// elbow angle is counted as a shallow/faulty rep instead of being discarded.
+/// Sits between [kPushUpBottomAngle] and [kPushUpStartAngle].
 const double kPushUpShallowRepMaxAngle = 130.0;
 
 /// ASCENDING → IDLE when elbow angle returns above this → rep++.
+/// Strictly greater than [kPushUpStartAngle] (hysteresis invariant).
 const double kPushUpEndAngle = 160.0;
 
 /// Push-up calibration accepts only realistic top-lockout elbow angles.
@@ -1205,3 +1250,19 @@ const int kSquatDebugRingBufferSize = 2000;
 /// Target frequency (Hz) for squat frame-metric telemetry.
 /// 3 Hz (vs curl's 2 Hz) — squat reps are slower so slightly higher density is useful.
 const double kSquatDebugFrameMetricsHz = 3.0;
+
+/// Compile-time gate for push-up debug sessions. Ships false in production.
+/// Currently `true` on dev builds — surfaces the home-screen "Push-up Debug
+/// Session" tile and the Settings switch so push-up FSM-threshold telemetry
+/// can be collected the same way as curl and squat. Flip back to `false`
+/// before cutting a production build. Mirrors [kSquatDebugSessionEnabled].
+const bool kPushUpDebugSessionEnabled = true;
+
+/// Ring-buffer size for push-up debug sessions.
+/// Overrides [kTelemetryRingSize] for the session lifetime; resetCap() restores it.
+const int kPushUpDebugRingBufferSize = 2000;
+
+/// Target frequency (Hz) for push-up frame-metric telemetry.
+/// 3 Hz — push-up cadence is comparable to squat (slower than curl), so the
+/// same density used for squat captures the elbow-angle rise/fall shape well.
+const double kPushUpDebugFrameMetricsHz = 3.0;

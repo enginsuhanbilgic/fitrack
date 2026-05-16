@@ -576,6 +576,16 @@ class WorkoutViewModel extends ChangeNotifier {
   /// True when this session runs in squat debug mode. Snapshot-on-construction.
   bool _isSquatDebugSession = false;
 
+  /// True when this session runs in push-up debug mode.
+  /// Snapshot-on-construction (read once in [init], frozen for the workout —
+  /// Settings toggling mid-session does not affect an in-flight workout).
+  /// Always false when the active exercise is not push-up or when
+  /// [kPushUpDebugSessionEnabled] is compiled out. Mirrors
+  /// [_isSquatDebugSession]. Forces tier-3 unmodified thresholds + silent
+  /// observation so the FSM-threshold telemetry baseline is clean.
+  bool _isPushUpDebugSession = false;
+  bool get isPushUpDebugSession => _isPushUpDebugSession;
+
   /// Monotonic rep index for squat.rep telemetry lines.
   int _squatDebugRepIndex = 0;
 
@@ -994,6 +1004,63 @@ class WorkoutViewModel extends ChangeNotifier {
             'push-up auto-calibration OFF — calibrated profile still honored; '
                 'tier-2 auto-cal will be skipped',
           );
+        }
+        if (kPushUpDebugSessionEnabled) {
+          _isPushUpDebugSession = await _preferencesRepository
+              .getPushUpDebugSession();
+          if (_isPushUpDebugSession) {
+            // Parity with curl/squat debug-session contract: when a push-up
+            // debug session is active, every rep MUST run against unmodified
+            // tier-3 globals (`PushUpRomThresholds.defaults`, NO sensitivity
+            // post-pass) so the offline derivation pipeline gets a clean
+            // baseline. Enforcement lives inside `_resolvePushUpThresholds`
+            // — that resolver checks `_isPushUpDebugSession` and short-
+            // circuits. Mirrors the squat resolver's `_isSquatDebugSession`
+            // short-circuit.
+            TelemetryLog.instance.setCap(kPushUpDebugRingBufferSize);
+            TelemetryLog.instance.log(
+              'pushup_debug.session_active',
+              'silent observation mode — feedback suppressed; '
+                  'ring_buffer=$kPushUpDebugRingBufferSize '
+                  'frame_metrics@${kPushUpDebugFrameMetricsHz}Hz',
+            );
+            // Universal session boundary. The offline derivation script
+            // (`derive_pushup_thresholds_from_telemetry.py`) splits sessions
+            // on `curl_debug.session_start` — push-up does NOT emit an
+            // exercise-specific boundary (verified against the script's
+            // `text.split("curl_debug.session_start")`). Emit it so a pasted
+            // push-up debug log is parseable by the existing pipeline.
+            TelemetryLog.instance.log(
+              'curl_debug.session_start',
+              'ts=${DateTime.now().toIso8601String()} '
+                  'exercise=${exercise.name} '
+                  'sensitivity=${_feedbackSensitivity.name} '
+                  'start_angle=$kPushUpStartAngle '
+                  'bottom_angle=$kPushUpBottomAngle '
+                  'shallow_max=$kPushUpShallowRepMaxAngle '
+                  'end_angle=$kPushUpEndAngle',
+            );
+            // Push-up-specific, human-readable session header (richer than
+            // the universal marker; not consumed by the splitter).
+            TelemetryLog.instance.log(
+              'pushup_debug.session_start',
+              'ts=${DateTime.now().toIso8601String()} '
+                  'exercise=${exercise.name} '
+                  'sensitivity=${_feedbackSensitivity.name} '
+                  'start_angle=$kPushUpStartAngle '
+                  'bottom_angle=$kPushUpBottomAngle '
+                  'shallow_max=$kPushUpShallowRepMaxAngle '
+                  'end_angle=$kPushUpEndAngle',
+            );
+            // Diagnostic marker — mirrors the curl/squat path so derivation
+            // scripts can split sessions on the same event regardless of
+            // exercise.
+            TelemetryLog.instance.log(
+              'diagnostic.mode_active',
+              'push-up debug session — every rep will run on '
+                  'PushUpRomThresholds.defaults (tier 3, no sensitivity)',
+            );
+          }
         }
       }
       _repCounter = RepCounter(
@@ -2895,7 +2962,8 @@ class WorkoutViewModel extends ChangeNotifier {
       // mirrors the curl contract.
       final isDebugSilent =
           (kCurlDebugSessionEnabled && _isCurlDebugSession) ||
-          (kSquatDebugSessionEnabled && _isSquatDebugSession);
+          (kSquatDebugSessionEnabled && _isSquatDebugSession) ||
+          (kPushUpDebugSessionEnabled && _isPushUpDebugSession);
       if (!isDebugSilent && snapshot.reps > _snapshot.reps) {
         _tts.speak('${snapshot.reps}');
       }
@@ -2979,7 +3047,8 @@ class WorkoutViewModel extends ChangeNotifier {
     // inflated counts that never had a chance to be seen and corrected
     // mid-set. Squat mirrors the curl contract.
     if ((kCurlDebugSessionEnabled && _isCurlDebugSession) ||
-        (kSquatDebugSessionEnabled && _isSquatDebugSession)) {
+        (kSquatDebugSessionEnabled && _isSquatDebugSession) ||
+        (kPushUpDebugSessionEnabled && _isPushUpDebugSession)) {
       return;
     }
     final now = DateTime.now();
@@ -3464,13 +3533,24 @@ class WorkoutViewModel extends ChangeNotifier {
   ///   3. Auto-cal has emitted thresholds → tier 2 (+sens).
   ///   4. Otherwise → tier 3 defaults (+sens).
   PushUpRomThresholds _resolvePushUpThresholds(int repIndexInSet) {
-    // TODO(phase-5): when push-up debug session lands (parity with curl /
-    // squat), add a second short-circuit here that returns
-    // `PushUpRomThresholds.defaults` unmodified when
-    // `kPushUpDebugSessionEnabled && _isPushUpDebugSession` is true.
-    // The truth table in `.agent_brain/SKILLS.md` already documents this
-    // row; the implementation lands with Phase 5 of the cross-exercise
-    // parity plan.
+    // Push-up debug session — highest-priority override. Forces tier-3
+    // `PushUpRomThresholds.defaults` UNMODIFIED (no sensitivity post-pass)
+    // so the offline derivation pipeline gets a clean baseline. Mirrors the
+    // squat resolver's `_isSquatDebugSession` short-circuit and matches the
+    // truth-table row in `.agent_brain/SKILLS.md` (Push-up Calibration Tier
+    // Precedence). Checked BEFORE the global diagnostic toggle because a
+    // debug session is the most specific intent.
+    if (kPushUpDebugSessionEnabled && _isPushUpDebugSession) {
+      const t = PushUpRomThresholds.defaults;
+      _logPushUpThresholdsResolved(
+        tier: 3,
+        source: 'global',
+        thresholds: t,
+        repIndex: repIndexInSet,
+        extra: 'debug=true',
+      );
+      return t;
+    }
     if (_diagnosticDisableAutoCalibration) {
       const t = PushUpRomThresholds.defaults;
       _logPushUpThresholdsResolved(
@@ -3789,6 +3869,9 @@ class WorkoutViewModel extends ChangeNotifier {
       TelemetryLog.instance.resetCap();
     }
     if (kSquatDebugSessionEnabled && _isSquatDebugSession) {
+      TelemetryLog.instance.resetCap();
+    }
+    if (kPushUpDebugSessionEnabled && _isPushUpDebugSession) {
       TelemetryLog.instance.resetCap();
     }
     _tts.dispose();

@@ -405,5 +405,47 @@ void main() {
       },
       timeout: const Timeout(Duration(seconds: 60)),
     );
+
+    test('medium: sustained-gate elbowDrift composes with the cap + re-arm '
+        '(2026-05-16)', () async {
+      // `elbowDrift` became a PER-REP verdict on 2026-05-16 (sustained-
+      // frame gate in CurlSideFormAnalyzer). The verbosity cap +
+      // persistence re-arm key on the FormError ENUM, not on how the
+      // error was detected, so the sustained gate needs NO new voice
+      // code — a once-per-bad-rep `elbowDrift` must flow through the
+      // exact same cap/re-arm machinery as every other cue. This test
+      // is the end-to-end guard for "consistently off-line elbow →
+      // tell constantly, throttled humanely": each bad rep emits one
+      // `elbowDrift`; the cap silences the nag; the persistence re-arm
+      // re-alerts exactly once when the fault genuinely persists.
+      final (:vm, :tts) = build(verbosity: TtsVerbosity.medium);
+      addTearDown(vm.dispose);
+
+      // One `elbowDrift` per bad rep, spaced past the time-cooldown.
+      // Fires 1..cap: spoken. Fires (cap+1)..(cap+window-1): muted,
+      // streak builds. Fire (cap+window): single re-alert, streak
+      // resets — identical contract to the elbowRise re-arm test above.
+      await pumpSpaced(
+        vm,
+        FormError.elbowDrift,
+        kTtsVerbosityMediumCap + kTtsPersistenceReArmRepsMedium,
+      );
+
+      expect(
+        tts.spoken,
+        hasLength(kTtsVerbosityMediumCap + 1),
+        reason:
+            'cap caps the per-bad-rep nag; the persistence re-arm fires '
+            'exactly one re-alert when the off-line elbow persists',
+      );
+      expect(
+        tts.spoken.every(
+          (s) =>
+              s == WorkoutViewModel.errorMessageForTest(FormError.elbowDrift),
+        ),
+        isTrue,
+        reason: 'every utterance is the elbowDrift cue, unchanged',
+      );
+    }, timeout: const Timeout(Duration(seconds: 40)));
   });
 }

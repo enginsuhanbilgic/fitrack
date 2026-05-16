@@ -30,7 +30,15 @@ void main() {
       expect(thresholds.shallowRepMaxAngle, closeTo(127.4, 0.01));
       expect(thresholds.bottomAngle, lessThan(thresholds.shallowRepMaxAngle));
       expect(thresholds.shallowRepMaxAngle, lessThan(thresholds.startAngle));
-      expect(thresholds.endAngle, greaterThanOrEqualTo(thresholds.startAngle));
+      // HYSTERESIS INVARIANT: end must be STRICTLY above start (was `>=`,
+      // which permitted the start==end double-count configuration). Post-fix
+      // end=164 for this 170/82 profile.
+      expect(thresholds.endAngle, greaterThan(thresholds.startAngle));
+      expect(thresholds.endAngle, closeTo(164, 0.01));
+      expect(
+        thresholds.endAngle - thresholds.startAngle,
+        greaterThanOrEqualTo(kPushUpProfileMinGateGap),
+      );
     });
 
     test(
@@ -42,12 +50,24 @@ void main() {
         );
         final thresholds = profile.thresholds;
 
+        // Post-fix derived tuple for this tight (20°) ROM:
+        // start=144, bottom=132, shallow=138, end=150.
+        // The pre-fix assertion `endAngle < 150` literally encoded the
+        // double-count bug — it required `end` to have collapsed onto
+        // `start` below the user's lockout. The hysteresis-correct answer
+        // is end=150 (one gate-gap above start=144, at the measured
+        // lockout). Assert the INVARIANT, not the old collapsed value.
         expect(thresholds.startAngle, lessThan(150));
-        expect(thresholds.endAngle, lessThan(150));
         expect(thresholds.bottomAngle, greaterThan(130));
         expect(thresholds.bottomAngle, lessThan(thresholds.shallowRepMaxAngle));
         expect(thresholds.shallowRepMaxAngle, lessThan(thresholds.startAngle));
-        expect(thresholds.startAngle, lessThanOrEqualTo(thresholds.endAngle));
+        // HYSTERESIS INVARIANT: end STRICTLY above start by ≥ one gate-gap,
+        // even for a minimal-ROM calibration (this is the regression guard).
+        expect(thresholds.endAngle, greaterThan(thresholds.startAngle));
+        expect(
+          thresholds.endAngle - thresholds.startAngle,
+          greaterThanOrEqualTo(kPushUpProfileMinGateGap),
+        );
       },
     );
 

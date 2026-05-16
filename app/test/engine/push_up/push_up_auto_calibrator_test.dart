@@ -122,27 +122,42 @@ void main() {
     });
 
     test('outlier in one dimension does not block the other', () {
-      // Seed with WIDE variance so MAD has real spread — important
-      // because the post-injection test asserts the new top sample is
-      // accepted by MAD AND sets a new max. With a tight seed the new
-      // sample could itself be borderline-rejected, defeating the
-      // assertion. Range here is [160, 172], spread ≈ 12° → MAD-rejection
-      // boundary lands well above the injection value (175).
+      // Seed top window [160..172] (median ≈ 167). The MAD-rejection
+      // boundary for this exact window sits at ≈173° (empirically observed:
+      // 173 accepted, 174+ rejected) — NOT ≈181 as a previous comment
+      // miscalculated. The earlier fixture injected top=175, which is a MAD
+      // outlier and was silently rejected, so the rep updated NEITHER
+      // anchor; the old `startAngle` assertion only passed on a saturation
+      // coincidence. Inject top=173 instead: the highest value MAD accepts
+      // above the prior window max (172), so it genuinely sets a new
+      // max-anchor.
       final topSeed = [160.0, 163.0, 166.0, 169.0, 172.0, 165.0, 168.0, 170.0];
       for (var i = 0; i < 8; i++) {
         c.recordRepExtremes(topSeed[i], 85 + (i.isEven ? 0.2 : -0.2));
       }
       final topBefore = c.currentThresholds!;
-      // Inject: top=175 — comfortably inside the MAD band (median≈167,
-      // spread ≈ 4°, so MAD threshold ≈ 181) AND above the prior window
-      // max of 172, so it sets a new max-anchor. Bottom=10° is extreme
-      // far outside any plausible MAD band → rejected.
-      c.recordRepExtremes(175, 10);
+      // top=173 → MAD-accepted, new max-anchor (172 → 173).
+      // bottom=10° → gross outlier, MAD-rejected. Per the calibrator's
+      // per-dimension contract the top is still kept and the depth anchor
+      // is left untouched.
+      c.recordRepExtremes(173, 10);
       final topAfter = c.currentThresholds!;
-      // Top side accepted at a new max → startAngle anchor moves.
+      // Top side accepted at a new max → the top-anchored gate moves.
       // Bottom side rejected → bottomAngle anchor unchanged.
-      expect(topAfter.startAngle, isNot(closeTo(topBefore.startAngle, 1e-9)));
+      //
+      // Assert on `endAngle`, NOT `startAngle`. `startAngle`'s derived upper
+      // clamp is `kPushUpEndAngle` (160°); for any calibrated top ≳172° it
+      // saturates at 160, so a higher top cannot move it. The gate that
+      // actually tracks a new max-top anchor is `endAngle` (its ceiling is
+      // `max(start+gap, topAngle-gap)`, so it follows topAngle). This
+      // verifies the real intent — "a new accepted max top changes the
+      // derived gate set, a rejected bottom outlier does not" — robustly
+      // across the whole calibration range.
+      expect(topAfter.endAngle, isNot(closeTo(topBefore.endAngle, 1e-9)));
+      expect(topAfter.endAngle, greaterThan(topBefore.endAngle));
       expect(topAfter.bottomAngle, closeTo(topBefore.bottomAngle, 1e-9));
+      // Hysteresis invariant still holds on the auto-cal path too.
+      expect(topAfter.startAngle, lessThan(topAfter.endAngle));
     });
 
     test('both-dimension outlier does NOT advance repCount', () {

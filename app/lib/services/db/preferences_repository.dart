@@ -91,6 +91,13 @@ abstract class PreferencesRepository {
   Future<bool> getSquatDebugSession();
   Future<void> setSquatDebugSession(bool value);
 
+  /// Whether the next push-up session should run as a *debug session* —
+  /// silent observation mode, expanded ring buffer, per-frame metrics.
+  /// Read once at session start; frozen for the workout.
+  /// Defaults to false. No effect when [kPushUpDebugSessionEnabled] is false.
+  Future<bool> getPushUpDebugSession();
+  Future<void> setPushUpDebugSession(bool value);
+
   /// Unified form/ROM coaching sensitivity for all exercises.
   /// Defaults to [FeedbackSensitivity.medium]. Affects only cold-start
   /// (`ThresholdSource.global`) reps — calibrated and auto-calibrated
@@ -167,6 +174,7 @@ class SqlitePreferencesRepository implements PreferencesRepository {
       'auto_calibration_force_off_v1';
   static const String _kCurlDebugSessionKey = 'curl_debug_session';
   static const String _kSquatDebugSessionKey = 'squat_debug_session';
+  static const String _kPushUpDebugSessionKey = 'pushup_debug_session';
   static const String _kThemeModeKey = 'theme_mode';
   static const String _kFeedbackSensitivityKey = 'feedback_sensitivity';
   static const String _kUnitsKey = 'units';
@@ -333,6 +341,27 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   Future<void> setSquatDebugSession(bool value) async {
     await _db.insert('preferences', {
       'key': _kSquatDebugSessionKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<bool> getPushUpDebugSession() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kPushUpDebugSessionKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    return rows.first['value'] == 'true';
+  }
+
+  @override
+  Future<void> setPushUpDebugSession(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kPushUpDebugSessionKey,
       'value': value.toString(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -601,6 +630,7 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   bool _autoCalibrationEnabled = false;
   bool _curlDebugSession = false;
   bool _squatDebugSession = false;
+  bool _pushUpDebugSession = false;
   FeedbackSensitivity _feedbackSensitivity = FeedbackSensitivity.medium;
   ThemeMode _themeMode = ThemeMode.system;
   Units _units = Units.metric;
@@ -659,6 +689,14 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   @override
   Future<void> setSquatDebugSession(bool value) async {
     _squatDebugSession = value;
+  }
+
+  @override
+  Future<bool> getPushUpDebugSession() async => _pushUpDebugSession;
+
+  @override
+  Future<void> setPushUpDebugSession(bool value) async {
+    _pushUpDebugSession = value;
   }
 
   @override

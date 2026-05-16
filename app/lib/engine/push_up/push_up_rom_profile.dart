@@ -30,6 +30,15 @@ class PushUpRomThresholds {
   /// by `PushUpStrategy`. Bucket-derived (calibrated) thresholds come back
   /// from `PushUpRomProfile.thresholds` as a High anchor; the resolver
   /// applies this post-pass before handing to the FSM. Idempotent on High.
+  ///
+  /// HYSTERESIS INVARIANT preserved by construction: the Medium deltas move
+  /// startAngle by −5 and endAngle by only −3, so the start↔end gap *widens*
+  /// by 2° relative to the anchor. Given the anchor satisfies
+  /// startAngle < endAngle (enforced in constants.dart and, for calibrated
+  /// profiles, by the [thresholds] getter's gate-gap clamp), every tier
+  /// transform keeps startAngle < endAngle. Do NOT change these deltas such
+  /// that the start delta becomes less negative than the end delta — that
+  /// would shrink the dead-band and reintroduce the double-count bug.
   PushUpRomThresholds applySensitivity(FeedbackSensitivity sensitivity) {
     if (sensitivity == FeedbackSensitivity.high) return this;
     // Same deltas as PushUpRomThresholdSet._mediumLooseness: (-5, +5, -3, +5).
@@ -119,43 +128,60 @@ class PushUpRomProfile {
 
   double get romDegrees => topAngle - bottomAngle;
 
+  /// Derive FSM gates from a calibrated `[bottomAngle, topAngle]` band.
+  ///
+  /// HYSTERESIS INVARIANT (calibration path): the returned tuple MUST satisfy
+  /// `startAngle < endAngle` with at least `kPushUpProfileMinGateGap` between
+  /// them. The pre-fix derivation collapsed `end` onto `start` via
+  /// `maxEnd <= start ? start : …` — that start==end equality is the exact
+  /// double-count bug (lockout jitter re-armed IDLE→DESCENDING immediately
+  /// after a commit). Everything except the final `end` computation is the
+  /// original, well-behaved derivation (start/bottom/shallow each anchored
+  /// to their proper reference points); only `end` is restructured so it is
+  /// ALWAYS at least one gate-gap above `start`.
   PushUpRomThresholds get thresholds {
+    const gap = kPushUpProfileMinGateGap;
     final rom = romDegrees;
     final startMargin = _clampDouble(
       rom * 0.25,
-      kPushUpProfileMinGateGap,
+      gap,
       kPushUpProfileStartMargin,
     );
     final start = _clampDouble(
       topAngle - startMargin,
-      bottomAngle + (kPushUpProfileMinGateGap * 2),
+      bottomAngle + (gap * 2),
       kPushUpEndAngle,
     );
     final bottomMargin = _clampDouble(
       rom * 0.20,
-      kPushUpProfileMinGateGap,
+      gap,
       kPushUpProfileBottomMargin,
     );
     final bottom = _clampDouble(
       bottomAngle + bottomMargin,
       kPushUpCalibrationBottomMinAngle,
-      start - (kPushUpProfileMinGateGap * 2),
+      start - (gap * 2),
     );
     final activeRom = start - bottom;
     final shallow = _clampDouble(
       bottom + (activeRom * 0.55),
-      bottom + kPushUpProfileMinGateGap,
-      start - kPushUpProfileMinGateGap,
+      bottom + gap,
+      start - gap,
     );
-    final endMargin = _clampDouble(
-      rom * 0.12,
-      kPushUpProfileMinGateGap,
-      kPushUpProfileEndMargin,
-    );
-    final maxEnd = topAngle - kPushUpProfileMinGateGap;
-    final end = maxEnd <= start
-        ? start
-        : _clampDouble(start + endMargin, start, maxEnd);
+    final endMargin = _clampDouble(rom * 0.12, gap, kPushUpProfileEndMargin);
+    // HYSTERESIS-SAFE end gate. `end` must clear `start` by ≥ gap so the
+    // FSM has a dead-band between the rep-commit gate and the next-rep-arm
+    // gate (the missing dead-band was the double-count root cause). Lower
+    // bound is therefore `start + gap`, NEVER `start` (the pre-fix code's
+    // `? start :` branch and `start`-floored clamp both allowed end==start).
+    // Upper bound prefers the user's measured lockout headroom
+    // (`topAngle - gap`) but is itself lifted to `start + gap` when a tight
+    // calibration leaves no headroom, so the clamp's `min ≤ max`
+    // precondition always holds (avoids the `Invalid argument` throw) and
+    // the dead-band is guaranteed even for a minimal-ROM profile.
+    final endLowerBound = start + gap;
+    final endUpperBound = _maxD(endLowerBound, topAngle - gap);
+    final end = _clampDouble(start + endMargin, endLowerBound, endUpperBound);
 
     return PushUpRomThresholds(
       startAngle: start,
@@ -164,6 +190,8 @@ class PushUpRomProfile {
       endAngle: end,
     );
   }
+
+  static double _maxD(double a, double b) => a > b ? a : b;
 
   static String? validate({
     required double topAngle,

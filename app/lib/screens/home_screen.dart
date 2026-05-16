@@ -1000,7 +1000,7 @@ class _TrainTab extends StatelessWidget {
                 title: ExerciseType.pushUp.label,
                 subtitle:
                     'Side camera · place phone at floor level, 1.5 m away',
-                onTap: () => onStartWorkout(ExerciseType.pushUp),
+                onTap: () => _startNormalPushUp(context),
               ),
               if (kCurlDebugSessionEnabled) ...[
                 const SizedBox(height: 10),
@@ -1020,6 +1020,16 @@ class _TrainTab extends StatelessWidget {
                   subtitle:
                       'Silent observation — logs frame metrics for tuning',
                   onTap: () => _startSquatDebugSession(context),
+                ),
+              ],
+              if (kPushUpDebugSessionEnabled) ...[
+                const SizedBox(height: 10),
+                _ExerciseCard(
+                  icon: Icons.bug_report_outlined,
+                  title: 'Push-up Debug Session',
+                  subtitle:
+                      'Silent observation — logs frame metrics for tuning',
+                  onTap: () => _startPushUpDebugSession(context),
                 ),
               ],
             ]),
@@ -1086,6 +1096,33 @@ class _TrainTab extends StatelessWidget {
     await prefs.setSquatDebugSession(true);
     if (!context.mounted) return;
     await onStartWorkout(ExerciseType.squat);
+  }
+
+  /// Normal push-up entry. Defensively clears any stale
+  /// `pushup_debug_session` pref left over from a prior debug launch so a
+  /// normal workout always runs with feedback ON. Push-up is bilateral —
+  /// no side picker. Mirrors [_startNormalSquat].
+  Future<void> _startNormalPushUp(BuildContext context) async {
+    if (!context.mounted) return;
+    if (kPushUpDebugSessionEnabled) {
+      final prefs = AppServicesScope.read(context).preferencesRepository;
+      await prefs.setPushUpDebugSession(false);
+      if (!context.mounted) return;
+    }
+    await onStartWorkout(ExerciseType.pushUp);
+  }
+
+  /// "Push-up Debug Session" entry. Mirrors [_startSquatDebugSession] —
+  /// push-up is a bilateral sagittal-plane movement so there is no side
+  /// picker. Flips the `pushup_debug_session` preference to `true` so the
+  /// view-model reads it during `init()` and forces tier 3 /
+  /// `PushUpRomThresholds.defaults` / silent observation for the session.
+  Future<void> _startPushUpDebugSession(BuildContext context) async {
+    if (!context.mounted) return;
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setPushUpDebugSession(true);
+    if (!context.mounted) return;
+    await onStartWorkout(ExerciseType.pushUp);
   }
 
   Future<ExerciseSide?> _showSideFacingPicker(BuildContext context) {
