@@ -52,8 +52,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _showDetails = false;
   bool _squatLongFemurLifter = false;
   bool _diagnosticDisableAutoCalibration = false;
-  bool _squatDebugSession = false;
-  bool _pushUpDebugSession = false;
+  // Defaults true (visible) — see PreferencesRepository.getShowDebugTools.
+  bool _showDebugTools = true;
   bool _demoEnabled = false;
   bool _demoBusy = false;
   ThemeMode _themeMode = ThemeMode.system;
@@ -91,12 +91,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         .getSquatLongFemurLifter();
     final diagnosticDisableAutoCal = await services.preferencesRepository
         .getDiagnosticDisableAutoCalibration();
-    final squatDebug = kSquatDebugSessionEnabled
-        ? await services.preferencesRepository.getSquatDebugSession()
-        : false;
-    final pushUpDebug = kPushUpDebugSessionEnabled
-        ? await services.preferencesRepository.getPushUpDebugSession()
-        : false;
+    final showDebugTools = await services.preferencesRepository
+        .getShowDebugTools();
     final themeMode = await services.preferencesRepository.getThemeMode();
     final feedbackSensitivity = await services.preferencesRepository
         .getFeedbackSensitivity();
@@ -112,8 +108,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _squatProfile = liveSquat;
       _squatLongFemurLifter = longFemur;
       _diagnosticDisableAutoCalibration = diagnosticDisableAutoCal;
-      _squatDebugSession = squatDebug;
-      _pushUpDebugSession = pushUpDebug;
+      _showDebugTools = showDebugTools;
       _themeMode = themeMode;
       _feedbackSensitivity = feedbackSensitivity;
       _ttsEnabled = tts;
@@ -402,6 +397,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _squatLongFemurLifter = value);
   }
 
+  Future<void> _setShowDebugTools(bool value) async {
+    final prefs = AppServicesScope.read(context).preferencesRepository;
+    await prefs.setShowDebugTools(value);
+    TelemetryLog.instance.log(
+      'preferences.show_debug_tools_toggled',
+      'enabled=$value',
+    );
+    if (!mounted) return;
+    setState(() => _showDebugTools = value);
+  }
+
   Future<void> _setDiagnosticDisableAutoCalibration(bool value) async {
     final prefs = AppServicesScope.read(context).preferencesRepository;
     await prefs.setDiagnosticDisableAutoCalibration(value);
@@ -411,28 +417,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (!mounted) return;
     setState(() => _diagnosticDisableAutoCalibration = value);
-  }
-
-  Future<void> _setSquatDebugSession(bool value) async {
-    final prefs = AppServicesScope.read(context).preferencesRepository;
-    await prefs.setSquatDebugSession(value);
-    TelemetryLog.instance.log(
-      'preferences.squat_debug_session_toggled',
-      'enabled=$value',
-    );
-    if (!mounted) return;
-    setState(() => _squatDebugSession = value);
-  }
-
-  Future<void> _setPushUpDebugSession(bool value) async {
-    final prefs = AppServicesScope.read(context).preferencesRepository;
-    await prefs.setPushUpDebugSession(value);
-    TelemetryLog.instance.log(
-      'preferences.pushup_debug_session_toggled',
-      'enabled=$value',
-    );
-    if (!mounted) return;
-    setState(() => _pushUpDebugSession = value);
   }
 
   Future<void> _setFeedbackSensitivity(FeedbackSensitivity sensitivity) async {
@@ -941,6 +925,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // floating above the destructive Reset Profile rows where it
                 // used to invite thumb-slips.
                 _sectionHeader(context, 'Diagnostics & Advanced'),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Show debug tools'),
+                  subtitle: const Text(
+                    'Shows the Curl / Squat / Push-up "Debug Session" '
+                    'cards on the Home screen. Turn OFF before handing the '
+                    'app to a real user; turn ON for internal testing. '
+                    'Does not change how a debug session behaves once '
+                    'launched.',
+                  ),
+                  value: _showDebugTools,
+                  onChanged: _setShowDebugTools,
+                ),
                 _ActionRow(
                   icon: Icons.science_outlined,
                   label: 'Diagnostics',
@@ -962,32 +960,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   value: _diagnosticDisableAutoCalibration,
                   onChanged: _setDiagnosticDisableAutoCalibration,
                 ),
-                if (kSquatDebugSessionEnabled)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text('Squat debug session'),
-                    subtitle: const Text(
-                      'Silent observation: no TTS / haptics / banners. '
-                      'Logs frame-level pose metrics for threshold tuning. '
-                      'Turn on, run a session, paste Diagnostics, turn off.',
-                    ),
-                    value: _squatDebugSession,
-                    onChanged: _setSquatDebugSession,
-                  ),
-                if (kPushUpDebugSessionEnabled)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text('Push-up debug session'),
-                    subtitle: const Text(
-                      'Silent observation: no TTS / haptics / banners. '
-                      'Logs frame-level pose metrics for threshold tuning. '
-                      'Turn on, run a session, paste Diagnostics, turn off.',
-                    ),
-                    value: _pushUpDebugSession,
-                    onChanged: _setPushUpDebugSession,
-                  ),
               ],
             ),
     );

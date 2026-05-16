@@ -452,7 +452,22 @@ class WorkoutViewModel extends ChangeNotifier {
   bool _isReady = false;
   bool _isProcessing = false;
   String? _error;
-  DateTime _lastProcessed = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Monotonic clock for frame throttling. `Stopwatch.elapsedMilliseconds`
+  /// is allocation-free (vs. two `DateTime` objects per ~30 Hz camera
+  /// callback) and immune to wall-clock skew — an NTP/user clock change
+  /// mid-session can't make the throttle burst (negative delta) or stall
+  /// (huge delta). `_lastProcessedMs` starts far in the past so the first
+  /// frame always passes (replaces the epoch-0 `DateTime` sentinel).
+  final Stopwatch _frameClock = Stopwatch()..start();
+  int _lastProcessedMs = -1 << 30;
+
+  /// Last time we emitted a `workout.frame_dropped` telemetry entry.
+  /// Throttled to 1/sec so a degraded session (a per-frame exception at
+  /// ~15 fps) can't flood the 500-entry ring buffer in ~33 seconds.
+  /// Mirrors `MlKitPoseService._maybeWarnQuality`'s throttle.
+  DateTime? _lastFrameDropWarnAt;
+
   WorkoutPhase _phase = WorkoutPhase.setupCheck;
 
   // SETUP_CHECK.
@@ -2522,15 +2537,15 @@ class WorkoutViewModel extends ChangeNotifier {
   void _onFrame(CameraImage image) {
     if (_isProcessing) return;
 
-    final now = DateTime.now();
     final intervalMs = switch (_phase) {
       WorkoutPhase.active => kActiveFrameIntervalMs,
       WorkoutPhase.calibration => kCalibrationFrameIntervalMs,
       _ => kIdleFrameIntervalMs,
     };
-    if (now.difference(_lastProcessed).inMilliseconds < intervalMs) return;
+    final nowMs = _frameClock.elapsedMilliseconds;
+    if (nowMs - _lastProcessedMs < intervalMs) return;
 
-    _lastProcessed = now;
+    _lastProcessedMs = nowMs;
     _isProcessing = true;
 
     _processFrame(image).whenComplete(() {
@@ -2660,8 +2675,23 @@ class WorkoutViewModel extends ChangeNotifier {
         case WorkoutPhase.completed:
           break;
       }
-    } catch (_) {
-      // Silently drop bad frames — don't crash the stream.
+    } catch (e, st) {
+      // Drop the bad frame — the camera stream must not crash. But do not
+      // swallow silently (AGENT_DIRECTIVES §2.5): a recurring engine
+      // exception here would otherwise burn CPU 15×/s AND stay invisible.
+      // Throttled to 1/sec so a degraded session can't flood the ring
+      // buffer (mirrors MlKitPoseService._maybeWarnQuality).
+      final now = DateTime.now();
+      final last = _lastFrameDropWarnAt;
+      if (last == null || now.difference(last).inMilliseconds >= 1000) {
+        _lastFrameDropWarnAt = now;
+        TelemetryLog.instance.log(
+          'workout.frame_dropped',
+          '${e.runtimeType}: $e',
+          data: {'stack': st.toString().split('\n').take(3).join(' | ')},
+        );
+      }
+      // Intentionally no rethrow — the frame is dropped by design.
     }
   }
 

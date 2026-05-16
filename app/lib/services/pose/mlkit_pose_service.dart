@@ -10,6 +10,7 @@ import '../../core/platform_config.dart';
 import '../../models/pose_landmark.dart';
 import '../../models/pose_result.dart';
 import '../telemetry_log.dart';
+import 'pose_gate.dart';
 import 'pose_service.dart';
 
 /// ML Kit Pose (accurate model, stream mode).
@@ -157,19 +158,27 @@ class MlKitPoseService extends PoseService {
         final floor = confidenceFloor ?? kPoseGateMinConfidence;
         final bestEffort = bestEffortLandmarks ?? const <int>{};
 
+        // Build the type→landmark index ONCE per frame and reuse it for
+        // both the primary and alternate group evals. Replaces the former
+        // per-id `landmarks.firstWhere(...)` linear scan (was up to ~6
+        // full-list scans per frame with dual-group side-view gating).
+        // First-wins (see `indexByType`) preserves `firstWhere` semantics
+        // exactly.
+        final byType = indexByType(landmarks);
+
         // Evaluate the primary group AND optional alternate group. If an
         // alternate is provided, the frame passes when EITHER fully
         // satisfies. Without an alternate, primary must pass.
-        final primary = _evaluateLandmarkGroup(
-          landmarks,
+        final primary = evaluateLandmarkGroup(
+          byType,
           requiredLandmarks,
           floor: floor,
           bestEffort: bestEffort,
         );
         final alt =
             requiredLandmarksAlt != null && requiredLandmarksAlt.isNotEmpty
-            ? _evaluateLandmarkGroup(
-                landmarks,
+            ? evaluateLandmarkGroup(
+                byType,
                 requiredLandmarksAlt,
                 floor: floor,
                 bestEffort: bestEffort,
@@ -202,42 +211,6 @@ class MlKitPoseService extends PoseService {
     } catch (e) {
       return PoseResult(landmarks: [], inferenceTime: Duration.zero);
     }
-  }
-
-  /// Evaluate a single landmark group against the latest detected
-  /// landmarks. Returns the missing IDs (with parallel confidences) and a
-  /// nearedge flag. Pure function; no side effects.
-  ///
-  /// `floor` — confidence threshold for non-best-effort landmarks.
-  /// `bestEffort` — landmark IDs that pass the gate at half the floor
-  /// (e.g., wrists in side view, where ML Kit struggles at peak flexion
-  /// but the FSM tolerates occasional missing angle frames).
-  _GroupEvaluation _evaluateLandmarkGroup(
-    List<PoseLandmark> landmarks,
-    List<int> required, {
-    required double floor,
-    required Set<int> bestEffort,
-  }) {
-    final missing = <int>[];
-    final missingConfs = <double>[];
-    var nearEdge = false;
-    for (final id in required) {
-      final lm = landmarks.firstWhere(
-        (l) => l.type == id,
-        orElse: () => const PoseLandmark(type: -1, x: 0, y: 0, confidence: 0),
-      );
-      final effectiveFloor = bestEffort.contains(id) ? floor * 0.5 : floor;
-      if (lm.type == -1 || lm.confidence < effectiveFloor) {
-        missing.add(id);
-        missingConfs.add(lm.type == -1 ? 0.0 : lm.confidence);
-      }
-      if (lm.type != -1) {
-        if (lm.x < 0.05 || lm.x > 0.95 || lm.y < 0.05 || lm.y > 0.95) {
-          nearEdge = true;
-        }
-      }
-    }
-    return _GroupEvaluation(missing, missingConfs, nearEdge);
   }
 
   /// Throttled pose-quality warning. Fires at most once per second so a
@@ -289,14 +262,4 @@ class MlKitPoseService extends PoseService {
         return mlkit.InputImageRotation.rotation0deg;
     }
   }
-}
-
-/// Per-group evaluation result for the required-landmark gate. Carries
-/// missing IDs (with parallel confidences) and a nearedge flag so the
-/// caller can pick whichever group came closer to passing when reporting.
-class _GroupEvaluation {
-  final List<int> missing;
-  final List<double> missingConfs;
-  final bool nearEdge;
-  const _GroupEvaluation(this.missing, this.missingConfs, this.nearEdge);
 }

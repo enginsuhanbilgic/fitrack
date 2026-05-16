@@ -84,6 +84,19 @@ abstract class PreferencesRepository {
   Future<bool> getCurlDebugSession();
   Future<void> setCurlDebugSession(bool value);
 
+  /// Whether the internal "Debug Session" entry cards (Curl / Squat /
+  /// Push-up) are shown on the Home screen. Purely a Home-card visibility
+  /// gate — does NOT change debug-session behavior when one is launched,
+  /// and is independent of the per-launch `curl_debug_session` flag.
+  ///
+  /// **Defaults to `true`** (visible) so the developer's internal builds
+  /// keep the tools by default; flip OFF in Settings before handing the
+  /// app to a real user. Still ANDed with the compile-time
+  /// `kCurlDebugSessionEnabled` / `kSquatDebugSessionEnabled` /
+  /// `kPushUpDebugSessionEnabled` consts — those remain the outer gate.
+  Future<bool> getShowDebugTools();
+  Future<void> setShowDebugTools(bool value);
+
   /// Whether the next squat session should run as a *debug session* —
   /// silent observation mode, expanded ring buffer, per-frame metrics.
   /// Read once at session start; frozen for the workout.
@@ -173,6 +186,7 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   static const String _kAutoCalibrationForcedOffKey =
       'auto_calibration_force_off_v1';
   static const String _kCurlDebugSessionKey = 'curl_debug_session';
+  static const String _kShowDebugToolsKey = 'show_debug_tools';
   static const String _kSquatDebugSessionKey = 'squat_debug_session';
   static const String _kPushUpDebugSessionKey = 'pushup_debug_session';
   static const String _kThemeModeKey = 'theme_mode';
@@ -320,6 +334,31 @@ class SqlitePreferencesRepository implements PreferencesRepository {
   Future<void> setCurlDebugSession(bool value) async {
     await _db.insert('preferences', {
       'key': _kCurlDebugSessionKey,
+      'value': value.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<bool> getShowDebugTools() async {
+    final rows = await _db.query(
+      'preferences',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_kShowDebugToolsKey],
+      limit: 1,
+    );
+    // NOTE: defaults to TRUE when unset — the opposite of the other debug
+    // prefs above. A fresh install shows the debug tools (developer's
+    // internal default); the developer flips it OFF in Settings before a
+    // real-user handoff.
+    if (rows.isEmpty) return true;
+    return rows.first['value'] == 'true';
+  }
+
+  @override
+  Future<void> setShowDebugTools(bool value) async {
+    await _db.insert('preferences', {
+      'key': _kShowDebugToolsKey,
       'value': value.toString(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -629,6 +668,8 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   // `setAutoCalibrationEnabled(true)` explicitly.
   bool _autoCalibrationEnabled = false;
   bool _curlDebugSession = false;
+  // Defaults to true (visible) — see PreferencesRepository.getShowDebugTools.
+  bool _showDebugTools = true;
   bool _squatDebugSession = false;
   bool _pushUpDebugSession = false;
   FeedbackSensitivity _feedbackSensitivity = FeedbackSensitivity.medium;
@@ -681,6 +722,14 @@ class InMemoryPreferencesRepository implements PreferencesRepository {
   @override
   Future<void> setCurlDebugSession(bool value) async {
     _curlDebugSession = value;
+  }
+
+  @override
+  Future<bool> getShowDebugTools() async => _showDebugTools;
+
+  @override
+  Future<void> setShowDebugTools(bool value) async {
+    _showDebugTools = value;
   }
 
   @override

@@ -19,12 +19,24 @@ dependencies:
   share_plus: ^10.1.0
   sqflite: ^2.3.3
   google_fonts: ^6.2.1
+  material_symbols_icons: ^4.2928.1
+  flutter_svg: ^2.0.10+1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
   sqflite_common_ffi: ^2.3.3
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/branding/logo.png"
+  remove_alpha_ios: true
+  min_sdk_android: 21
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/branding/

@@ -5,6 +5,8 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants.dart';
@@ -981,14 +983,14 @@ class _TrainTab extends StatelessWidget {
               ),
               const SizedBox(height: 20),
               _ExerciseCard(
-                icon: Icons.fitness_center,
+                icon: Symbols.exercise,
                 title: 'Biceps Curl',
                 subtitle: 'Side camera · stand 2 m away',
                 onTap: () => _showCurlViewPicker(context),
               ),
               const SizedBox(height: 10),
               _ExerciseCard(
-                icon: Icons.accessibility,
+                svgAsset: 'assets/branding/squat.svg',
                 title: ExerciseType.squat.label,
                 subtitle: 'Side view · stand 2 m away at waist height',
                 badgeColor: squatBadgeColor,
@@ -996,42 +998,68 @@ class _TrainTab extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               _ExerciseCard(
-                icon: Icons.sports_gymnastics,
+                svgAsset: 'assets/branding/pushup.svg',
                 title: ExerciseType.pushUp.label,
                 subtitle:
                     'Side camera · place phone at floor level, 1.5 m away',
                 onTap: () => _startNormalPushUp(context),
               ),
-              if (kCurlDebugSessionEnabled) ...[
-                const SizedBox(height: 10),
-                _ExerciseCard(
-                  icon: Icons.bug_report_outlined,
-                  title: 'Curl Debug Session',
-                  subtitle:
-                      'Silent observation — logs frame metrics for tuning',
-                  onTap: () => _showCurlDebugSidePicker(context),
+              // Debug-session entry cards. Outer compile-time consts gate
+              // whether the machinery exists at all; the runtime
+              // `getShowDebugTools()` pref (default ON, toggled in
+              // Settings → Diagnostics & Advanced) lets the developer hide
+              // ALL of them before a real-user handoff. Pending resolves to
+              // HIDDEN so a real user (pref OFF) never sees a debug flash;
+              // for the developer (pref ON) the cards pop in within one
+              // fast indexed SQLite read — imperceptible.
+              if (kCurlDebugSessionEnabled ||
+                  kSquatDebugSessionEnabled ||
+                  kPushUpDebugSessionEnabled)
+                FutureBuilder<bool>(
+                  future: AppServicesScope.read(
+                    context,
+                  ).preferencesRepository.getShowDebugTools(),
+                  builder: (context, snap) {
+                    if (snap.data != true) return const SizedBox.shrink();
+                    return Column(
+                      children: [
+                        if (kCurlDebugSessionEnabled) ...[
+                          const SizedBox(height: 10),
+                          _ExerciseCard(
+                            icon: Icons.bug_report_outlined,
+                            title: 'Curl Debug Session',
+                            subtitle:
+                                'Silent observation — logs frame metrics '
+                                'for tuning',
+                            onTap: () => _showCurlDebugSidePicker(context),
+                          ),
+                        ],
+                        if (kSquatDebugSessionEnabled) ...[
+                          const SizedBox(height: 10),
+                          _ExerciseCard(
+                            icon: Icons.bug_report_outlined,
+                            title: 'Squat Debug Session',
+                            subtitle:
+                                'Silent observation — logs frame metrics '
+                                'for tuning',
+                            onTap: () => _startSquatDebugSession(context),
+                          ),
+                        ],
+                        if (kPushUpDebugSessionEnabled) ...[
+                          const SizedBox(height: 10),
+                          _ExerciseCard(
+                            icon: Icons.bug_report_outlined,
+                            title: 'Push-up Debug Session',
+                            subtitle:
+                                'Silent observation — logs frame metrics '
+                                'for tuning',
+                            onTap: () => _startPushUpDebugSession(context),
+                          ),
+                        ],
+                      ],
+                    );
+                  },
                 ),
-              ],
-              if (kSquatDebugSessionEnabled) ...[
-                const SizedBox(height: 10),
-                _ExerciseCard(
-                  icon: Icons.bug_report_outlined,
-                  title: 'Squat Debug Session',
-                  subtitle:
-                      'Silent observation — logs frame metrics for tuning',
-                  onTap: () => _startSquatDebugSession(context),
-                ),
-              ],
-              if (kPushUpDebugSessionEnabled) ...[
-                const SizedBox(height: 10),
-                _ExerciseCard(
-                  icon: Icons.bug_report_outlined,
-                  title: 'Push-up Debug Session',
-                  subtitle:
-                      'Silent observation — logs frame metrics for tuning',
-                  onTap: () => _startPushUpDebugSession(context),
-                ),
-              ],
             ]),
           ),
         ),
@@ -1056,11 +1084,9 @@ class _TrainTab extends StatelessWidget {
     await onStartWorkout(ExerciseType.bicepsCurlSide, curlSide: side);
   }
 
-  /// "Curl Debug Session" entry. Mirrors [_showCurlViewPicker] but flips
-  /// the `curl_debug_session` preference to `true` before launching the
-  /// workout so the view-model reads it during `init()`. The Settings
-  /// switch reflects the flip — users can manually flip it back off after
-  /// the session, or the next normal-curl launch will clear it.
+  /// "Curl Debug Session" entry. Sets the debug flag, launches the workout,
+  /// then resets the flag after the session (and summary screen) completes so
+  /// the next normal curl session runs with full feedback.
   Future<void> _showCurlDebugSidePicker(BuildContext context) async {
     if (!context.mounted) return;
     final side = await _showSideFacingPicker(context);
@@ -1070,59 +1096,44 @@ class _TrainTab extends StatelessWidget {
     await prefs.setCurlDebugSession(true);
     if (!context.mounted) return;
     await onStartWorkout(ExerciseType.bicepsCurlSide, curlSide: side);
+    if (!context.mounted) return;
+    await prefs.setCurlDebugSession(false);
   }
 
-  /// Normal squat entry. Defensively clears any stale `squat_debug_session`
-  /// pref left over from a prior debug launch so a normal workout always
-  /// runs with feedback ON. Squat is bilateral — no side picker.
   Future<void> _startNormalSquat(BuildContext context) async {
     if (!context.mounted) return;
-    if (kSquatDebugSessionEnabled) {
-      final prefs = AppServicesScope.read(context).preferencesRepository;
-      await prefs.setSquatDebugSession(false);
-      if (!context.mounted) return;
-    }
     await onStartWorkout(ExerciseType.squat);
   }
 
-  /// "Squat Debug Session" entry. Mirrors [_showCurlDebugSidePicker] but
-  /// without a side picker since squat is a bilateral sagittal-plane
-  /// movement. Flips the `squat_debug_session` preference to `true` so the
-  /// view-model reads it during `init()` and forces tier 3 / source=global
-  /// / silent observation mode for the session.
+  /// "Squat Debug Session" entry. Sets the debug flag, launches the workout,
+  /// then resets the flag after the session completes so the next normal
+  /// squat session runs with full feedback.
   Future<void> _startSquatDebugSession(BuildContext context) async {
     if (!context.mounted) return;
     final prefs = AppServicesScope.read(context).preferencesRepository;
     await prefs.setSquatDebugSession(true);
     if (!context.mounted) return;
     await onStartWorkout(ExerciseType.squat);
+    if (!context.mounted) return;
+    await prefs.setSquatDebugSession(false);
   }
 
-  /// Normal push-up entry. Defensively clears any stale
-  /// `pushup_debug_session` pref left over from a prior debug launch so a
-  /// normal workout always runs with feedback ON. Push-up is bilateral —
-  /// no side picker. Mirrors [_startNormalSquat].
   Future<void> _startNormalPushUp(BuildContext context) async {
     if (!context.mounted) return;
-    if (kPushUpDebugSessionEnabled) {
-      final prefs = AppServicesScope.read(context).preferencesRepository;
-      await prefs.setPushUpDebugSession(false);
-      if (!context.mounted) return;
-    }
     await onStartWorkout(ExerciseType.pushUp);
   }
 
-  /// "Push-up Debug Session" entry. Mirrors [_startSquatDebugSession] —
-  /// push-up is a bilateral sagittal-plane movement so there is no side
-  /// picker. Flips the `pushup_debug_session` preference to `true` so the
-  /// view-model reads it during `init()` and forces tier 3 /
-  /// `PushUpRomThresholds.defaults` / silent observation for the session.
+  /// "Push-up Debug Session" entry. Sets the debug flag, launches the workout,
+  /// then resets the flag after the session completes so the next normal
+  /// push-up session runs with full feedback.
   Future<void> _startPushUpDebugSession(BuildContext context) async {
     if (!context.mounted) return;
     final prefs = AppServicesScope.read(context).preferencesRepository;
     await prefs.setPushUpDebugSession(true);
     if (!context.mounted) return;
     await onStartWorkout(ExerciseType.pushUp);
+    if (!context.mounted) return;
+    await prefs.setPushUpDebugSession(false);
   }
 
   Future<ExerciseSide?> _showSideFacingPicker(BuildContext context) {
@@ -1191,14 +1202,22 @@ class _TrainTab extends StatelessWidget {
 
 class _ExerciseCard extends StatelessWidget {
   const _ExerciseCard({
-    required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.icon,
+    this.svgAsset,
     this.badgeColor,
-  });
+  }) : assert(
+         icon != null || svgAsset != null,
+         'Provide either icon or svgAsset',
+       );
 
-  final IconData icon;
+  final IconData? icon;
+
+  /// Path to an SVG asset (e.g. 'assets/branding/pushup.svg').
+  /// Takes precedence over [icon] when both are provided.
+  final String? svgAsset;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
@@ -1210,6 +1229,14 @@ class _ExerciseCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ft = FiTrackColors.of(context);
+    final iconWidget = svgAsset != null
+        ? SvgPicture.asset(
+            svgAsset!,
+            width: 36,
+            height: 36,
+            colorFilter: ColorFilter.mode(ft.accent, BlendMode.srcIn),
+          )
+        : Icon(icon, size: 32, color: ft.accent);
     return Semantics(
       button: true,
       label: '$title. $subtitle',
@@ -1228,7 +1255,7 @@ class _ExerciseCard extends StatelessWidget {
             ),
             child: Row(
               children: [
-                // Placeholder image block with optional calibration badge
+                // Icon block with optional calibration badge
                 Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -1240,7 +1267,7 @@ class _ExerciseCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: ft.stroke),
                       ),
-                      child: Icon(icon, size: 32, color: ft.accent),
+                      child: Center(child: iconWidget),
                     ),
                     if (badgeColor != null)
                       Positioned(

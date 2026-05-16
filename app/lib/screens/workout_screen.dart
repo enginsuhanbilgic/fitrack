@@ -345,135 +345,133 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         backgroundColor: Colors.black,
         // No AppBar — replaced by a floating glassmorphic top HUD bar.
         extendBodyBehindAppBar: true,
-        body: Consumer<WorkoutViewModel>(builder: (_, _, _) => _buildBody()),
+        // Gate Selector: error / not-ready are state-change-only (fire once
+        // at startup or on init failure), so this rebuilds essentially
+        // never. The per-frame notifyListeners() no longer rebuilds the
+        // whole body — each Stack child below owns a narrow Selector.
+        body: Selector<WorkoutViewModel, ({String? error, bool isReady})>(
+          selector: (_, vm) => (error: vm.error, isReady: vm.isReady),
+          builder: (context, s, _) {
+            if (s.error != null) return _ErrorView(message: s.error!);
+            if (!s.isReady) return const _StartingCameraView();
+            return _buildBody();
+          },
+        ),
       ),
     );
   }
 
   Widget _buildBody() {
-    if (_vm.error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            _vm.error!,
-            style: const TextStyle(color: Colors.redAccent, fontSize: 16),
-          ),
-        ),
-      );
-    }
-
-    if (!_vm.isReady) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(color: Color(0xFF00E676)),
-            const SizedBox(height: 16),
-            Text(
-              'Starting camera...',
-              style: TextStyle(
-                color: Theme.of(
-                  context,
-                ).colorScheme.onSurface.withValues(alpha: 0.70),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
     final camera = _vm.camera;
-    final phase = _vm.phase;
-    final snapshot = _vm.snapshot;
-    final allLandmarks = _vm.landmarks;
-    final calibrationSummary = _vm.calibrationSummary;
-
-    final landmarks = _filterSkeletonForView(
-      allLandmarks,
-      _vm.detectedCurlView,
-    );
 
     return Stack(
       fit: StackFit.expand,
       children: [
         // ── Camera preview + skeleton overlay ──────────────────────────────
+        // Inherently per-frame (the skeleton tracks the body every frame),
+        // so this Selector force-rebuilds. landmarkColors / errorHighlight
+        // are Map<int,Color> with NO value equality — they are read via
+        // context.read INSIDE the builder, never selected by value (a
+        // value-equality Selector on a Map would either rebuild always or,
+        // worse, dedupe and drop a form-error color update → stale skeleton
+        // color). Already wrapped in RepaintBoundary, so the per-frame cost
+        // stays confined to this subtree's paint; the other 11 children no
+        // longer rebuild per frame.
         if (camera.controller != null)
-          ClipRect(
-            child: FittedBox(
-              fit: BoxFit.cover,
-              child: Builder(
-                builder: (context) {
-                  final preview = camera.controller!.value.previewSize!;
-                  // OS-coherent rotation model: the push-up screen unlocks
-                  // landscape via SystemChrome, so the framework reports the
-                  // real screen orientation and the camera preview is rotated
-                  // by the OS. Size the box to match.
-                  //
-                  // - PORTRAIT (curl, squat, portrait push-up): `width:
-                  //   preview.height, height: preview.width` — BYTE-IDENTICAL
-                  //   to the legacy hardcoded swap, so non-push-up is
-                  //   unchanged (their screens never unlock landscape, so
-                  //   MediaQuery.orientation is always portrait for them).
-                  // - LANDSCAPE (push-up rotated): natural (un-swapped)
-                  //   dimensions so `FittedBox.cover` fills the wide viewport
-                  //   instead of pillarboxing.
-                  final landscape =
-                      MediaQuery.of(context).orientation ==
-                      Orientation.landscape;
-                  return SizedBox(
-                    width: landscape ? preview.width : preview.height,
-                    height: landscape ? preview.height : preview.width,
-                    child: Stack(
-                      children: [
-                        CameraPreview(camera.controller!),
-                        if (landmarks.isNotEmpty)
-                          Positioned.fill(
-                            child: RepaintBoundary(
-                              child: CustomPaint(
-                                painter: SkeletonPainter(
-                                  landmarks: landmarks,
-                                  mirror: false,
-                                  boneColor: FiTrackColors.of(context).accent,
-                                  landmarkColors: () {
-                                    final phaseColor = _skeletonPhaseColor(
-                                      snapshot.state,
-                                    );
-                                    final phaseBase = phaseColor != null
-                                        ? {
-                                            for (final idx
-                                                in LM.bodyOnlyLandmarks)
-                                              idx: phaseColor,
-                                          }
-                                        : <int, Color>{};
-                                    final merged = {
-                                      ...phaseBase,
-                                      ..._vm.landmarkColors,
-                                      ..._vm.errorHighlight,
-                                    };
-                                    return merged.isNotEmpty ? merged : null;
-                                  }(),
-                                  boneConnections: widget.exercise.isCurl
-                                      ? LM.upperBodyConnections
-                                      : null,
-                                  elbowAngleAnnotation:
-                                      phase == WorkoutPhase.active &&
-                                          snapshot.jointAngle != null
-                                      ? (
-                                          _elbowLandmarkForSide(),
-                                          snapshot.jointAngle!,
-                                        )
-                                      : null,
+          Selector<WorkoutViewModel, bool>(
+            // Trivial selector value; rebuild forced every notify.
+            selector: (_, _) => true,
+            shouldRebuild: (_, _) => true,
+            builder: (context, _, _) {
+              final vm = context.read<WorkoutViewModel>();
+              final snapshot = vm.snapshot;
+              final phase = vm.phase;
+              final landmarks = _filterSkeletonForView(
+                vm.landmarks,
+                vm.detectedCurlView,
+              );
+              return ClipRect(
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  child: Builder(
+                    builder: (context) {
+                      final preview = camera.controller!.value.previewSize!;
+                      // OS-coherent rotation model: the push-up screen
+                      // unlocks landscape via SystemChrome, so the framework
+                      // reports the real screen orientation and the camera
+                      // preview is rotated by the OS. Size the box to match.
+                      //
+                      // - PORTRAIT (curl, squat, portrait push-up): `width:
+                      //   preview.height, height: preview.width` —
+                      //   BYTE-IDENTICAL to the legacy hardcoded swap, so
+                      //   non-push-up is unchanged (their screens never
+                      //   unlock landscape, so MediaQuery.orientation is
+                      //   always portrait for them).
+                      // - LANDSCAPE (push-up rotated): natural (un-swapped)
+                      //   dimensions so `FittedBox.cover` fills the wide
+                      //   viewport instead of pillarboxing.
+                      final landscape =
+                          MediaQuery.of(context).orientation ==
+                          Orientation.landscape;
+                      return SizedBox(
+                        width: landscape ? preview.width : preview.height,
+                        height: landscape ? preview.height : preview.width,
+                        child: Stack(
+                          children: [
+                            CameraPreview(camera.controller!),
+                            if (landmarks.isNotEmpty)
+                              Positioned.fill(
+                                child: RepaintBoundary(
+                                  child: CustomPaint(
+                                    painter: SkeletonPainter(
+                                      landmarks: landmarks,
+                                      mirror: false,
+                                      boneColor: FiTrackColors.of(
+                                        context,
+                                      ).accent,
+                                      landmarkColors: () {
+                                        final phaseColor = _skeletonPhaseColor(
+                                          snapshot.state,
+                                        );
+                                        final phaseBase = phaseColor != null
+                                            ? {
+                                                for (final idx
+                                                    in LM.bodyOnlyLandmarks)
+                                                  idx: phaseColor,
+                                              }
+                                            : <int, Color>{};
+                                        final merged = {
+                                          ...phaseBase,
+                                          ...vm.landmarkColors,
+                                          ...vm.errorHighlight,
+                                        };
+                                        return merged.isNotEmpty
+                                            ? merged
+                                            : null;
+                                      }(),
+                                      boneConnections: widget.exercise.isCurl
+                                          ? LM.upperBodyConnections
+                                          : null,
+                                      elbowAngleAnnotation:
+                                          phase == WorkoutPhase.active &&
+                                              snapshot.jointAngle != null
+                                          ? (
+                                              _elbowLandmarkForSide(),
+                                              snapshot.jointAngle!,
+                                            )
+                                          : null,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              );
+            },
           ),
 
         // ── Cinematic camera vignette / gradient scrim ────────────────────
@@ -500,156 +498,241 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         ),
 
         // ── CALIBRATION overlay ─────────────────────────────────────────────
-        if (phase == WorkoutPhase.calibration && calibrationSummary == null)
-          CalibrationOverlay(
-            exercise: widget.exercise,
-            repsDetected: _vm.calibrationReps,
-            progressTarget: _vm.calibrationProgressTarget,
-            progressLabel: _vm.calibrationProgressLabel,
-            instruction: _vm.calibrationInstruction,
-            currentAngle: _vm.calibrationCurrentAngle,
-            // During calibration, the user is the authoritative source for
-            // which side is being calibrated. ML Kit's anatomical
-            // left/right labels are unreliable in side recordings, so the
-            // raw `detectedCurlView` can disagree with the user's pick
-            // and confuse them. Once a side has been picked, mirror it
-            // back as the live indicator; before that, fall back to the
-            // detector so the "Detecting view…" chip works.
-            detectedView: _vm.calibrationChosenSide == ProfileSide.left
-                ? CurlCameraView.sideLeft
-                : _vm.calibrationChosenSide == ProfileSide.right
-                ? CurlCameraView.sideRight
-                : _vm.detectedCurlView,
-            secondsRemaining: _vm.calibrationError == null
-                ? _vm.calibrationSecondsRemaining
-                : null,
-            errorMessage: _vm.calibrationError,
-            onSkip: _vm.skipCalibration,
-            onRetry: _vm.calibrationError != null ? _vm.retryCalibration : null,
-            chosenSide: _vm.calibrationChosenSide,
-            onPickSide: widget.exercise.isCurl ? _vm.pickCalibrationSide : null,
+        // Selects the calibration fields that actually change during the
+        // phase. Stable strings (instruction/progress label) are read via
+        // context.read in the builder — they don't change within a session.
+        Selector<
+          WorkoutViewModel,
+          ({
+            WorkoutPhase phase,
+            bool hasSummary,
+            int reps,
+            double? angle,
+            int? secs,
+            String? error,
+            ProfileSide? side,
+            CurlCameraView view,
+          })
+        >(
+          selector: (_, vm) => (
+            phase: vm.phase,
+            hasSummary: vm.calibrationSummary != null,
+            reps: vm.calibrationReps,
+            angle: vm.calibrationCurrentAngle,
+            secs: vm.calibrationSecondsRemaining,
+            error: vm.calibrationError,
+            side: vm.calibrationChosenSide,
+            view: vm.detectedCurlView,
           ),
-        if (phase == WorkoutPhase.calibration && calibrationSummary != null)
-          Positioned.fill(
-            child: Container(
-              color: Colors.black87,
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.check_circle,
-                        color: Color(0xFF00E676),
-                        size: 64,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        '${calibrationSummary.viewLabel} calibrated',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
+          builder: (context, s, _) {
+            if (s.phase != WorkoutPhase.calibration) {
+              return const SizedBox.shrink();
+            }
+            final vm = context.read<WorkoutViewModel>();
+            final summary = vm.calibrationSummary;
+            if (summary == null) {
+              return CalibrationOverlay(
+                exercise: widget.exercise,
+                repsDetected: s.reps,
+                progressTarget: vm.calibrationProgressTarget,
+                progressLabel: vm.calibrationProgressLabel,
+                instruction: vm.calibrationInstruction,
+                currentAngle: s.angle,
+                // During calibration, the user is the authoritative source
+                // for which side is being calibrated. ML Kit's anatomical
+                // left/right labels are unreliable in side recordings, so
+                // the raw `detectedCurlView` can disagree with the user's
+                // pick and confuse them. Once a side has been picked,
+                // mirror it back as the live indicator; before that, fall
+                // back to the detector so the "Detecting view…" chip works.
+                detectedView: s.side == ProfileSide.left
+                    ? CurlCameraView.sideLeft
+                    : s.side == ProfileSide.right
+                    ? CurlCameraView.sideRight
+                    : s.view,
+                secondsRemaining: s.error == null ? s.secs : null,
+                errorMessage: s.error,
+                onSkip: vm.skipCalibration,
+                onRetry: s.error != null ? vm.retryCalibration : null,
+                chosenSide: s.side,
+                onPickSide: widget.exercise.isCurl
+                    ? vm.pickCalibrationSide
+                    : null,
+              );
+            }
+            return Positioned.fill(
+              child: Container(
+                color: Colors.black87,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.check_circle,
+                          color: Color(0xFF00E676),
+                          size: 64,
                         ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        calibrationSummary.sidesLabel,
-                        style: TextStyle(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.onSurface.withValues(alpha: 0.70),
-                          fontSize: 16,
+                        const SizedBox(height: 16),
+                        Text(
+                          '${summary.viewLabel} calibrated',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          textAlign: TextAlign.center,
                         ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      Text(
-                        'For other camera angles, use\nSettings → Recalibrate.',
-                        style: TextStyle(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.onSurface.withValues(alpha: 0.54),
-                          fontSize: 13,
+                        const SizedBox(height: 8),
+                        Text(
+                          summary.sidesLabel,
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurface.withValues(alpha: 0.70),
+                            fontSize: 16,
+                          ),
+                          textAlign: TextAlign.center,
                         ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
+                        const SizedBox(height: 24),
+                        Text(
+                          'For other camera angles, use\n'
+                          'Settings → Recalibrate.',
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurface.withValues(alpha: 0.54),
+                            fontSize: 13,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
+        ),
 
         // ── SETUP_CHECK banner ──────────────────────────────────────────────
-        if (phase == WorkoutPhase.setupCheck)
-          _SetupBanner(vm: _vm, exercise: widget.exercise),
+        Selector<
+          WorkoutViewModel,
+          ({WorkoutPhase phase, int okFrames, String? hint})
+        >(
+          selector: (_, vm) => (
+            phase: vm.phase,
+            okFrames: vm.setupOkFrames,
+            hint: vm.setupFramingHint,
+          ),
+          builder: (_, s, _) => s.phase == WorkoutPhase.setupCheck
+              ? _SetupBanner(
+                  setupOkFrames: s.okFrames,
+                  setupFramingHint: s.hint,
+                  exercise: widget.exercise,
+                )
+              : const SizedBox.shrink(),
+        ),
 
         // ── COUNTDOWN — centered big number ────────────────────────────────
-        if (phase == WorkoutPhase.countdown)
-          Center(
-            child: Text(
-              '${_vm.countdownValue}',
-              style: const TextStyle(
-                fontSize: 160,
-                fontWeight: FontWeight.w900,
-                color: Color(0xFFC3F400),
-              ),
-            ),
-          ),
+        Selector<WorkoutViewModel, ({WorkoutPhase phase, int value})>(
+          selector: (_, vm) => (phase: vm.phase, value: vm.countdownValue),
+          builder: (_, s, _) => s.phase == WorkoutPhase.countdown
+              ? Center(
+                  child: Text(
+                    '${s.value}',
+                    style: const TextStyle(
+                      fontSize: 160,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFFC3F400),
+                    ),
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
 
         // ── SETUP/COUNTDOWN framing hint ────────────────────────────────────
-        if ((phase == WorkoutPhase.setupCheck ||
-                phase == WorkoutPhase.countdown) &&
-            _vm.framingHint != null)
-          _FramingHintBanner(hint: _vm.framingHint!),
+        Selector<WorkoutViewModel, ({WorkoutPhase phase, String? hint})>(
+          selector: (_, vm) => (phase: vm.phase, hint: vm.framingHint),
+          builder: (_, s, _) {
+            final show =
+                (s.phase == WorkoutPhase.setupCheck ||
+                    s.phase == WorkoutPhase.countdown) &&
+                s.hint != null;
+            return show
+                ? _FramingHintBanner(hint: s.hint!)
+                : const SizedBox.shrink();
+          },
+        ),
 
         // ── ACTIVE — uncalibrated-view notice ───────────────────────────────
-        if (phase == WorkoutPhase.active && _vm.uncalibratedViewNotice != null)
-          _InfoBanner(
-            icon: Icons.straighten,
-            text: _vm.uncalibratedViewNotice!,
-            tone: _BannerTone.cyan,
-          ),
+        Selector<WorkoutViewModel, ({WorkoutPhase phase, String? notice})>(
+          selector: (_, vm) =>
+              (phase: vm.phase, notice: vm.uncalibratedViewNotice),
+          builder: (_, s, _) =>
+              s.phase == WorkoutPhase.active && s.notice != null
+              ? _InfoBanner(
+                  icon: Icons.straighten,
+                  text: s.notice!,
+                  tone: _BannerTone.cyan,
+                )
+              : const SizedBox.shrink(),
+        ),
 
         // ── ACTIVE — runtime view-flip advisory ─────────────────────────────
-        if (phase == WorkoutPhase.active && _vm.viewFlipBanner != null)
-          _InfoBanner(
-            icon: Icons.cameraswitch,
-            text: _vm.viewFlipBanner!,
-            tone: _BannerTone.amber,
-          ),
+        Selector<WorkoutViewModel, ({WorkoutPhase phase, String? banner})>(
+          selector: (_, vm) => (phase: vm.phase, banner: vm.viewFlipBanner),
+          builder: (_, s, _) =>
+              s.phase == WorkoutPhase.active && s.banner != null
+              ? _InfoBanner(
+                  icon: Icons.cameraswitch,
+                  text: s.banner!,
+                  tone: _BannerTone.amber,
+                )
+              : const SizedBox.shrink(),
+        ),
 
         // ── ACTIVE — mid-session occlusion banner ────────────────────────────
-        if (phase == WorkoutPhase.active && _vm.isOccluded) _OcclusionBanner(),
+        Selector<WorkoutViewModel, ({WorkoutPhase phase, bool occluded})>(
+          selector: (_, vm) => (phase: vm.phase, occluded: vm.isOccluded),
+          builder: (_, s, _) => s.phase == WorkoutPhase.active && s.occluded
+              ? _OcclusionBanner()
+              : const SizedBox.shrink(),
+        ),
 
         // ── Curl view indicator chip ─────────────────────────────────────────
-        if (widget.exercise.isCurl &&
-            (phase == WorkoutPhase.setupCheck ||
-                phase == WorkoutPhase.countdown) &&
-            _vm.detectedCurlView != CurlCameraView.unknown)
-          Positioned(
-            bottom: 32,
-            right: 16,
-            child: _GlassPill(
-              icon: Icons.videocam,
-              label: _viewLabel(_vm.detectedCurlView),
-              iconColor: const Color(0xFF00E676),
-            ),
-          ),
+        Selector<WorkoutViewModel, ({WorkoutPhase phase, CurlCameraView view})>(
+          selector: (_, vm) => (phase: vm.phase, view: vm.detectedCurlView),
+          builder: (_, s, _) {
+            final show =
+                widget.exercise.isCurl &&
+                (s.phase == WorkoutPhase.setupCheck ||
+                    s.phase == WorkoutPhase.countdown) &&
+                s.view != CurlCameraView.unknown;
+            return show
+                ? Positioned(
+                    bottom: 32,
+                    right: 16,
+                    child: _GlassPill(
+                      icon: Icons.videocam,
+                      label: _viewLabel(s.view),
+                      iconColor: const Color(0xFF00E676),
+                    ),
+                  )
+                : const SizedBox.shrink();
+          },
+        ),
 
         // ── ACTIVE — rep counter + bottom stats HUD ──────────────────────────
         // (Coach tips are now folded into _MinimalHud's bottom guidance row,
         // priority-gated behind form errors.)
-        if (phase == WorkoutPhase.active)
-          Positioned.fill(
-            child: Selector<WorkoutViewModel, RepSnapshot>(
-              selector: (_, vm) => vm.snapshot,
-              builder: (context, snap, _) => _MinimalHud(snapshot: snap),
-            ),
-          ),
+        Selector<WorkoutViewModel, ({WorkoutPhase phase, RepSnapshot snap})>(
+          selector: (_, vm) => (phase: vm.phase, snap: vm.snapshot),
+          builder: (_, s, _) => s.phase == WorkoutPhase.active
+              ? Positioned.fill(child: _MinimalHud(snapshot: s.snap))
+              : const SizedBox.shrink(),
+        ),
 
         // ── Floating top HUD bar (replaces AppBar) ───────────────────────────
         Selector<WorkoutViewModel, ({WorkoutPhase phase, bool needsCal})>(
@@ -664,6 +747,55 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Gate views — error / camera-starting. Extracted from the former
+// _buildBody early returns so the gate Selector (build()) rebuilds them
+// only on state change, never per frame.
+// ──────────────────────────────────────────────────────────────────────────────
+
+class _ErrorView extends StatelessWidget {
+  final String message;
+  const _ErrorView({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          message,
+          style: const TextStyle(color: Colors.redAccent, fontSize: 16),
+        ),
+      ),
+    );
+  }
+}
+
+class _StartingCameraView extends StatelessWidget {
+  const _StartingCameraView();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(color: Color(0xFF00E676)),
+          const SizedBox(height: 16),
+          Text(
+            'Starting camera...',
+            style: TextStyle(
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.70),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -934,10 +1066,15 @@ class _LivePillState extends State<_LivePill>
 // ──────────────────────────────────────────────────────────────────────────────
 
 class _SetupBanner extends StatelessWidget {
-  final WorkoutViewModel vm;
+  final int setupOkFrames;
+  final String? setupFramingHint;
   final ExerciseType exercise;
 
-  const _SetupBanner({required this.vm, required this.exercise});
+  const _SetupBanner({
+    required this.setupOkFrames,
+    required this.setupFramingHint,
+    required this.exercise,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -947,9 +1084,9 @@ class _SetupBanner extends StatelessWidget {
     // Framing hint (curl only) wins over the generic per-exercise prompt
     // when the landmarks pass confidence but the camera height/tilt is
     // off — gives the user an actionable correction.
-    final text = vm.setupOkFrames > 0
-        ? 'Almost there… (${vm.setupOkFrames} / $kSetupCheckFrames)'
-        : vm.setupFramingHint ??
+    final text = setupOkFrames > 0
+        ? 'Almost there… ($setupOkFrames / $kSetupCheckFrames)'
+        : setupFramingHint ??
               (exercise == ExerciseType.pushUp
                   ? 'Side view: keep shoulder, elbow, wrist, hip and ankle visible'
                   : exercise == ExerciseType.squat
