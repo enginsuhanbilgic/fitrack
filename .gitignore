@@ -16,6 +16,7 @@
 *.iml
 *.ipr
 *.iws
+.idea/
 
 # ─── AI Agent Tooling ────────────────────────────────────
 # Never commit AI tool internals or session state
