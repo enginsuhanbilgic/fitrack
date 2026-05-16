@@ -333,20 +333,40 @@ const double kHeadSigmaDriftCap = 2.0;
 const double kFeedbackCooldownSec = 3.0;
 
 /// Per-error voice-cue cap when [TtsVerbosity.low] is selected. After this
-/// many fires of the same error in a single session, the voice falls silent
-/// for that error — visual highlights and the session-end summary still
-/// surface every fire. Tuned to 1 (single spoken reminder per cue per
-/// session) because the "low" tier exists for users who've internalized
-/// the coaching and want a quiet workout.
+/// many fires of the same error in a single session, the voice mutes for
+/// that error — UNTIL the persistence re-arm fires it again (see
+/// [kTtsPersistenceReArmRepsLow]). Visual highlights and the session-end
+/// summary still surface every fire regardless. Tuned to 1 (single spoken
+/// reminder per cue) because the "low" tier exists for users who've
+/// internalized the coaching and want a quiet workout.
 const int kTtsVerbosityLowCap = 1;
 
 /// Per-error voice-cue cap when [TtsVerbosity.medium] is selected. After
-/// this many fires of the same error in a single session, the voice falls
-/// silent for that error — visual highlights and the session-end summary
-/// still surface every fire. Tuned to 3 (initial cue + two follow-ups)
-/// because most form errors fire 2-5 times per set, so the cap silences
-/// the *repeat* without missing the first warning. Default tier.
+/// this many fires of the same error in a single session, the voice mutes
+/// for that error — UNTIL the persistence re-arm fires it again (see
+/// [kTtsPersistenceReArmRepsMedium]). Visual highlights and the session-end
+/// summary still surface every fire regardless. Tuned to 3 (initial cue +
+/// two follow-ups) because most form errors fire 2-5 times per set, so the
+/// cap silences the *repeat* without missing the first warning. Default tier.
 const int kTtsVerbosityMediumCap = 3;
+
+/// Persistence re-arm window for [TtsVerbosity.medium]. After the per-error
+/// voice cap ([kTtsVerbosityMediumCap]) mutes a fault, if it keeps clearing
+/// the [kFeedbackCooldownSec] time-cooldown this many more times, the voice
+/// re-alerts EXACTLY ONCE, then re-mutes for another full window. Because the
+/// 3 s cooldown collapses multi-frame error spam to ≈ one fire per rep, this
+/// is effectively "re-nudge after this many more faulty reps." Mirrors the
+/// proven `kTempoConsistencyReArmReps` (5) re-arm shape. A user who fixes the
+/// fault never hears it again; a persistently-wrong user gets a periodic
+/// nudge instead of permanent silence. Audio-only — detection, highlights,
+/// `errorCounts`, and the summary are unaffected.
+const int kTtsPersistenceReArmRepsMedium = 5;
+
+/// Persistence re-arm window for [TtsVerbosity.low]. Wider than
+/// [kTtsPersistenceReArmRepsMedium] — "low" means "I've internalized the
+/// cues, keep it quiet" — but a persistently-wrong user is still re-nudged,
+/// just less often. Same mechanism as the medium window.
+const int kTtsPersistenceReArmRepsLow = 8;
 
 // ── 1€ Filter defaults ──────────────────────────────────
 /// Paper defaults (Casiez et al., CHI 2012). Kept as the base for any
@@ -443,8 +463,27 @@ const double kSetupTorsoTiltMaxDeg = 25.0;
 /// IDLE → DESCENDING when knee angle drops below this.
 const double kSquatStartAngle = 160.0;
 
-/// DESCENDING → BOTTOM when knee angle drops below this.
-const double kSquatBottomAngle = 90.0;
+/// DESCENDING → BOTTOM when knee angle drops below this — the squat depth
+/// gate. A rep that never crosses this angle fires `FormError.squatDepth`
+/// and is vetoed by the half-squat guard (not counted).
+///
+/// 2026-05-16: tightened 90° → 80° (parallel → clearly below parallel).
+/// At 90° the counter committed reps at parallel-depth, which the user
+/// reported as "counting earlier than it should" — their target depth is
+/// below parallel. 80° demands a visibly below-parallel squat.
+///
+/// **PROVISIONAL — telemetry-derivation pending.** This is an interim
+/// value chosen so clean-rep telemetry collection isn't polluted by
+/// parallel-only reps. The empirical retune comes from the `squat.rep`
+/// `min_knee=` distribution of labeled clean reps via the standard
+/// derive-from-telemetry workflow (curl-peak lesson: derive, don't guess).
+/// Do NOT treat 80° as final.
+///
+/// NOTE: the long-femur auto-relax detection band is deliberately NOT
+/// coupled to this constant — it uses [kSquatLongFemurDetectFloorAngle]
+/// (pinned at anatomical 90°) so tightening the depth gate does not
+/// silently widen long-femur detection.
+const double kSquatBottomAngle = 80.0;
 
 /// ASCENDING → IDLE when knee angle returns above this → rep++.
 const double kSquatEndAngle = 160.0;
@@ -596,6 +635,36 @@ const double kSquatLeanWarnDegHBBS = 35.0;
 /// detection (which relaxes the BOTTOM angle, not the lean threshold).
 const double kSquatLongFemurLeanBoost = 5.0;
 
+// ── Sustained forward-lean gate (2026-05-16) ─────────────
+/// Fraction of a rep's *evaluated* frames whose signed lean must exceed the
+/// active forward-lean threshold before `FormError.excessiveForwardLean`
+/// fires at rep commit. Replaces the pre-2026-05-16 single-frame trigger
+/// that false-fired on a momentary dip at the deepest point of an
+/// otherwise-good rep.
+///
+/// Rationale for the rep-boundary move: forward lean at the very bottom of
+/// a squat is transiently normal (the trunk pitches forward to keep the
+/// bar over mid-foot, then recovers on the ascent). A single noisy frame
+/// crossing 30°/35° is NOT a form fault; a *sustained* lean across a
+/// meaningful share of the rep is. Backward lean keeps its instantaneous
+/// fire — lumbar hyperextension is a genuine single-frame injury vector.
+///
+/// PRELIMINARY — telemetry-derivation pending. 0.35 is an engineering
+/// starting point: a clean rep momentarily clips threshold for ~2-3 of
+/// ~20 evaluated frames (~0.10-0.15); a genuine deep-lean fault holds it
+/// for the bulk of the descent + bottom (≫ 0.35). The numeric retune
+/// happens via the `squat.rep lean_exceed_frac` channel once real sessions
+/// are collected with this logic shipping (curl-peak lesson: don't guess
+/// thresholds — derive them).
+const double kSquatLeanSustainedFraction = 0.35;
+
+/// Minimum evaluated-frame count before the sustained-lean fraction is
+/// trusted. Below this floor the verdict fails OPEN (no fault emitted) —
+/// a 2-frame rep can't carry enough signal to grade. Mirrors the
+/// fail-open semantics of `kSquatHipsForwardMinFrames` /
+/// `kHipLeadMinAscendingFrames`.
+const int kSquatLeanMinEvalFrames = 6;
+
 /// Minimum dwell time in the BOTTOM state (milliseconds) before
 /// BOTTOM → ASCENDING can fire. Added 2026-05-15.
 ///
@@ -721,6 +790,48 @@ const double kSquatHipsForwardMinRatio = 0.05;
 /// dominated by pose-detector noise. Mirrors `kHipLeadMinAscendingFrames`.
 const int kSquatHipsForwardMinFrames = 3;
 
+// ── Knee-led-descent detector (2026-05-16) ───────────────
+/// Early-descent dominance threshold: `|Δknee.x| / Δhip.y_down`
+/// (leg-length-normalized) measured over the SAME window as the
+/// hips-forward sampler ([kSquatHipsForwardWindowMs] — deliberately reused,
+/// no second timer). A correct squat sits the hips back: the hip drops far
+/// (large Δy) while the knee barely translates (small Δx), so the ratio is
+/// well below 1.0. A knee-dominant initiation darts the knee forward with
+/// little hip drop, pushing the ratio above this threshold. This is the
+/// industry-standard "sit back into the squat" rule (NSCA/ACSM movement
+/// screening) — NOT the retired "knees must not pass toes" myth.
+///
+/// PRELIMINARY — telemetry-derivation pending. 1.2 means horizontal knee
+/// travel exceeded vertical hip drop by 20% in the first ~200 ms. A clean
+/// hip-hinge sits well under 1.0 (hip drop dominates); a quad-dominant
+/// knee-slide commonly clears 1.2 before the hip meaningfully descends.
+/// The numeric retune happens via the `squat.knee_led ratio=` channel once
+/// real sessions ship with this logic (curl-peak lesson: derive, don't
+/// guess).
+const double kSquatKneeLedMinRatio = 1.2;
+
+/// Minimum raw frame count inside the shared window before the knee-led
+/// check grades. Fail-open below this count. Reuses the hips-forward
+/// floor's value semantics — both detectors share the window, so they
+/// share the noise-floor frame count too. Kept as its own named constant
+/// (rather than referencing `kSquatHipsForwardMinFrames` directly) so a
+/// future telemetry retune can move them independently.
+const int kSquatKneeLedMinFrames = 3;
+
+/// Minimum leg-length-normalized hip-drop over the early-descent window
+/// for the knee-led ratio to be DEFINED. The ratio is `knee-X-travel /
+/// hip-drop`; with a near-zero denominator it is meaningless. Added
+/// 2026-05-16 after a pre-flight session logged `knee_led ratio=5814`
+/// (the old `math.max(1e-6, …)` clamp divided by epsilon instead of
+/// guarding). Below this fraction the hip simply hasn't descended enough
+/// in the window to compare against — the detector emits a null ratio and
+/// does not fire (fail-open; the shallow rep is `squatDepth`'s concern).
+///
+/// PRELIMINARY — telemetry-derivation pending. 0.03 of leg length ≈ a few
+/// cm of vertical hip travel: above pose-jitter, below the drop of any
+/// genuine descent that has progressed far enough to be gradable.
+const double kSquatKneeLedMinHipDropNorm = 0.03;
+
 // ── Push-up form thresholds ──────────────────────────────
 /// Max shoulder-hip-ankle collinearity deviation for hip sag (degrees).
 const double kHipSagDeviation = 15.0;
@@ -748,6 +859,20 @@ const int kOcclusionResumeFrames = 5;
 // ── Long-femur squat adaptation ──────────────────────────
 /// Fallback BOTTOM angle for users whose anatomy prevents reaching 90°.
 const double kLongFemurBottomAngle = 100.0;
+
+/// Lower bound of the rep-history long-femur detection band — anatomical,
+/// pinned at 90° (parallel). The `_maybeUpdateLongFemur` heuristic relaxes
+/// the depth gate only when the user consistently bottoms in
+/// `(kSquatLongFemurDetectFloorAngle, kLongFemurBottomAngle]` =
+/// `(90°, 100°]`, i.e. they can't reach parallel.
+///
+/// Deliberately a SEPARATE constant from [kSquatBottomAngle] (2026-05-16):
+/// the depth gate was tightened to 80° (below-parallel target), but the
+/// long-femur band must stay anchored to the anatomical 90° parallel
+/// reference — otherwise tightening the depth gate would silently widen
+/// long-femur detection to `(80°, 100°]`, making the auto-relax fire on
+/// users who simply aren't squatting deep enough yet.
+const double kSquatLongFemurDetectFloorAngle = 90.0;
 
 /// Number of completed reps used to detect long-femur pattern.
 const int kLongFemurDetectReps = 3;
@@ -823,6 +948,75 @@ const int kFatigueWindowSize = 3;
 /// Ratio threshold: if lastAvg / firstAvg > this, user is fatiguing.
 const double kFatigueSlowdownRatio = 1.4;
 
+// ── Squat Tempo Tracking (PRELIMINARY 2026-05-16 — telemetry-tunable) ──
+// Squat is a slower compound movement than a curl, so the speed floors are
+// higher than the curl equivalents (0.8/0.3). DESCENDING = eccentric
+// (lowering), ASCENDING = concentric (lifting) — NSCA convention. Values
+// are conservative first-pass estimates; refine from `squat.rep` telemetry.
+/// Minimum descent (eccentric) duration in seconds — below fires
+/// `squatEccentricTooFast`.
+const double kSquatMinEccentricSec = 0.6;
+
+/// Minimum ascent (concentric/lift) duration in seconds — below fires
+/// `squatConcentricTooFast`. Closer to the eccentric floor than in a curl: a
+/// squat ascent is a controlled grind, not an explosive curl.
+const double kSquatMinConcentricSec = 0.5;
+
+/// `(max − min) / mean` of the last N ascent durations above this fires
+/// `squatTempoInconsistent`. Same ratio as curl — the fatigue signature
+/// ("two controlled reps then a rushed one") is movement-agnostic.
+const double kSquatTempoInconsistencyRatio = 0.30;
+
+/// Sliding-window size for squat tempo-consistency evaluation.
+const int kSquatTempoConsistencyWindow = 3;
+
+/// After firing `squatTempoInconsistent`, suppress re-emission for this many
+/// reps (recoverable drift, not a permanent one-shot — mirrors curl).
+const int kSquatTempoConsistencyReArmReps = 5;
+
+/// Minimum reps before squat fatigue comparison is possible (first N vs last N).
+const int kSquatFatigueMinReps = 6;
+
+/// Reps to average at start and end for the squat fatigue comparison.
+const int kSquatFatigueWindowSize = 3;
+
+/// Ratio threshold: if lastAvg / max(firstAvg, historicalMedian) > this, the
+/// user is fatiguing on squat ascents.
+const double kSquatFatigueSlowdownRatio = 1.4;
+
+// ── Push-up Tempo Tracking (PRELIMINARY 2026-05-16 — telemetry-tunable) ──
+// Push-up is faster than a squat but slower than a curl. DESCENDING =
+// eccentric (lowering), ASCENDING = concentric (press). Conservative
+// first-pass values; refine from `pushup.rep` telemetry.
+/// Minimum descent (eccentric) duration in seconds — below fires
+/// `pushUpEccentricTooFast`.
+const double kPushUpMinEccentricSec = 0.5;
+
+/// Minimum ascent (concentric/press) duration in seconds — below fires
+/// `pushUpConcentricTooFast`.
+const double kPushUpMinConcentricSec = 0.4;
+
+/// `(max − min) / mean` of the last N ascent durations above this fires
+/// `pushUpTempoInconsistent`.
+const double kPushUpTempoInconsistencyRatio = 0.30;
+
+/// Sliding-window size for push-up tempo-consistency evaluation.
+const int kPushUpTempoConsistencyWindow = 3;
+
+/// After firing `pushUpTempoInconsistent`, suppress re-emission for this many
+/// reps (recoverable drift — mirrors curl).
+const int kPushUpTempoConsistencyReArmReps = 5;
+
+/// Minimum reps before push-up fatigue comparison is possible.
+const int kPushUpFatigueMinReps = 6;
+
+/// Reps to average at start and end for the push-up fatigue comparison.
+const int kPushUpFatigueWindowSize = 3;
+
+/// Ratio threshold: if lastAvg / max(firstAvg, historicalMedian) > this, the
+/// user is fatiguing on push-up ascents.
+const double kPushUpFatigueSlowdownRatio = 1.4;
+
 // ── Curl Per-Rep Quality Score ───────────────────────────
 /// Maximum deduction for torso swing (proportional to magnitude).
 const double kQualitySwingMaxDeduction = 0.25;
@@ -851,10 +1045,11 @@ const double kQualityTempoInconsistencyDeduction = 0.10;
 /// Deduction for short ROM (applied to both `shortRomStart` and `shortRomPeak`).
 const double kQualityShortRomDeduction = 0.30;
 
-/// Tolerance for start/peak short-ROM classification. Smaller than the
-/// profile's `kProfilePeakTolerance` (15°) — we only flag clear shortfalls,
-/// not borderline-OK reps. 5° sits above the ~2–3° pose-estimation noise
-/// floor and well below a meaningful ROM restriction.
+/// Tolerance for start/peak short-ROM classification. Now equal to the
+/// profile's `kProfilePeakTolerance` (7.5°) after the 2026-05-16 halving —
+/// we only flag clear shortfalls, not borderline-OK reps. 5° sits above the
+/// ~2–3° pose-estimation noise floor and well below a meaningful ROM
+/// restriction.
 ///
 /// Applied asymmetrically against the FSM's active `RomThresholds`:
 /// - `shortRomStart` fires when `maxAngleAtStart < startAngle − kShortRomTolerance`
@@ -897,13 +1092,18 @@ const int kViewDetectionConsensusFrames = 10;
 
 // ── Per-User ROM Profile (Biceps Curl) ───────────────────
 /// Tolerance below the bucket's observed peak before the FSM accepts a peak.
-const double kProfilePeakTolerance = 15.0;
+/// Halved 2026-05-16 (was 15.0) — gates hug demonstrated ROM more tightly for
+/// both manual calibration (`RomThresholds.fromBucket`) and auto-cal
+/// (`RomThresholds.autoCalibrated`); they share `_build`.
+const double kProfilePeakTolerance = 7.5;
 
 /// Tolerance below the bucket's observed rest before the FSM enters CONCENTRIC.
-const double kProfileStartTolerance = 10.0;
+/// Halved 2026-05-16 (was 10.0) — see [kProfilePeakTolerance].
+const double kProfileStartTolerance = 5.0;
 
 /// Tolerance applied to ECCENTRIC → IDLE transition (rep++).
-const double kProfileEndTolerance = 25.0;
+/// Halved 2026-05-16 (was 25.0) — see [kProfilePeakTolerance].
+const double kProfileEndTolerance = 12.5;
 
 /// Hysteresis gap between peakAngle and peakExitAngle (peakExit = peak + this).
 const double kCurlPeakExitGap = 15.0;

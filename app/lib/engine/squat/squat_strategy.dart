@@ -76,6 +76,7 @@ class SquatStrategy extends ExerciseStrategy {
     SquatRepExtremesCallback? onRepExtremes,
     SquatLongFemurDetectedCallback? onLongFemurDetected,
     double? persistedFemurTorsoRatio,
+    List<Duration> historicalConcentricDurations = const [],
   }) : _romThresholds = romThresholds,
        _thresholdsProvider = thresholdsProvider,
        _onRepExtremes = onRepExtremes,
@@ -85,6 +86,7 @@ class SquatStrategy extends ExerciseStrategy {
          variant: variant,
          longFemurLifter: longFemurLifter,
          formThresholds: formThresholds,
+         historicalConcentricDurations: historicalConcentricDurations,
        ) {
     // Returning user with a stored ratio: seed the classifier so we don't
     // wait 5 high-confidence frames before adapting. The strategy still
@@ -179,6 +181,12 @@ class SquatStrategy extends ExerciseStrategy {
   /// first rep commits in the current session.
   double? get lastRepQuality => _form.lastRepQuality;
 
+  /// Ascent (concentric/lift) duration of the most recently committed
+  /// rep. Null on a rep with no measured ascent. Pass-through to the
+  /// analyzer — consumed by the host's `_handleSquatRepCommit` for
+  /// `concentric_ms` persistence + the cross-session fatigue baseline.
+  Duration? get lastConcentricDuration => _form.lastConcentricDuration;
+
   /// Most recent peak forward-lean (deg). Null until first commit.
   double? get lastRepLeanDeg => _form.lastRepLeanDeg;
 
@@ -188,15 +196,41 @@ class SquatStrategy extends ExerciseStrategy {
   /// Most recent peak heel-lift ratio. Null until first commit.
   double? get lastRepHeelLiftRatio => _form.lastRepHeelLiftRatio;
 
+  /// Fraction of the most recent rep's evaluated frames whose forward lean
+  /// exceeded the active threshold. Null until first commit OR when the rep
+  /// had no evaluable lean frames. The host reads this for the `squat.rep`
+  /// `lean_exceed_frac` telemetry field.
+  double? get lastRepLeanExceedFrac => _form.lastRepLeanExceedFrac;
+
+  /// Signed lean at the |lean| peak of the most recent rep (forward = +,
+  /// backward = −). Bug-4 sign-convention diagnostic. The host reads this
+  /// for the `squat.rep` `signed_lean=` field.
+  double? get lastRepSignedLeanAtPeak => _form.lastRepSignedLeanAtPeak;
+
+  /// Frames in the most recent rep that fired `excessiveBackwardLean`.
+  /// The host reads this for the `squat.rep` `backward_lean_frames=` field.
+  int get lastRepBackwardLeanFrameCount => _form.lastRepBackwardLeanFrameCount;
+
   /// Most recent hip-lead ratio (mean v_y_hip / mean v_y_shoulder over the
   /// first 30% of ASCENDING). Null until the hip-lead check has run AND
   /// the window contained ≥ 4 valid velocity pairs. The host reads this
   /// for the `squat.hip_lead` telemetry line at rep commit.
   double? get lastRepHipLeadRatio => _form.lastRepHipLeadRatio;
 
+  /// Most recent knee-led-descent ratio (`|Δknee.x| / Δhip.y_down`,
+  /// leg-length-normalized, over the shared early-descent window). Null
+  /// between rep commit and the next window close. The host reads this for
+  /// the `squat.knee_led` telemetry line at rep commit.
+  double? get lastRepKneeLedRatio => _form.lastRepKneeLedRatio;
+
   /// Frames accumulated during the most recent ASCENDING window — the
   /// `ascending_frame_count` field of the `squat.hip_lead` telemetry line.
   int get ascendingFrameCount => _form.ascendingFrameCount;
+
+  /// Frames sampled inside the most recent early-descent window for the
+  /// knee-led check — the `window_frames` field of the `squat.knee_led`
+  /// telemetry line.
+  int get kneeLedSampleCount => _form.kneeLedSampleCount;
 
   /// Live signed forward-lean angle (deg) from the most recent frame.
   /// Positive = forward; negative = backward; null when the analyzer
@@ -305,6 +339,8 @@ class SquatStrategy extends ExerciseStrategy {
           // the standing pause. No capture needed here.
           nextState = RepState.descending;
           _form.onRepStart(pose);
+          // Eccentric (descent) phase clock starts here.
+          _form.stampDescentStart(input.now);
         }
       case RepState.descending:
         if (smoothed < _effectiveBottomAngle) {
@@ -335,6 +371,9 @@ class SquatStrategy extends ExerciseStrategy {
           // Arm the analyzer's per-frame hip+shoulder Y accumulator —
           // hip-lead is evaluated over the first 30% of ASCENDING.
           _form.onAscendingStart();
+          // Concentric (ascent) phase clock starts; closes the eccentric
+          // timer inside the analyzer.
+          _form.stampAscentStart(input.now);
           nextState = RepState.ascending;
         }
       case RepState.ascending:
@@ -345,6 +384,11 @@ class SquatStrategy extends ExerciseStrategy {
           // returned set. Calling it after the consume would drop the
           // error entirely.
           _form.onAscendingEnd();
+          // Close the concentric timer BEFORE consuming completion errors
+          // so the squat tempo/fatigue signals see this rep's final
+          // ascent duration. (Does NOT yet append to the rolling window —
+          // that waits for the half-squat veto verdict below.)
+          _form.stampAscentEnd(input.now);
           final completionErrors = _form.consumeCompletionErrorsWithDepth(
             _effectiveBottomAngle,
           );
@@ -361,6 +405,14 @@ class SquatStrategy extends ExerciseStrategy {
           // so the user can re-attempt without a stale ASCENDING state.
           final missedDepth = completionErrors.contains(FormError.squatDepth);
           repCommitted = !missedDepth;
+          // Only a COMMITTED rep feeds the tempo-consistency / fatigue
+          // rolling window. A vetoed half-squat already emitted its
+          // per-rep too-fast cue (feedback) above, but its abnormal
+          // ascent duration must not skew the window — see
+          // SquatFormAnalyzer.commitAscentToWindow doc.
+          if (repCommitted) {
+            _form.commitAscentToWindow();
+          }
           nextState = RepState.idle;
           _resetPerRepState();
         }
@@ -444,8 +496,16 @@ class SquatStrategy extends ExerciseStrategy {
   }
 
   /// Long-femur adaptation: if the user consistently bottoms between
-  /// [kSquatBottomAngle] and [kLongFemurBottomAngle] for
-  /// [kLongFemurDetectReps] consecutive reps, relax the bottom threshold.
+  /// [kSquatLongFemurDetectFloorAngle] (anatomical 90° parallel) and
+  /// [kLongFemurBottomAngle] for [kLongFemurDetectReps] consecutive reps,
+  /// relax the bottom threshold.
+  ///
+  /// The lower bound is [kSquatLongFemurDetectFloorAngle] (pinned 90°), NOT
+  /// [kSquatBottomAngle] (the depth gate, tightened to 80° on 2026-05-16).
+  /// Anchoring here keeps long-femur detection tied to the anatomical
+  /// parallel reference — a user squatting at 82-88° is "not deep enough
+  /// yet," not "anatomically long-femured," and must not auto-relax the
+  /// gate out from under themselves.
   void _maybeUpdateLongFemur() {
     if (_longFemurDetected) return;
     if (_minAngleThisRep == null) return;
@@ -453,11 +513,13 @@ class SquatStrategy extends ExerciseStrategy {
     _repMinAngles.add(_minAngleThisRep!);
     if (_repMinAngles.length < kLongFemurDetectReps) return;
 
-    final allAbove90 = _repMinAngles.every((a) => a > kSquatBottomAngle);
+    final allAboveParallel = _repMinAngles.every(
+      (a) => a > kSquatLongFemurDetectFloorAngle,
+    );
     final allReached100 = _repMinAngles.every(
       (a) => a <= kLongFemurBottomAngle,
     );
-    if (allAbove90 && allReached100) {
+    if (allAboveParallel && allReached100) {
       _longFemurDetected = true;
       _effectiveBottomAngle = kLongFemurBottomAngle;
       // Log only in checked builds — keeps squat_strategy.dart pure-Dart

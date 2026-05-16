@@ -6,14 +6,19 @@
 ///   - Session-scoped adaptation lifecycle: [onNextSet] preserves session
 ///     state, [onReset] clears it.
 ///
-/// NOTE: The current long-femur detector in `SquatStrategy` gates on
-/// `_repMinAngles.every((a) => a > kSquatBottomAngle)` AND requires the rep
-/// to commit, which requires reaching BOTTOM (smoothed < 90°). These two
-/// predicates are mutually exclusive under the default threshold — detection
-/// only fires if a future change relaxes the BOTTOM gate. Tests here verify
-/// the lifecycle (survive nextSet, clear on reset) by driving
-/// [effectiveBottomAngle] through the legitimate production path, not
-/// through a synthetic hack.
+/// NOTE: The rep-history long-femur detector in `SquatStrategy` gates on
+/// `_repMinAngles.every((a) => a > kSquatLongFemurDetectFloorAngle)` (90°)
+/// AND `every((a) => a <= kLongFemurBottomAngle)` (85° as of 2026-05-16).
+/// That band `(90°, 85°]` is empty by construction, so the rep-history
+/// path is inert — the ratio-based `_maybeApplyAnatomicalLongFemur`
+/// (femur/torso > `kLongFemurRatioThreshold`) is the live path. Tests in
+/// the "anatomical long-femur classifier" group exercise the ratio path;
+/// the lifecycle tests here drive [effectiveBottomAngle] via the
+/// persisted-ratio seed, the legitimate production path.
+///
+/// DEPTH GATE: `kSquatBottomAngle` was tightened 90° → 80° on 2026-05-16
+/// (below-parallel target). `driveRep` / direct-tick fixtures that mean
+/// "a deep rep that commits" pass a `minAngle` clearly below 80°.
 library;
 
 import 'package:fitrack/core/constants.dart';
@@ -53,12 +58,17 @@ StrategyFrameOutput tickAt({
   required RepState state,
   required double angle,
   required double hipY,
+  DateTime? now,
 }) {
   return strategy.tick(
     StrategyFrameInput(
       pose: buildPoseWithHipY(hipY),
       smoothedAngle: angle,
-      now: DateTime.now(),
+      // Explicit `now` lets `driveRep` simulate the ≥ kSquatBottomDwellMs
+      // (200ms) BOTTOM dwell required by the BOTTOM→ASCENDING gate (added
+      // 2026-05-15). Defaults to wall-clock for the many single-tick call
+      // sites that don't exercise the dwell.
+      now: now ?? DateTime.now(),
       state: state,
       repIndexInSet: 0,
     ),
@@ -73,21 +83,34 @@ StrategyFrameOutput driveRep({
   required SquatStrategy strategy,
   required double minAngle,
 }) {
+  // Advancing clock — the BOTTOM→ASCENDING gate requires the FSM to dwell
+  // ≥ kSquatBottomDwellMs (200ms) in BOTTOM (added 2026-05-15). Without an
+  // advancing `now`, every tick shares wall-clock and the dwell never
+  // clears, so the rep would stick in BOTTOM forever.
+  var clock = DateTime(2026, 5, 16, 12);
+  DateTime tick() {
+    clock = clock.add(const Duration(milliseconds: 120));
+    return clock;
+  }
+
   // IDLE → DESCENDING (angle < kSquatStartAngle = 160).
   var out = tickAt(
     strategy: strategy,
     state: RepState.idle,
     angle: 150,
     hipY: 0.50,
+    now: tick(),
   );
   expect(out.nextState, RepState.descending);
 
-  // DESCENDING → BOTTOM (angle < effectiveBottomAngle, default 90).
+  // DESCENDING → BOTTOM (angle < effectiveBottomAngle, default
+  // kSquatBottomAngle = 80° as of 2026-05-16).
   out = tickAt(
     strategy: strategy,
     state: RepState.descending,
     angle: minAngle,
     hipY: 0.60,
+    now: tick(),
   );
   expect(
     out.nextState,
@@ -97,19 +120,24 @@ StrategyFrameOutput driveRep({
         '${strategy.effectiveBottomAngle}',
   );
 
-  // Establish a previous hipY so the next frame can detect rise.
+  // Establish a previous hipY so the next frame can detect rise. Two
+  // BOTTOM ticks at 120ms each ⇒ ≥ 240ms total dwell, clearing the 200ms
+  // kSquatBottomDwellMs gate before the rise frame.
   tickAt(
     strategy: strategy,
     state: RepState.bottom,
     angle: minAngle,
     hipY: 0.60,
+    now: tick(),
   );
-  // BOTTOM → ASCENDING: hip rises (Y decreases in screen coords).
+  // BOTTOM → ASCENDING: hip rises (Y decreases in screen coords) AND the
+  // dwell has elapsed.
   out = tickAt(
     strategy: strategy,
     state: RepState.bottom,
     angle: minAngle + 5,
     hipY: 0.55,
+    now: tick(),
   );
   expect(out.nextState, RepState.ascending);
 
@@ -119,6 +147,7 @@ StrategyFrameOutput driveRep({
     state: RepState.ascending,
     angle: 165,
     hipY: 0.50,
+    now: tick(),
   );
   expect(out.nextState, RepState.idle);
   expect(out.repCommitted, isTrue);
@@ -129,7 +158,7 @@ void main() {
   group('SquatStrategy — FSM transitions', () {
     test('full rep cycle commits exactly once', () {
       final strategy = SquatStrategy();
-      final out = driveRep(strategy: strategy, minAngle: 85);
+      final out = driveRep(strategy: strategy, minAngle: 70);
       expect(out.repCommitted, isTrue);
     });
 
@@ -186,12 +215,12 @@ void main() {
     test('bottom phase waits for hip to rise before flipping to ascending', () {
       final strategy = SquatStrategy();
 
-      // IDLE → DESCENDING → BOTTOM.
+      // IDLE → DESCENDING → BOTTOM (70° clears the 80° gate).
       tickAt(strategy: strategy, state: RepState.idle, angle: 150, hipY: 0.50);
       var out = tickAt(
         strategy: strategy,
         state: RepState.descending,
-        angle: 85,
+        angle: 70,
         hipY: 0.60,
       );
       expect(out.nextState, RepState.bottom);
@@ -200,7 +229,7 @@ void main() {
       out = tickAt(
         strategy: strategy,
         state: RepState.bottom,
-        angle: 85,
+        angle: 70,
         hipY: 0.60,
       );
       expect(out.nextState, RepState.bottom);
@@ -209,7 +238,7 @@ void main() {
       out = tickAt(
         strategy: strategy,
         state: RepState.bottom,
-        angle: 85,
+        angle: 70,
         hipY: 0.62,
       );
       expect(out.nextState, RepState.bottom);
@@ -226,7 +255,7 @@ void main() {
       final strategy = SquatStrategy();
       // Drive 5 deep reps — min angle well below kSquatBottomAngle.
       for (var i = 0; i < 5; i++) {
-        driveRep(strategy: strategy, minAngle: 80);
+        driveRep(strategy: strategy, minAngle: 70);
       }
       expect(
         strategy.effectiveBottomAngle,
@@ -252,7 +281,7 @@ void main() {
 
       // After onNextSet, the next rep must start cleanly (no stale hipY
       // causing a spurious BOTTOM→ASCENDING flip). Drive a full rep end-to-end.
-      final out = driveRep(strategy: strategy, minAngle: 82);
+      final out = driveRep(strategy: strategy, minAngle: 70);
       expect(out.repCommitted, isTrue);
       expect(
         strategy.effectiveBottomAngle,
@@ -265,8 +294,8 @@ void main() {
       final strategy = SquatStrategy();
 
       // Drive two reps to populate internal state.
-      driveRep(strategy: strategy, minAngle: 80);
-      driveRep(strategy: strategy, minAngle: 85);
+      driveRep(strategy: strategy, minAngle: 70);
+      driveRep(strategy: strategy, minAngle: 70);
 
       strategy.onReset();
 
@@ -274,35 +303,44 @@ void main() {
       expect(strategy.effectiveBottomAngle, kSquatBottomAngle);
 
       // A fresh rep still commits.
-      final out = driveRep(strategy: strategy, minAngle: 82);
+      final out = driveRep(strategy: strategy, minAngle: 70);
       expect(out.repCommitted, isTrue);
     });
   });
 
   group('SquatStrategy — variant + tall-lifter constructor params', () {
-    test('default variant is bodyweight, lean threshold = 45°', () {
+    // These assert against the constants, NOT literals. The lean
+    // thresholds were retuned 45°→30° / 50°→35° on 2026-05-15; pinning to
+    // `kSquatLeanWarnDeg*` keeps the *relationship* contract (variant +
+    // boost composition) verified without re-drifting on every retune.
+    test('default variant is bodyweight, lean threshold = '
+        'kSquatLeanWarnDegBodyweight', () {
       final s = SquatStrategy();
       expect(s.variant, SquatVariant.bodyweight);
       expect(s.longFemurLifter, isFalse);
-      expect(s.leanWarnDeg, 45.0);
+      expect(s.leanWarnDeg, kSquatLeanWarnDegBodyweight);
     });
 
-    test('HBBS variant raises lean threshold to 50°', () {
+    test('HBBS variant raises lean threshold to kSquatLeanWarnDegHBBS', () {
       final s = SquatStrategy(variant: SquatVariant.highBarBackSquat);
-      expect(s.leanWarnDeg, 50.0);
+      expect(s.leanWarnDeg, kSquatLeanWarnDegHBBS);
     });
 
-    test('tall-lifter toggle adds +5° to bodyweight threshold (50°)', () {
+    test('tall-lifter toggle adds the long-femur boost to the bodyweight '
+        'threshold', () {
       final s = SquatStrategy(longFemurLifter: true);
-      expect(s.leanWarnDeg, 50.0);
+      expect(
+        s.leanWarnDeg,
+        kSquatLeanWarnDegBodyweight + kSquatLongFemurLeanBoost,
+      );
     });
 
-    test('tall-lifter + HBBS combine to 55° (variant + boost)', () {
+    test('tall-lifter + HBBS compose (variant base + boost)', () {
       final s = SquatStrategy(
         variant: SquatVariant.highBarBackSquat,
         longFemurLifter: true,
       );
-      expect(s.leanWarnDeg, 55.0);
+      expect(s.leanWarnDeg, kSquatLeanWarnDegHBBS + kSquatLongFemurLeanBoost);
     });
   });
 
@@ -323,15 +361,16 @@ void main() {
     test(
       'auto-detected long-femur does NOT widen lean threshold (only widens BOTTOM)',
       () {
-        // Toggle OFF — even after auto-detection, lean threshold stays at 45°
-        // (orthogonality: auto-detect targets BOTTOM, toggle targets lean).
+        // Toggle OFF — even after auto-detection, lean threshold stays at
+        // the bodyweight base (orthogonality: auto-detect targets BOTTOM,
+        // toggle targets lean).
         final s = SquatStrategy();
-        expect(s.leanWarnDeg, 45.0);
-        // We can't easily trigger auto-detection in this test (the FSM gates
-        // on `every (a) => a > 90` AND `every (a) => a <= 100`, mutually
-        // exclusive under default thresholds). Assertion is on the static
-        // contract: the analyzer's lean threshold is captured at
-        // construction and never updated by the strategy's auto-flag.
+        expect(s.leanWarnDeg, kSquatLeanWarnDegBodyweight);
+        // Auto-detection can't be triggered here: the rep-history band
+        // `(kSquatLongFemurDetectFloorAngle, kLongFemurBottomAngle]` =
+        // `(90°, 85°]` is empty by construction (2026-05-16). Assertion is
+        // on the static contract: the analyzer's lean threshold is captured
+        // at construction and never updated by the strategy's auto-flag.
       },
     );
   });
@@ -344,7 +383,7 @@ void main() {
 
     test('lastRepQuality is set after a rep commits', () {
       final s = SquatStrategy();
-      driveRep(strategy: s, minAngle: 80);
+      driveRep(strategy: s, minAngle: 70);
       expect(s.lastRepQuality, isNotNull);
       expect(s.lastRepQuality! >= 0.0, isTrue);
       expect(s.lastRepQuality! <= 1.0, isTrue);
@@ -356,23 +395,26 @@ void main() {
       'default (Medium) strategy uses defaults: starts at <160, commits >=160',
       () {
         // Regression guard: the default constructor must continue to drive
-        // an unchanged Medium-sensitivity FSM. A rep that bottoms at 80° (well
-        // below the Medium 90° gate) commits cleanly through driveRep, which
-        // pins each transition against the literal default thresholds.
+        // an unchanged Medium-sensitivity FSM. A rep that bottoms at 70°
+        // (clearly below the 80° depth gate, post-2026-05-16) commits
+        // cleanly through driveRep, which pins each transition against the
+        // default thresholds.
         final s = SquatStrategy();
-        final out = driveRep(strategy: s, minAngle: 80);
+        final out = driveRep(strategy: s, minAngle: 70);
         expect(out.repCommitted, isTrue);
       },
     );
 
-    test('Medium strategy enters BOTTOM at 89° (below default 90° gate)', () {
+    test('Medium strategy enters BOTTOM at 79° (below the 80° depth gate)', () {
       final s = SquatStrategy();
-      // Walk IDLE → DESCENDING → BOTTOM with minAngle = 89°.
+      // Walk IDLE → DESCENDING → BOTTOM with minAngle = 79° (just below the
+      // 2026-05-16 tightened 80° gate — proves the gate moved with the
+      // constant, not a hardcoded 90°).
       tickAt(strategy: s, state: RepState.idle, angle: 150, hipY: 0.50);
       final out = tickAt(
         strategy: s,
         state: RepState.descending,
-        angle: 89,
+        angle: 79,
         hipY: 0.60,
       );
       expect(out.nextState, RepState.bottom);
@@ -398,24 +440,37 @@ void main() {
       },
     );
 
-    test('Medium idle→descending gate stays at 160° (regression guard)', () {
-      // The Medium START gate is 160°. An angle at 161° must NOT enter
-      // DESCENDING (because 161 > 160). This is the regression mirror to
-      // the High test above — confirms the gate moved only under High.
-      // Post-2026-05-14: SquatRomDefaults.defaults aliases the High anchor,
-      // so to test Medium behavior we must apply the sensitivity post-pass
-      // explicitly rather than relying on the no-arg constructor default.
+    test('Medium idle→descending gate is the derived Medium startAngle, '
+        'NOT the looser High value (regression guard)', () {
+      // The Medium START gate is `anchor.startAngle + dStart` (the
+      // sensitivity post-pass), NOT a hardcoded literal — the old "160°"
+      // expectation predates the anchor+delta model and was stale drift.
+      // Derive the boundary from the tuple so this never re-drifts on an
+      // anchor retune: an angle JUST ABOVE the Medium start must stay IDLE
+      // (gate not crossed); JUST BELOW must enter DESCENDING.
       final mediumTuple = SquatRomThresholdSet.anchor.applySensitivity(
         FeedbackSensitivity.medium,
       );
       final s = SquatStrategy(romThresholds: mediumTuple);
-      final out = tickAt(
+
+      // Just ABOVE the Medium gate → must NOT enter DESCENDING.
+      final above = tickAt(
         strategy: s,
         state: RepState.idle,
-        angle: 161,
+        angle: mediumTuple.startAngle + 1.0,
         hipY: 0.50,
       );
-      expect(out.nextState, RepState.idle);
+      expect(above.nextState, RepState.idle);
+
+      // Just BELOW the Medium gate → must enter DESCENDING (proves the
+      // gate is wired to the tuple's startAngle, not a stale constant).
+      final below = tickAt(
+        strategy: SquatStrategy(romThresholds: mediumTuple),
+        state: RepState.idle,
+        angle: mediumTuple.startAngle - 1.0,
+        hipY: 0.50,
+      );
+      expect(below.nextState, RepState.descending);
     });
 
     test('High strategy ascending→idle gate is 163° '
@@ -430,11 +485,13 @@ void main() {
       final s = SquatStrategy(romThresholds: highTuple);
 
       // Drive the FSM through to ASCENDING using the default BOTTOM gate
-      // (Part 1 keeps `_effectiveBottomAngle = kSquatBottomAngle`).
+      // (`_effectiveBottomAngle = kSquatBottomAngle` = 80° as of
+      // 2026-05-16). 70° clears it; the +5 ascending step stays well below
+      // the END gate so the END-gate assertion is what discriminates.
       tickAt(strategy: s, state: RepState.idle, angle: 150, hipY: 0.50);
-      tickAt(strategy: s, state: RepState.descending, angle: 80, hipY: 0.60);
-      tickAt(strategy: s, state: RepState.bottom, angle: 80, hipY: 0.60);
-      tickAt(strategy: s, state: RepState.bottom, angle: 85, hipY: 0.55);
+      tickAt(strategy: s, state: RepState.descending, angle: 70, hipY: 0.60);
+      tickAt(strategy: s, state: RepState.bottom, angle: 70, hipY: 0.60);
+      tickAt(strategy: s, state: RepState.bottom, angle: 75, hipY: 0.55);
 
       // 162° is below the High END gate (163°) → no commit.
       final notYet = tickAt(
@@ -457,30 +514,36 @@ void main() {
       expect(committed.nextState, RepState.idle);
     });
 
-    test('High BOTTOM angle is defined in the tuple but NOT yet consumed by '
-        'the FSM in Part 1 (effective BOTTOM stays at the long-femur '
-        "path's 90° default)", () {
-      // Part 1 wires START and END to the tuple; BOTTOM continues to flow
-      // through `_effectiveBottomAngle`, which is initialized to
-      // `kSquatBottomAngle` (90°) regardless of sensitivity. The High
-      // tuple's `bottomAngle = 88` is therefore *defined* but unused
-      // at FSM transition time. A later PR is expected to wire this in
-      // (and replace this test). The test exists to make that wiring
-      // change visible: when it lands, this test fails and the developer
-      // confirms the new wiring is intentional.
+    test('the resolved tuple\'s bottomAngle is DEFINED but NOT consumed at '
+        'FSM transition time — the FSM gates on _effectiveBottomAngle '
+        '(= kSquatBottomAngle), the dead-tuple-disconnect invariant', () {
+      // Dead-tuple-disconnect (documented GLOSSARY §4.1 / the 2026-05-16
+      // telemetry-honesty fix): the FSM gates DESCENDING→BOTTOM on
+      // `_effectiveBottomAngle`, NOT on the resolved
+      // `SquatRomThresholdSet.bottomAngle`. The tuple field is telemetry-
+      // derived (47.1, the actual current value — NOT the stale 88.0 the
+      // pre-2026-05-15 revision asserted) and unconsumed at transition
+      // time. This test is the living regression guard: if a future PR
+      // wires the tuple bottomAngle into the FSM, it fails and the
+      // developer confirms the new wiring is intentional.
       final highTuple = SquatRomThresholdSet.forSensitivity(
         FeedbackSensitivity.high,
       );
-      expect(highTuple.bottomAngle, 88.0);
+      // The tuple value is whatever telemetry derived — assert it is NOT
+      // the gate the FSM actually enforces (that is the whole point of
+      // the disconnect), without hardcoding a literal that will re-drift.
+      expect(highTuple.bottomAngle, isNot(equals(kSquatBottomAngle)));
 
       final s = SquatStrategy(romThresholds: highTuple);
-      // Without driving the long-femur path, effective BOTTOM is 90°. A
-      // rep at 89° still crosses into BOTTOM under Part 1 wiring.
+      // The enforced gate is `kSquatBottomAngle` (80° as of 2026-05-16)
+      // regardless of the High tuple. A rep at 70° crosses it; a rep that
+      // only reached the tuple's bottomAngle region would NOT (proving
+      // the tuple value is not the gate).
       tickAt(strategy: s, state: RepState.idle, angle: 150, hipY: 0.50);
       final out = tickAt(
         strategy: s,
         state: RepState.descending,
-        angle: 89,
+        angle: 70,
         hipY: 0.60,
       );
       expect(out.nextState, RepState.bottom);

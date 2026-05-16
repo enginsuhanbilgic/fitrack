@@ -270,4 +270,140 @@ void main() {
       timeout: const Timeout(Duration(seconds: 20)),
     );
   });
+
+  group('Persistence re-arm (2026-05-16)', () {
+    // Helper: fire `count` same-error cues, each spaced past the
+    // time-cooldown so the count-cap (not the time-cooldown) is what gates.
+    Future<void> pumpSpaced(
+      WorkoutViewModel vm,
+      FormError err,
+      int count,
+    ) async {
+      for (var i = 0; i < count; i++) {
+        vm.triggerFormErrorsForTest([err]);
+        await Future<void>.delayed(
+          Duration(milliseconds: ((kFeedbackCooldownSec * 1000) + 50).toInt()),
+        );
+      }
+    }
+
+    test(
+      'medium: a persistent fault re-alerts exactly once at the re-arm window',
+      () async {
+        final (:vm, :tts) = build(verbosity: TtsVerbosity.medium);
+        addTearDown(vm.dispose);
+
+        // cap=3 normal cues, then the muted streak must reach
+        // kTtsPersistenceReArmRepsMedium before exactly ONE re-alert.
+        // Fires 1-3: spoken (under cap). Fires 4..(3+window-1): muted,
+        // streak builds. Fire (3+window): re-alert → spoken, streak resets.
+        await pumpSpaced(
+          vm,
+          FormError.elbowRise,
+          kTtsVerbosityMediumCap + kTtsPersistenceReArmRepsMedium,
+        );
+
+        expect(tts.spoken, hasLength(kTtsVerbosityMediumCap + 1));
+      },
+      timeout: const Timeout(Duration(seconds: 40)),
+    );
+
+    test(
+      'medium: re-mutes after the re-alert (no per-rep nagging)',
+      () async {
+        // The whole point of the re-arm (vs. raising the cap): after the
+        // single re-alert it must go quiet again for a FULL fresh window,
+        // then re-alert a second time. This guards against reintroducing
+        // the nagging the cap was built to prevent.
+        final (:vm, :tts) = build(verbosity: TtsVerbosity.medium);
+        addTearDown(vm.dispose);
+
+        // First re-alert at fire (cap + window). Second re-alert one full
+        // window later → total 2 re-alerts on top of the cap cues.
+        await pumpSpaced(
+          vm,
+          FormError.elbowRise,
+          kTtsVerbosityMediumCap + (kTtsPersistenceReArmRepsMedium * 2),
+        );
+
+        expect(tts.spoken, hasLength(kTtsVerbosityMediumCap + 2));
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
+
+    test(
+      'low: persistent fault re-alerts on the wider low window',
+      () async {
+        final (:vm, :tts) = build(verbosity: TtsVerbosity.low);
+        addTearDown(vm.dispose);
+
+        // cap=1 then one re-alert after kTtsPersistenceReArmRepsLow muted
+        // fires. Low uses the WIDER window than medium by design.
+        await pumpSpaced(
+          vm,
+          FormError.elbowRise,
+          kTtsVerbosityLowCap + kTtsPersistenceReArmRepsLow,
+        );
+
+        expect(tts.spoken, hasLength(kTtsVerbosityLowCap + 1));
+      },
+      timeout: const Timeout(Duration(seconds: 50)),
+    );
+
+    test(
+      'high: re-arm block is inert (every cue still spoken, no interaction)',
+      () async {
+        // Regression guard: high has no cap, so the re-arm branch must
+        // never engage. Every cooldown-clear is spoken, 1:1.
+        final (:vm, :tts) = build(verbosity: TtsVerbosity.high);
+        addTearDown(vm.dispose);
+
+        await pumpSpaced(vm, FormError.elbowRise, 8);
+
+        expect(tts.spoken, hasLength(8));
+      },
+      timeout: const Timeout(Duration(seconds: 40)),
+    );
+
+    test(
+      'medium: re-arm streak is per-error (one fault does not re-arm another)',
+      () async {
+        // elbowRise gets muted and builds its streak; torsoSwing is a
+        // distinct error with its own counter. torsoSwing's first cue must
+        // still be spoken (under its own cap), and elbowRise's streak must
+        // not be advanced/reset by torsoSwing fires.
+        final (:vm, :tts) = build(verbosity: TtsVerbosity.medium);
+        addTearDown(vm.dispose);
+
+        // Push elbowRise just below its re-arm point: cap + (window-1)
+        // fires → cap cues spoken, streak = window-1 (NOT re-alerted yet).
+        await pumpSpaced(
+          vm,
+          FormError.elbowRise,
+          kTtsVerbosityMediumCap + kTtsPersistenceReArmRepsMedium - 1,
+        );
+        final afterElbow = tts.spoken.length; // == kTtsVerbosityMediumCap
+
+        // Interleave a different error — must not touch elbowRise's streak.
+        await pumpSpaced(vm, FormError.torsoSwing, 1);
+
+        expect(
+          tts.spoken.length,
+          afterElbow + 1,
+          reason: 'torsoSwing first cue spoken under its own cap',
+        );
+        // One more elbowRise → NOW its streak hits the window → re-alert.
+        await pumpSpaced(vm, FormError.elbowRise, 1);
+
+        expect(
+          tts.spoken.length,
+          afterElbow + 2,
+          reason:
+              'elbowRise re-alerts on its own window, unaffected by '
+              'the interleaved torsoSwing',
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
+  });
 }

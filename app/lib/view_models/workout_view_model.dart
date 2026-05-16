@@ -478,6 +478,17 @@ class WorkoutViewModel extends ChangeNotifier {
   final Map<FormError, DateTime> _lastFeedbackTime = {};
   final Map<FormError, int> _formErrorCounts = {};
 
+  /// Per-error count of cap-suppressed (muted) cooldown-clears since the last
+  /// time the voice was allowed to speak this error. Drives the persistence
+  /// re-arm in [_onFormErrors]: when it reaches the verbosity's re-arm window
+  /// ([kTtsPersistenceReArmRepsMedium] / [kTtsPersistenceReArmRepsLow]), one
+  /// extra cue is allowed and this resets to 0. Audio-only — does not touch
+  /// detection, `_formErrorCounts`, highlights, or the summary. Keyed by the
+  /// actual error (matching `_formErrorCounts`), NOT the cooldown key, so the
+  /// asymmetry L/R independence is preserved. Same VM-lifetime reset lifecycle
+  /// as `_formErrorCounts` (fresh map per session, no explicit clear).
+  final Map<FormError, int> _mutedFireStreak = {};
+
   // Visual highlight state.
   Map<int, Color> _errorHighlight = {};
   Timer? _highlightTimer;
@@ -501,6 +512,13 @@ class WorkoutViewModel extends ChangeNotifier {
   String? _framingHint;
   int _nearEdgeStreak = 0;
   static const int _kFramingHintFrames = 30;
+
+  // Push-up landscape uses the OS-coherent rotation model (the push-up
+  // WorkoutScreen unlocks SystemChrome landscape; OS rotates UI + camera +
+  // buffer together). No engine-side orientation state is required — the
+  // accelerometer-driven approach was reverted 2026-05-16 (see WISDOM:
+  // iOS desyncs buffer-vs-declared rotation under a portrait UI lock).
+
   Timer? _uncalibratedNoticeTimer;
 
   // Runtime view-flip advisory banner. Set whenever the engine reports
@@ -858,6 +876,23 @@ class WorkoutViewModel extends ChangeNotifier {
         // launch or after a reset — `_resolveSquatThresholds` handles the
         // null path via Tier 2 (auto-cal) or Tier 3 (cold-start).
         _squatProfile = await _profileRepository.loadSquat();
+        // Cross-session fatigue baseline (2026-05-16, curl-parity). Same
+        // 30-day window + try/catch as the curl branch. The repo method is
+        // exercise-parameterized — squat uses an exact-name match, so no
+        // repo change is needed. Empty on failure → analyzer collapses to
+        // in-session-only fatigue (graceful, mirrors curl).
+        try {
+          historical = await _sessionRepository.recentConcentricDurations(
+            exercise: exercise,
+            window: const Duration(days: 30),
+          );
+        } catch (e, st) {
+          TelemetryLog.instance.log(
+            'fatigue.baseline.load_failed',
+            e.toString(),
+            data: <String, Object?>{'stackTrace': st.toString()},
+          );
+        }
         // Unified global diagnostic toggle (2026-05-15). Same pref the curl
         // branch reads above — all three exercises now respond to a single
         // "Disable auto-calibration" Settings switch. Squat resolver
@@ -925,6 +960,20 @@ class WorkoutViewModel extends ChangeNotifier {
         }
       } else if (exercise == ExerciseType.pushUp) {
         _pushUpProfile = await _profileRepository.loadPushUp();
+        // Cross-session fatigue baseline (2026-05-16, curl-parity). Same
+        // contract as the curl + squat branches.
+        try {
+          historical = await _sessionRepository.recentConcentricDurations(
+            exercise: exercise,
+            window: const Duration(days: 30),
+          );
+        } catch (e, st) {
+          TelemetryLog.instance.log(
+            'fatigue.baseline.load_failed',
+            e.toString(),
+            data: <String, Object?>{'stackTrace': st.toString()},
+          );
+        }
         // Unified global diagnostic toggle (2026-05-15). Same pref the
         // curl and squat branches read — when true, the resolver line
         // below (`pushUpThresholds:` in the RepCounter constructor)
@@ -953,7 +1002,7 @@ class WorkoutViewModel extends ChangeNotifier {
         curlThresholdsProvider: _resolveThresholds,
         onCurlRepCommit: _handleCurlRepCommit,
         onCurlViewFlipped: _handleCurlViewFlipped,
-        curlHistoricalConcentricDurations: historical,
+        historicalConcentricDurations: historical,
         // Form-audit thresholds are fixed (Sensitivity vs Form Audit doctrine,
         // .agent_brain/SKILLS.md, 2026-05-14). The user's `_feedbackSensitivity`
         // affects ROM gates only — form audit always runs at the biomechanical
@@ -2473,6 +2522,16 @@ class WorkoutViewModel extends ChangeNotifier {
           ? kPoseGateMinConfidenceSideRelaxed
           : null;
       final Set<int>? gateBestEffort = isSideCurl ? const {15, 16} : null;
+
+      // Push-up landscape uses the OS-coherent rotation model: the push-up
+      // WorkoutScreen unlocks landscape via SystemChrome, so iOS/Android
+      // rotate the UI + camera + capture buffer together and the buffer's
+      // `size` and ML Kit's declared `rotation` stay in sync. The legacy
+      // raw `sensorRotation` is therefore correct in BOTH portrait and
+      // OS-rotated landscape — no engine-side rotation reconciliation. (An
+      // earlier engine-only approach computing rotation from the
+      // accelerometer was reverted 2026-05-16 after an on-device probe
+      // proved iOS desyncs buffer-vs-declared rotation; see WISDOM.)
       final result = await _pose.processCameraImage(
         image,
         _camera.sensorRotation,
@@ -2940,19 +2999,51 @@ class WorkoutViewModel extends ChangeNotifier {
       }
       _lastFeedbackTime[cooldownKey] = now;
       _formErrorCounts[err] = (_formErrorCounts[err] ?? 0) + 1;
-      // Per-error voice-cue cap. `high` is unlimited (every fire passes
+      // Per-error voice-cue cap. `high` is unlimited (every fire that passes
       // the time-cooldown is spoken); `medium` and `low` clamp the audio
-      // after [kTtsVerbosityMediumCap] / [kTtsVerbosityLowCap] fires of
-      // the *same* error this session. The visual highlight below still
-      // runs unconditionally, and the bumped `_formErrorCounts[err]` is
-      // what the session-end summary reads — silencing the voice does
-      // NOT silence detection.
+      // after [kTtsVerbosityMediumCap] / [kTtsVerbosityLowCap] fires of the
+      // *same* error this session. The visual highlight below still runs
+      // unconditionally, and the bumped `_formErrorCounts[err]` is what the
+      // session-end summary reads — silencing the voice does NOT silence
+      // detection.
+      //
+      // Persistence re-arm: once the cap mutes an error, a *persistent*
+      // fault (one that keeps clearing the time-cooldown) is re-alerted
+      // exactly once every re-arm window, then re-muted. The cooldown
+      // collapses multi-frame spam to ≈ 1 fire/rep, so the window is
+      // effectively "this many more faulty reps." A user who fixes the
+      // fault never hears it again; a stuck user gets a periodic nudge
+      // instead of permanent silence. `high` has no cap, so the re-arm
+      // block is inert there (zero behavior change).
       final cap = switch (_ttsVerbosity) {
         TtsVerbosity.high => null,
         TtsVerbosity.medium => kTtsVerbosityMediumCap,
         TtsVerbosity.low => kTtsVerbosityLowCap,
       };
-      if (cap == null || _formErrorCounts[err]! <= cap) {
+      final reArmWindow = switch (_ttsVerbosity) {
+        TtsVerbosity.high => null,
+        TtsVerbosity.medium => kTtsPersistenceReArmRepsMedium,
+        TtsVerbosity.low => kTtsPersistenceReArmRepsLow,
+      };
+
+      final underCap = cap == null || _formErrorCounts[err]! <= cap;
+      var speak = underCap;
+
+      if (!underCap && reArmWindow != null) {
+        // Cap has muted this error. Count muted cooldown-clears; on the
+        // reArmWindow-th, allow exactly one re-alert, then re-mute for a
+        // fresh full window (reset to 0). Mirrors the proven
+        // `_tempoReArmRepsRemaining = kTempoConsistencyReArmReps` shape.
+        final streak = (_mutedFireStreak[err] ?? 0) + 1;
+        if (streak >= reArmWindow) {
+          speak = true;
+          _mutedFireStreak[err] = 0;
+        } else {
+          _mutedFireStreak[err] = streak;
+        }
+      }
+
+      if (speak) {
         _tts.speak(_errorMessage(err));
       }
       _triggerHighlight(err);
@@ -2972,6 +3063,11 @@ class WorkoutViewModel extends ChangeNotifier {
     required double? minKneeAngle,
     required double? maxKneeAngle,
     required double? hipLeadRatio,
+    required double? leanExceedFrac,
+    required double? kneeLedRatio,
+    required double? signedLeanAtPeak,
+    required int backwardLeanFrameCount,
+    required Duration? concentricDuration,
   }) {
     _squatRepMetrics.add(
       SquatRepMetrics(
@@ -2982,6 +3078,14 @@ class WorkoutViewModel extends ChangeNotifier {
         heelLiftRatio: heelLiftRatio,
       ),
     );
+
+    // Buffer the ascent (concentric/lift) duration for `concentric_ms`
+    // persistence + the cross-session fatigue baseline. Index-aligned with
+    // reps, exactly like the curl path (`_handleCurlRepCommit`). Null on a
+    // rep with no measured ascent (vetoed half-squats still reach here, but
+    // their duration is non-null — the rolling-window contamination guard
+    // lives in the engine, not here).
+    _repConcentricDurations.add(concentricDuration);
 
     _recordSquatExtremes(minKneeAngle, maxKneeAngle);
 
@@ -2998,7 +3102,11 @@ class WorkoutViewModel extends ChangeNotifier {
           'heel_lift=${heelLiftRatio?.toStringAsFixed(4) ?? "null"} '
           'quality=${quality?.toStringAsFixed(3) ?? "null"} '
           'min_knee=${minKneeAngle?.toStringAsFixed(2) ?? "null"} '
-          'max_knee=${maxKneeAngle?.toStringAsFixed(2) ?? "null"}',
+          'max_knee=${maxKneeAngle?.toStringAsFixed(2) ?? "null"} '
+          'lean_exceed_frac=${leanExceedFrac?.toStringAsFixed(4) ?? "null"} '
+          'effective_bottom=${_repCounter.squatEffectiveBottomAngle?.toStringAsFixed(2) ?? "null"} '
+          'signed_lean=${signedLeanAtPeak?.toStringAsFixed(2) ?? "null"} '
+          'backward_lean_frames=$backwardLeanFrameCount',
     );
 
     // Hip-lead diagnostic line — separate from `squat.rep` so the Python
@@ -3016,6 +3124,22 @@ class WorkoutViewModel extends ChangeNotifier {
           'ascending_frame_count=$hipLeadFrames '
           'threshold=$kHipLeadVelocityRatio',
     );
+
+    // Knee-led-descent diagnostic line — separate from `squat.rep` so the
+    // Python tuning workflow can filter by tag (mirrors `squat.hip_lead`).
+    // Null ratio means the rep had fewer than `kSquatKneeLedMinFrames`
+    // samples in the early-descent window OR a degenerate leg length;
+    // either way no grade was emitted (fail-open). `window_frames`
+    // contextualizes the ratio the same way `ascending_frame_count` does
+    // for hip-lead.
+    final kneeLedFrames = _repCounter.squatKneeLedSampleCount ?? 0;
+    TelemetryLog.instance.log(
+      'squat.knee_led',
+      'rep=$_squatDebugRepIndex '
+          'ratio=${kneeLedRatio?.toStringAsFixed(3) ?? "null"} '
+          'window_frames=$kneeLedFrames '
+          'threshold=$kSquatKneeLedMinRatio',
+    );
   }
 
   /// Push-up rep commit callback. Emits the `pushup.rep` telemetry line
@@ -3030,7 +3154,13 @@ class WorkoutViewModel extends ChangeNotifier {
     required int repIndex,
     required double? minElbowAngle,
     required double? maxElbowAngle,
+    required Duration? concentricDuration,
   }) {
+    // Buffer the ascent (concentric/press) duration for `concentric_ms`
+    // persistence + the cross-session fatigue baseline. Index-aligned with
+    // reps, exactly like curl/squat. Null on a shallow rep with no measured
+    // ascent — the engine already skipped its tempo signals for that rep.
+    _repConcentricDurations.add(concentricDuration);
     _pushUpDebugRepIndex++;
     TelemetryLog.instance.log(
       'pushup.rep',
@@ -3309,7 +3439,13 @@ class WorkoutViewModel extends ChangeNotifier {
       'tier=$tier source=$source '
           'sensitivity=${_feedbackSensitivity.name} '
           'start=${thresholds.startAngle.toStringAsFixed(2)} '
-          'bottom=${thresholds.bottomAngle.toStringAsFixed(2)} '
+          // NOTE: `bottom_tuple` is the resolved SquatRomThresholdSet's
+          // bottomAngle field — DEFINED BUT NOT ENFORCED at FSM-transition
+          // time (the FSM gates on `_effectiveBottomAngle`, logged as
+          // `effective_bottom=` on the `squat.rep` line). Kept here for
+          // parser continuity; do NOT use it as the depth gate in
+          // threshold derivation — use `squat.rep effective_bottom=`.
+          'bottom_tuple=${thresholds.bottomAngle.toStringAsFixed(2)} '
           'end=${thresholds.endAngle.toStringAsFixed(2)}'
           '${extra != null ? ' $extra' : ''}',
     );
@@ -3448,6 +3584,9 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.hipLead => 'Lead with your chest',
     FormError.noKneeFlexion => 'Sit into the squat — bend your knees',
     FormError.hipsForwardOnDescent => 'Push your hips back',
+    FormError.kneeLedDescent =>
+      'Sit back — lead with your hips, not your knees',
+    FormError.kneeDominantPattern => 'Keep your heels down and weight mid-foot',
     // forwardKneeShift intentionally has a fallback string — TTS suppression
     // happens in `_onFormErrors`, not here. The string is still used by the
     // visual highlight subtitle if the in-workout overlay surfaces it.
@@ -3460,6 +3599,18 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.asymmetryLeftLag => 'Left arm is lagging',
     FormError.asymmetryRightLag => 'Right arm is lagging',
     FormError.fatigue => "You're slowing down, stay strong",
+    // Squat tempo/fatigue (2026-05-16, curl-parity). Same biomechanical
+    // instruction as the curl cues — the message is movement-agnostic; the
+    // per-exercise enum exists only so summary/telemetry stay unambiguous.
+    FormError.squatEccentricTooFast => 'Lower slowly',
+    FormError.squatConcentricTooFast => 'Control the drive up',
+    FormError.squatTempoInconsistent => 'Keep steady tempo',
+    FormError.squatFatigue => "You're slowing down, stay strong",
+    // Push-up tempo/fatigue (2026-05-16, curl-parity).
+    FormError.pushUpEccentricTooFast => 'Lower slowly',
+    FormError.pushUpConcentricTooFast => 'Control the press',
+    FormError.pushUpTempoInconsistent => 'Keep steady tempo',
+    FormError.pushUpFatigue => "You're slowing down, stay strong",
   };
 
   /// Per-error highlight color. `forwardKneeShift` is informational (no TTS,

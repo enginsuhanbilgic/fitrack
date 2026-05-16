@@ -571,6 +571,7 @@ class InMemorySessionRepository implements SessionRepository {
                         r.repIndex - 1 < s.event.bicepsSideRepMetrics.length
                     ? s.event.bicepsSideRepMetrics[r.repIndex - 1]
                     : null;
+                final ci = r.repIndex - 1;
                 return RepRow(
                   repIndex: r.repIndex,
                   quality:
@@ -585,6 +586,13 @@ class InMemorySessionRepository implements SessionRepository {
                   source: r.source,
                   bucketUpdated: r.bucketUpdated,
                   rejectedOutlier: r.rejectedOutlier,
+                  // Mirror the SQLite read path: in-memory double must
+                  // round-trip `concentricMs` identically (2026-05-16 —
+                  // this was the one DB-layer gap for cross-exercise
+                  // fatigue parity).
+                  concentricMs: ci >= 0 && ci < s.concentricDurations.length
+                      ? s.concentricDurations[ci]?.inMilliseconds
+                      : null,
                   bicepsLeanDeg: bicepsMetric?.leanDeg,
                   bicepsShoulderDriftRatio: bicepsMetric?.shoulderDriftRatio,
                   bicepsElbowDriftRatio: bicepsMetric?.elbowDriftRatio,
@@ -611,6 +619,14 @@ class InMemorySessionRepository implements SessionRepository {
             return RepRow(
               repIndex: i + 1,
               quality: s.event.repQualities[i],
+              // Mirror the SQLite non-curl read path. Squat + push-up now
+              // persist `concentric_ms` (the ascent/lift duration) — the
+              // in-memory double must round-trip it identically so the
+              // cross-session fatigue baseline tests pass against both
+              // repositories (2026-05-16, curl-parity).
+              concentricMs: i < s.concentricDurations.length
+                  ? s.concentricDurations[i]?.inMilliseconds
+                  : null,
               squatLeanDeg: squatMetric?.leanDeg,
               squatKneeShiftRatio: squatMetric?.kneeShiftRatio,
               squatHeelLiftRatio: squatMetric?.heelLiftRatio,

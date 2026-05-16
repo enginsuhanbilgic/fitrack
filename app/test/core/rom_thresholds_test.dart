@@ -107,14 +107,15 @@ void main() {
 
       final t = RomThresholds.fromBucket(bucket);
 
-      // peak = 60 + 15 = 75
-      // peakExit = 75 + kCurlPeakExitGap (15) = 90
-      // start = 165 - 10 = 155
-      // end   = 165 - 25 = 140
-      expect(t.peakAngle, 75);
-      expect(t.peakExitAngle, 90);
-      expect(t.startAngle, 155);
-      expect(t.endAngle, 140);
+      // Tolerances halved 2026-05-16: peak +7.5, start -5, end -12.5.
+      // peak = 60 + 7.5 = 67.5
+      // peakExit = 67.5 + kCurlPeakExitGap (15) = 82.5
+      // start = 165 - 5 = 160
+      // end   = 165 - 12.5 = 152.5
+      expect(t.peakAngle, 67.5);
+      expect(t.peakExitAngle, 82.5);
+      expect(t.startAngle, 160);
+      expect(t.endAngle, 152.5);
       expect(t.source, ThresholdSource.calibrated);
     });
 
@@ -124,14 +125,15 @@ void main() {
       final t = RomThresholds.fromBucket(bucket, warmup: true);
 
       // multiplier = kProfileWarmupMultiplier (1.5)
-      // peak = 60 + (15 * 1.5) = 82.5
-      // peakExit = 82.5 + 15 (gap is NOT warmup-scaled) = 97.5
-      // start = 165 - (10 * 1.5) = 150
-      // end   = 165 - (25 * 1.5) = 127.5
-      expect(t.peakAngle, 82.5);
-      expect(t.peakExitAngle, 97.5);
-      expect(t.startAngle, 150);
-      expect(t.endAngle, 127.5);
+      // Tolerances halved 2026-05-16: peak +7.5, start -5, end -12.5.
+      // peak = 60 + (7.5 * 1.5) = 71.25
+      // peakExit = 71.25 + 15 (gap is NOT warmup-scaled) = 86.25
+      // start = 165 - (5 * 1.5) = 157.5
+      // end   = 165 - (12.5 * 1.5) = 146.25
+      expect(t.peakAngle, 71.25);
+      expect(t.peakExitAngle, 86.25);
+      expect(t.startAngle, 157.5);
+      expect(t.endAngle, 146.25);
       expect(t.source, ThresholdSource.warmup);
     });
 
@@ -153,10 +155,11 @@ void main() {
 
         final t = RomThresholds.fromBucket(bucket);
 
-        // Raw math would give: peak=105, peakExit=120, end=105 → FSM stuck.
+        // Tolerances halved 2026-05-16. Raw math: peak=97.5, peakExit=112.5,
+        // raw end=117.5 < peakExit+gap(127.5) → FSM stuck without the floor.
         // Floor must promote endAngle above peakExit by at least one gap.
-        expect(t.peakAngle, 105);
-        expect(t.peakExitAngle, 120);
+        expect(t.peakAngle, 97.5);
+        expect(t.peakExitAngle, 112.5);
         expect(
           t.endAngle,
           greaterThanOrEqualTo(t.peakExitAngle + kCurlPeakExitGap),
@@ -199,9 +202,10 @@ void main() {
 
       final t = RomThresholds.autoCalibrated(bucket);
 
-      expect(t.peakAngle, 75);
-      expect(t.startAngle, 155);
-      expect(t.endAngle, 140);
+      // Tolerances halved 2026-05-16: peak +7.5, start -5, end -12.5.
+      expect(t.peakAngle, 67.5);
+      expect(t.startAngle, 160);
+      expect(t.endAngle, 152.5);
       expect(t.source, ThresholdSource.autoCalibrated);
     });
   });
@@ -220,18 +224,21 @@ void main() {
       expect(t.source, ThresholdSource.calibrated);
     });
 
-    test('medium loosens a calibrated tuple by (-5, +10, 0)', () {
+    test('medium loosens a calibrated tuple by (-8, +12, -6)', () {
       const bucket = _StubBucket(60, 165);
       final anchor = RomThresholds.fromBucket(bucket);
-      // anchor: peak=75, peakExit=90, start=155, end=140
+      // anchor (halved tolerances): peak=67.5, peakExit=82.5, start=160, end=152.5
       final t = anchor.applySensitivity(FeedbackSensitivity.medium);
-      // (start-5, peak+10, end+0) → start=150, peak=85, end=140
-      // peakExit re-derived: 85 + 15 = 100
-      // Strict floor: end > peakExit + gap (115)? 140 > 115 ✓
-      expect(t.startAngle, 150);
-      expect(t.peakAngle, 85);
-      expect(t.peakExitAngle, 100);
-      expect(t.endAngle, 140);
+      // _tier3MediumLooseness (-8, +12, -6):
+      //   start = 160 - 8   = 152
+      //   peak  = 67.5 + 12 = 79.5
+      //   end   = 152.5 - 6 = 146.5
+      // peakExit re-derived: 79.5 + 15 = 94.5
+      // Strict floor: end > peakExit + gap (109.5)? 146.5 > 109.5 ✓
+      expect(t.startAngle, 152);
+      expect(t.peakAngle, 79.5);
+      expect(t.peakExitAngle, 94.5);
+      expect(t.endAngle, 146.5);
       // Source survives the post-pass.
       expect(t.source, ThresholdSource.calibrated);
     });
@@ -240,9 +247,10 @@ void main() {
       const bucket = _StubBucket(60, 165);
       final anchor = RomThresholds.autoCalibrated(bucket);
       final t = anchor.applySensitivity(FeedbackSensitivity.medium);
-      expect(t.startAngle, 150);
-      expect(t.peakAngle, 85);
-      expect(t.endAngle, 140);
+      // Same math as the calibrated case above (shared _build + post-pass).
+      expect(t.startAngle, 152);
+      expect(t.peakAngle, 79.5);
+      expect(t.endAngle, 146.5);
       expect(t.source, ThresholdSource.autoCalibrated);
     });
 

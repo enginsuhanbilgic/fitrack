@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants.dart';
@@ -67,6 +68,23 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     _completionSub = _vm.completionEvents.listen(_onWorkoutCompleted);
     _vm.addListener(_onVmTick);
     _vm.init();
+
+    // Push-up landscape (OS-coherent model): unlock landscape for THIS
+    // screen only. iOS/Android then rotate the UI, camera preview, and
+    // capture buffer together, so ML Kit receives a self-consistent frame
+    // (the engine-only approach that desynced buffer-vs-rotation was
+    // reverted 2026-05-16 — see WISDOM). Curl/squat WorkoutScreens never
+    // call this, so they stay portrait-locked exactly as before. The
+    // restore in dispose() runs on EVERY exit path (back, finish→summary,
+    // recalibrate-exit pop, process teardown) because all of them destroy
+    // this State.
+    if (widget.exercise.allowsLandscape) {
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
   }
 
   @override
@@ -74,6 +92,15 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     _vm.removeListener(_onVmTick);
     _completionSub?.cancel();
     _vm.dispose();
+    // Always restore the app-wide portrait lock when leaving a push-up
+    // session. Idempotent for non-push-up (they never changed it). This is
+    // the single chokepoint that guarantees curl/squat never inherit a
+    // landscape orientation from a prior push-up session.
+    if (widget.exercise.allowsLandscape) {
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.portraitUp,
+      ]);
+    }
     super.dispose();
   }
 
@@ -375,54 +402,76 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           ClipRect(
             child: FittedBox(
               fit: BoxFit.cover,
-              child: SizedBox(
-                width: camera.controller!.value.previewSize!.height,
-                height: camera.controller!.value.previewSize!.width,
-                child: Stack(
-                  children: [
-                    CameraPreview(camera.controller!),
-                    if (landmarks.isNotEmpty)
-                      Positioned.fill(
-                        child: RepaintBoundary(
-                          child: CustomPaint(
-                            painter: SkeletonPainter(
-                              landmarks: landmarks,
-                              mirror: false,
-                              boneColor: FiTrackColors.of(context).accent,
-                              landmarkColors: () {
-                                final phaseColor = _skeletonPhaseColor(
-                                  snapshot.state,
-                                );
-                                final phaseBase = phaseColor != null
-                                    ? {
-                                        for (final idx in LM.bodyOnlyLandmarks)
-                                          idx: phaseColor,
-                                      }
-                                    : <int, Color>{};
-                                final merged = {
-                                  ...phaseBase,
-                                  ..._vm.landmarkColors,
-                                  ..._vm.errorHighlight,
-                                };
-                                return merged.isNotEmpty ? merged : null;
-                              }(),
-                              boneConnections: widget.exercise.isCurl
-                                  ? LM.upperBodyConnections
-                                  : null,
-                              elbowAngleAnnotation:
-                                  phase == WorkoutPhase.active &&
-                                      snapshot.jointAngle != null
-                                  ? (
-                                      _elbowLandmarkForSide(),
-                                      snapshot.jointAngle!,
-                                    )
-                                  : null,
+              child: Builder(
+                builder: (context) {
+                  final preview = camera.controller!.value.previewSize!;
+                  // OS-coherent rotation model: the push-up screen unlocks
+                  // landscape via SystemChrome, so the framework reports the
+                  // real screen orientation and the camera preview is rotated
+                  // by the OS. Size the box to match.
+                  //
+                  // - PORTRAIT (curl, squat, portrait push-up): `width:
+                  //   preview.height, height: preview.width` — BYTE-IDENTICAL
+                  //   to the legacy hardcoded swap, so non-push-up is
+                  //   unchanged (their screens never unlock landscape, so
+                  //   MediaQuery.orientation is always portrait for them).
+                  // - LANDSCAPE (push-up rotated): natural (un-swapped)
+                  //   dimensions so `FittedBox.cover` fills the wide viewport
+                  //   instead of pillarboxing.
+                  final landscape =
+                      MediaQuery.of(context).orientation ==
+                      Orientation.landscape;
+                  return SizedBox(
+                    width: landscape ? preview.width : preview.height,
+                    height: landscape ? preview.height : preview.width,
+                    child: Stack(
+                      children: [
+                        CameraPreview(camera.controller!),
+                        if (landmarks.isNotEmpty)
+                          Positioned.fill(
+                            child: RepaintBoundary(
+                              child: CustomPaint(
+                                painter: SkeletonPainter(
+                                  landmarks: landmarks,
+                                  mirror: false,
+                                  boneColor: FiTrackColors.of(context).accent,
+                                  landmarkColors: () {
+                                    final phaseColor = _skeletonPhaseColor(
+                                      snapshot.state,
+                                    );
+                                    final phaseBase = phaseColor != null
+                                        ? {
+                                            for (final idx
+                                                in LM.bodyOnlyLandmarks)
+                                              idx: phaseColor,
+                                          }
+                                        : <int, Color>{};
+                                    final merged = {
+                                      ...phaseBase,
+                                      ..._vm.landmarkColors,
+                                      ..._vm.errorHighlight,
+                                    };
+                                    return merged.isNotEmpty ? merged : null;
+                                  }(),
+                                  boneConnections: widget.exercise.isCurl
+                                      ? LM.upperBodyConnections
+                                      : null,
+                                  elbowAngleAnnotation:
+                                      phase == WorkoutPhase.active &&
+                                          snapshot.jointAngle != null
+                                      ? (
+                                          _elbowLandmarkForSide(),
+                                          snapshot.jointAngle!,
+                                        )
+                                      : null,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                  ],
-                ),
+                      ],
+                    ),
+                  );
+                },
               ),
             ),
           ),

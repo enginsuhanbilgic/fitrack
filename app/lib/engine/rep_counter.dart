@@ -90,6 +90,15 @@ typedef _OnPushUpRepCommit =
       required int repIndex,
       required double? minElbowAngle,
       required double? maxElbowAngle,
+
+      /// Ascent (concentric/press) duration of the just-committed rep, as
+      /// measured by `PushUpFormAnalyzer`. Nullable: a rep can commit before
+      /// the analyzer stamped both phase boundaries (partial reps, skipped
+      /// BOTTOM). Hosts treat null as "no data" and skip persistence.
+      /// Added 2026-05-16 (curl-parity tempo/fatigue). The descent/eccentric
+      /// duration is computed transiently for the too-fast cue and is NOT
+      /// carried out — only the concentric duration feeds `concentric_ms`.
+      required Duration? concentricDuration,
     });
 
 /// Multi-exercise rep counter. Dispatches to an [ExerciseStrategy] per
@@ -150,7 +159,7 @@ class RepCounter {
     RomThresholdsProvider? curlThresholdsProvider,
     CurlRepCommitCallback? onCurlRepCommit,
     CurlViewFlipCallback? onCurlViewFlipped,
-    List<Duration> curlHistoricalConcentricDurations = const [],
+    List<Duration> historicalConcentricDurations = const [],
     FormThresholds curlFormThresholds = FormThresholds.medium,
     SquatVariant squatVariant = SquatVariant.bodyweight,
     bool squatLongFemurLifter = false,
@@ -175,7 +184,7 @@ class RepCounter {
       curlThresholdsProvider: curlThresholdsProvider,
       onCurlRepCommit: onCurlRepCommit,
       onCurlViewFlipped: onCurlViewFlipped,
-      curlHistoricalConcentricDurations: curlHistoricalConcentricDurations,
+      historicalConcentricDurations: historicalConcentricDurations,
       curlFormThresholds: curlFormThresholds,
       squatVariant: squatVariant,
       squatLongFemurLifter: squatLongFemurLifter,
@@ -196,7 +205,7 @@ class RepCounter {
     RomThresholdsProvider? curlThresholdsProvider,
     CurlRepCommitCallback? onCurlRepCommit,
     CurlViewFlipCallback? onCurlViewFlipped,
-    List<Duration> curlHistoricalConcentricDurations = const [],
+    List<Duration> historicalConcentricDurations = const [],
     FormThresholds curlFormThresholds = FormThresholds.medium,
     SquatVariant squatVariant = SquatVariant.bodyweight,
     bool squatLongFemurLifter = false,
@@ -216,7 +225,7 @@ class RepCounter {
       thresholdsProvider: curlThresholdsProvider,
       onRepCommit: onCurlRepCommit,
       onViewFlipped: onCurlViewFlipped,
-      historicalConcentricDurations: curlHistoricalConcentricDurations,
+      historicalConcentricDurations: historicalConcentricDurations,
       formThresholds: curlFormThresholds,
     ),
     ExerciseType.bicepsCurlSide => CurlStrategy(
@@ -228,7 +237,7 @@ class RepCounter {
       thresholdsProvider: curlThresholdsProvider,
       onRepCommit: onCurlRepCommit,
       onViewFlipped: onCurlViewFlipped,
-      historicalConcentricDurations: curlHistoricalConcentricDurations,
+      historicalConcentricDurations: historicalConcentricDurations,
       formThresholds: curlFormThresholds,
     ),
     // ignore: deprecated_member_use_from_same_package
@@ -238,7 +247,7 @@ class RepCounter {
       thresholdsProvider: curlThresholdsProvider,
       onRepCommit: onCurlRepCommit,
       onViewFlipped: onCurlViewFlipped,
-      historicalConcentricDurations: curlHistoricalConcentricDurations,
+      historicalConcentricDurations: historicalConcentricDurations,
       formThresholds: curlFormThresholds,
     ),
     ExerciseType.squat => SquatStrategy(
@@ -250,10 +259,12 @@ class RepCounter {
       onRepExtremes: onSquatRepExtremes,
       onLongFemurDetected: onSquatLongFemurDetected,
       persistedFemurTorsoRatio: squatPersistedFemurTorsoRatio,
+      historicalConcentricDurations: historicalConcentricDurations,
     ),
     ExerciseType.pushUp => PushUpStrategy(
       thresholds: pushUpThresholds,
       thresholdsProvider: pushUpThresholdsProvider,
+      historicalConcentricDurations: historicalConcentricDurations,
     ),
   };
 
@@ -382,6 +393,31 @@ class RepCounter {
     return strategy.ascendingFrameCount;
   }
 
+  /// Frame count from the most recent early-descent window — feeds the
+  /// `squat.knee_led` telemetry line's `window_frames` field. Null when
+  /// the active strategy is not squat. Same read-window semantics as
+  /// [squatAscendingFrameCount] — cleared at the next IDLE → DESCENDING.
+  int? get squatKneeLedSampleCount {
+    final strategy = _strategy;
+    if (strategy is! SquatStrategy) return null;
+    return strategy.kneeLedSampleCount;
+  }
+
+  /// The depth gate (`_effectiveBottomAngle`) actually ENFORCED by the
+  /// squat FSM for the most recent rep — `kSquatBottomAngle` (80°) by
+  /// default, or `kLongFemurBottomAngle` (100°) if the long-femur path
+  /// relaxed it this session. Distinct from the resolved
+  /// `SquatRomThresholdSet.bottomAngle` tuple field (which is defined but
+  /// NOT consumed at FSM-transition time). Null when the active strategy
+  /// is not squat. The host logs this on `squat.rep` so the offline
+  /// threshold-derivation workflow sees the gate that was truly applied,
+  /// not the dead tuple value.
+  double? get squatEffectiveBottomAngle {
+    final strategy = _strategy;
+    if (strategy is! SquatStrategy) return null;
+    return strategy.effectiveBottomAngle;
+  }
+
   /// Live signed forward-lean angle (deg) from the squat analyzer's
   /// most recent frame. Positive = forward, negative = backward. Null
   /// when the active strategy is not squat OR the analyzer hasn't seen
@@ -434,6 +470,11 @@ class RepCounter {
         minKneeAngle: _pendingSquatMinKneeAngle,
         maxKneeAngle: _pendingSquatMaxKneeAngle,
         hipLeadRatio: strategy.lastRepHipLeadRatio,
+        leanExceedFrac: strategy.lastRepLeanExceedFrac,
+        kneeLedRatio: strategy.lastRepKneeLedRatio,
+        signedLeanAtPeak: strategy.lastRepSignedLeanAtPeak,
+        backwardLeanFrameCount: strategy.lastRepBackwardLeanFrameCount,
+        concentricDuration: strategy.lastConcentricDuration,
       );
     }
     _pendingSquatMinKneeAngle = null;
@@ -453,6 +494,7 @@ class RepCounter {
       repIndex: _reps,
       minElbowAngle: strategy.lastRepMinElbowAngle,
       maxElbowAngle: strategy.lastRepMaxElbowAngle,
+      concentricDuration: strategy.lastConcentricDuration,
     );
   }
 
@@ -524,4 +566,26 @@ typedef SquatRepCommitCallback =
       required double? minKneeAngle,
       required double? maxKneeAngle,
       required double? hipLeadRatio,
+      required double? leanExceedFrac,
+      required double? kneeLedRatio,
+
+      /// Signed lean (forward = +, backward = −) at the |lean| peak of the
+      /// just-committed rep. Bug-4 sign-convention diagnostic — distinct
+      /// from the abs() `leanDeg`. Null when no lean frame was measured.
+      required double? signedLeanAtPeak,
+
+      /// Frames in the just-committed rep that fired
+      /// `excessiveBackwardLean`. High value with `leanExceedFrac≈0` ⇒
+      /// sign inversion at the camera. Diagnostic only.
+      required int backwardLeanFrameCount,
+
+      /// Ascent (concentric/lift) duration of the just-committed rep, as
+      /// measured by `SquatFormAnalyzer`. Nullable: a rep can commit
+      /// without a measured ascent (edge cases). Hosts treat null as "no
+      /// data" and skip persistence. Added 2026-05-16 (curl-parity
+      /// tempo/fatigue). Only the concentric duration is carried out — it
+      /// feeds `concentric_ms` + the cross-session fatigue baseline. The
+      /// descent/eccentric duration is graded transiently for the
+      /// too-fast cue and is NOT persisted.
+      required Duration? concentricDuration,
     });

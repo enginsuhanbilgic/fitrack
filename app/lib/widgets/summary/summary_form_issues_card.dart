@@ -131,6 +131,18 @@ IconData _iconFor(FormError err) => switch (err) {
   FormError.forwardKneeShift => Icons.compare_arrows_rounded,
   FormError.hipSag => Icons.straighten_rounded,
   FormError.pushUpShortRom => Icons.unfold_less,
+  FormError.kneeLedDescent => Icons.trending_flat_rounded,
+  FormError.kneeDominantPattern => Icons.do_not_step_rounded,
+  // Squat + push-up tempo/fatigue (2026-05-16) — mirror the curl tempo
+  // icons so the same fault reads consistently across exercises.
+  FormError.squatEccentricTooFast => Icons.fast_forward_rounded,
+  FormError.squatConcentricTooFast => Icons.rocket_launch,
+  FormError.squatTempoInconsistent => Icons.shuffle,
+  FormError.squatFatigue => Icons.battery_alert,
+  FormError.pushUpEccentricTooFast => Icons.fast_forward_rounded,
+  FormError.pushUpConcentricTooFast => Icons.rocket_launch,
+  FormError.pushUpTempoInconsistent => Icons.shuffle,
+  FormError.pushUpFatigue => Icons.battery_alert,
   _ => Icons.error_outline,
 };
 
@@ -161,4 +173,15 @@ String _labelFor(FormError err) => switch (err) {
   FormError.hipLead => 'Hip Lead',
   FormError.noKneeFlexion => 'No Knee Flexion',
   FormError.hipsForwardOnDescent => 'Hips Forward on Descent',
+  FormError.kneeLedDescent => 'Knee-Led Descent',
+  FormError.kneeDominantPattern => 'Knee-Dominant Pattern',
+  // Squat + push-up tempo/fatigue (2026-05-16, curl-parity).
+  FormError.squatEccentricTooFast => 'Lowering Too Fast',
+  FormError.squatConcentricTooFast => 'Driving Up Too Fast',
+  FormError.squatTempoInconsistent => 'Unsteady Pace',
+  FormError.squatFatigue => 'Fatigue',
+  FormError.pushUpEccentricTooFast => 'Lowering Too Fast',
+  FormError.pushUpConcentricTooFast => 'Pressing Too Fast',
+  FormError.pushUpTempoInconsistent => 'Unsteady Pace',
+  FormError.pushUpFatigue => 'Fatigue',
 };

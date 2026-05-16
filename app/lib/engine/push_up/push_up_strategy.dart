@@ -30,9 +30,13 @@ class PushUpStrategy extends ExerciseStrategy {
   PushUpStrategy({
     PushUpRomThresholds thresholds = PushUpRomThresholds.defaults,
     PushUpRomThresholdsProvider? thresholdsProvider,
+    List<Duration> historicalConcentricDurations = const [],
   }) : _thresholds = thresholds,
        _thresholdsProvider = thresholdsProvider,
-       _form = PushUpFormAnalyzer(thresholds: thresholds);
+       _form = PushUpFormAnalyzer(
+         thresholds: thresholds,
+         historicalConcentricDurations: historicalConcentricDurations,
+       );
 
   PushUpRomThresholds _thresholds;
   final PushUpRomThresholdsProvider? _thresholdsProvider;
@@ -67,6 +71,12 @@ class PushUpStrategy extends ExerciseStrategy {
   }
 
   double? get lastRepQuality => _form.lastRepQuality;
+
+  /// Ascent (concentric/press) duration of the most recently committed
+  /// rep. Null on shallow reps with no measured ascent. Pass-through to
+  /// the analyzer — consumed by the host's `_handlePushUpRepCommit` for
+  /// `concentric_ms` persistence + the cross-session fatigue baseline.
+  Duration? get lastConcentricDuration => _form.lastConcentricDuration;
 
   double? get lastBodyLineDeviationDeg => _form.lastBodyLineDeviationDeg;
 
@@ -119,6 +129,8 @@ class PushUpStrategy extends ExerciseStrategy {
           }
           nextState = RepState.descending;
           _form.onRepStart(pose);
+          // Eccentric (descent) phase clock starts here.
+          _form.onDescentStart(input.now);
           _form.trackAngle(smoothed);
           _form.trackMaxElbow(smoothed);
         }
@@ -128,6 +140,11 @@ class PushUpStrategy extends ExerciseStrategy {
           nextState = RepState.bottom;
         } else if (smoothed >= _thresholds.endAngle) {
           if (_form.hasShallowRepAttempt) {
+            // Shallow rep: reversed before BOTTOM, so there is no
+            // concentric (ascent) phase. We deliberately do NOT call
+            // onAscentStart/onAscentEnd — `lastConcentricDuration` stays
+            // null and the tempo/fatigue signals correctly skip this rep
+            // (there was no controlled press to grade).
             final completionErrors = _form.consumeCompletionErrors();
             errors = [...errors, ...completionErrors];
             repCommitted = true;
@@ -138,11 +155,18 @@ class PushUpStrategy extends ExerciseStrategy {
       case RepState.bottom:
         errors = _form.evaluate(pose, now: input.now);
         if (smoothed > _thresholds.bottomAngle) {
+          // Concentric (ascent) phase clock starts; closes the eccentric
+          // timer inside the analyzer.
+          _form.onAscentStart(input.now);
           nextState = RepState.ascending;
         }
       case RepState.ascending:
         errors = _form.evaluate(pose, now: input.now);
         if (smoothed >= _thresholds.endAngle) {
+          // Close the concentric timer BEFORE consuming completion errors
+          // so the tempo/fatigue signals see this rep's final ascent
+          // duration.
+          _form.onAscentEnd(input.now);
           final completionErrors = _form.consumeCompletionErrors();
           errors = [...errors, ...completionErrors];
           repCommitted = true;

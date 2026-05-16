@@ -71,7 +71,7 @@ class CurlRomDefaults {
   // `RomThresholds._applyTelemetrySensitivity`.
 
   static const CurlRomThresholdSet sideLeftAnchor = CurlRomThresholdSet(
-    startAngle: 157.6,
+    startAngle: 155.6,
     peakAngle: 70.0,
     peakExitAngle: 80.0,
     endAngle: 150.6,

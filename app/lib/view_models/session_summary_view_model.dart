@@ -164,6 +164,21 @@ SessionSummaryViewModel _fromCurl(SessionSummaryInput input) {
     FormError.heelLift,
     FormError.forwardKneeShift,
     FormError.hipLead,
+    // Defense-in-depth: other exercises' tempo/fatigue enums (2026-05-16)
+    // can never appear in a curl session (one exercise per session), but
+    // the existing convention explicitly excludes cross-exercise errors —
+    // keep that invariant intact so a future shared-session path can't leak
+    // squat/push-up tempo onto the curl issues card. Curl's OWN tempo
+    // errors (eccentricTooFast/concentricTooFast/tempoInconsistent/
+    // fatigue) are deliberately NOT excluded — they still surface here.
+    FormError.squatEccentricTooFast,
+    FormError.squatConcentricTooFast,
+    FormError.squatTempoInconsistent,
+    FormError.squatFatigue,
+    FormError.pushUpEccentricTooFast,
+    FormError.pushUpConcentricTooFast,
+    FormError.pushUpTempoInconsistent,
+    FormError.pushUpFatigue,
   };
   final issues = input.errorsTriggered
       .where((e) => !curlExcluded.contains(e))
@@ -304,6 +319,14 @@ SessionSummaryViewModel _fromSquat(SessionSummaryInput input) {
     FormError.heelLift,
     FormError.forwardKneeShift,
     FormError.squatDepth,
+    // Tempo/fatigue (2026-05-16, curl-parity). Surfaced on the issues card
+    // like heelLift/squatDepth — they carry a TTS cue AND a real
+    // training-quality signal (unlike the cue-only noKneeFlexion /
+    // kneeLedDescent which stay intentionally off the card).
+    FormError.squatEccentricTooFast,
+    FormError.squatConcentricTooFast,
+    FormError.squatTempoInconsistent,
+    FormError.squatFatigue,
   };
   final issues = input.errorsTriggered.where(squatErrors.contains).toList();
 
@@ -382,6 +405,35 @@ List<String> _squatInsights(SessionSummaryInput input) {
     );
   }
 
+  // Tempo / fatigue (2026-05-16, curl-parity). Driven off the
+  // `errorsTriggered` set — the channel the new per-exercise enums flow
+  // through (squat's `fatigueDetected` snapshot bool is curl-shaped and
+  // does not carry `squatFatigue`, so it's checked separately here).
+  if (input.errorsTriggered.contains(FormError.squatEccentricTooFast)) {
+    insights.add(
+      'You dropped into some squats too quickly. Control the descent — '
+      'a 2-3 second lowering builds strength and protects the knees.',
+    );
+  }
+  if (input.errorsTriggered.contains(FormError.squatConcentricTooFast)) {
+    insights.add(
+      'Some drives out of the bottom were rushed. Push the floor away '
+      'with intent, but stay controlled — no bouncing out of the hole.',
+    );
+  }
+  if (input.errorsTriggered.contains(FormError.squatTempoInconsistent)) {
+    insights.add(
+      'Your rep tempo varied widely. A steady, repeatable cadence is a '
+      'better strength signal than alternating slow and fast reps.',
+    );
+  }
+  if (input.errorsTriggered.contains(FormError.squatFatigue)) {
+    insights.add(
+      'Your ascent slowed across the set — a fatigue signature. End the '
+      'set while form is clean rather than grinding slow reps.',
+    );
+  }
+
   _appendFallbackInsight(insights, input);
   return insights;
 }
@@ -395,8 +447,18 @@ SessionSummaryViewModel _fromPushUp(SessionSummaryInput input) {
     averageQuality: input.averageQuality,
   );
 
-  // Only push-up errors land in the issues card.
-  const pushUpErrors = <FormError>{FormError.hipSag, FormError.pushUpShortRom};
+  // Only push-up errors land in the issues card. The four tempo/fatigue
+  // enums (2026-05-16, curl-parity) are push-up-scoped and belong here so
+  // the issues card count stays consistent with the coaching insights
+  // below.
+  const pushUpErrors = <FormError>{
+    FormError.hipSag,
+    FormError.pushUpShortRom,
+    FormError.pushUpEccentricTooFast,
+    FormError.pushUpConcentricTooFast,
+    FormError.pushUpTempoInconsistent,
+    FormError.pushUpFatigue,
+  };
   final issues = input.errorsTriggered.where(pushUpErrors.contains).toList();
 
   final audit = const FormAuditor().auditPushUp(
@@ -452,6 +514,33 @@ List<String> _pushUpInsights(SessionSummaryInput input) {
     insights.add(
       'Fatigue detected mid-session. Drop to your knees to maintain '
       'form rather than letting reps degrade.',
+    );
+  }
+
+  // Tempo / fatigue (2026-05-16, curl-parity). Driven off `errorsTriggered`
+  // — the channel the per-exercise push-up tempo enums flow through.
+  if (input.errorsTriggered.contains(FormError.pushUpEccentricTooFast)) {
+    insights.add(
+      'You dropped into some push-ups too quickly. Control the descent — '
+      'a slow, deliberate lowering builds more pressing strength.',
+    );
+  }
+  if (input.errorsTriggered.contains(FormError.pushUpConcentricTooFast)) {
+    insights.add(
+      'Some presses were rushed. Drive up with intent but stay controlled '
+      'through the full range — no snapping the elbows.',
+    );
+  }
+  if (input.errorsTriggered.contains(FormError.pushUpTempoInconsistent)) {
+    insights.add(
+      'Your rep tempo varied widely. A steady cadence is a better strength '
+      'and endurance signal than alternating slow and fast reps.',
+    );
+  }
+  if (input.errorsTriggered.contains(FormError.pushUpFatigue)) {
+    insights.add(
+      'Your press slowed across the set — a fatigue signature. Stop while '
+      'form is clean rather than grinding slow reps.',
     );
   }
 

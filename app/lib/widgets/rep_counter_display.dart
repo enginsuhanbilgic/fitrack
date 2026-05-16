@@ -204,5 +204,17 @@ class _RepCounterDisplayState extends State<RepCounterDisplay> {
     FormError.hipLead => 'Lead with your chest',
     FormError.noKneeFlexion => 'Sit into the squat — bend your knees',
     FormError.hipsForwardOnDescent => 'Push your hips back',
+    FormError.kneeLedDescent => 'Sit back — lead with your hips',
+    FormError.kneeDominantPattern => 'Heels down — weight mid-foot',
+    // Squat + push-up tempo/fatigue (2026-05-16, curl-parity). Live HUD
+    // copy mirrors the TTS cue wording in `_errorMessage`.
+    FormError.squatEccentricTooFast => 'Lower slowly',
+    FormError.squatConcentricTooFast => 'Control the drive up',
+    FormError.squatTempoInconsistent => 'Keep steady tempo',
+    FormError.squatFatigue => "You're slowing down, stay strong",
+    FormError.pushUpEccentricTooFast => 'Lower slowly',
+    FormError.pushUpConcentricTooFast => 'Control the press',
+    FormError.pushUpTempoInconsistent => 'Keep steady tempo',
+    FormError.pushUpFatigue => "You're slowing down, stay strong",
   };
 }

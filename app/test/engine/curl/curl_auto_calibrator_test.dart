@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fitrack/core/constants.dart';
 import 'package:fitrack/core/types.dart';
 import 'package:fitrack/engine/curl/curl_auto_calibrator.dart';
 
@@ -41,13 +42,13 @@ void main() {
         c.recordRepExtremes(70, 170);
         final t = c.currentThresholds!;
         // Post-2026-05-15: anchor = deepest min (60°) and most-extended max (170°),
-        // NOT the arithmetic mean. Margins unchanged.
-        // peak  = min(60, 70) + 15 = 75
-        // start = max(160, 170) - 10 = 160
-        // end   = max(160, 170) - 25 = 145
-        expect(t.peakAngle, closeTo(75, 1e-9));
-        expect(t.startAngle, closeTo(160, 1e-9));
-        expect(t.endAngle, closeTo(145, 1e-9));
+        // NOT the arithmetic mean. Tolerances halved 2026-05-16.
+        // peak  = min(60, 70) + 7.5  = 67.5
+        // start = max(160, 170) - 5  = 165
+        // end   = max(160, 170) - 12.5 = 157.5
+        expect(t.peakAngle, closeTo(67.5, 1e-9));
+        expect(t.startAngle, closeTo(165, 1e-9));
+        expect(t.endAngle, closeTo(157.5, 1e-9));
       },
     );
 
@@ -57,12 +58,13 @@ void main() {
       c.recordRepExtremes(80, 180);
       final t = c.currentThresholds!;
       // Anchor = min(60, 70, 80) = 60 and max(160, 170, 180) = 180.
-      // peak  = 60 + 15 = 75
-      // start = 180 - 10 = 170
-      // end   = 180 - 25 = 155
-      expect(t.peakAngle, closeTo(75, 1e-9));
-      expect(t.startAngle, closeTo(170, 1e-9));
-      expect(t.endAngle, closeTo(155, 1e-9));
+      // Tolerances halved 2026-05-16.
+      // peak  = 60 + 7.5   = 67.5
+      // start = 180 - 5    = 175
+      // end   = 180 - 12.5 = 167.5
+      expect(t.peakAngle, closeTo(67.5, 1e-9));
+      expect(t.startAngle, closeTo(175, 1e-9));
+      expect(t.endAngle, closeTo(167.5, 1e-9));
     });
 
     test('shallow reps DO NOT drift the threshold shallower', () {
@@ -75,7 +77,8 @@ void main() {
       c.recordRepExtremes(72, 165); // Shallow.
       final t = c.currentThresholds!;
       // peak still anchored on 55° (the deepest), not the mean of [55,75,78,72]=70.
-      expect(t.peakAngle, closeTo(55 + 15, 1e-9)); // 70°, not ~85°.
+      // Tolerances halved 2026-05-16: 55 + 7.5 = 62.5.
+      expect(t.peakAngle, closeTo(55 + 7.5, 1e-9)); // 62.5°, not the mean.
     });
   });
 
@@ -126,13 +129,16 @@ void main() {
       for (var i = 0; i < 8; i++) {
         c.recordRepExtremes(60 + (i.isEven ? 0.2 : -0.2), maxSeed[i]);
       }
-      // startAngle = max(samples) - 10, so max(samples) = startAngle + 10.
+      // startAngle = max(samples) - kProfileStartTolerance, so
+      // max(samples) = startAngle + kProfileStartTolerance. Reconstruct via
+      // the live constant so this test survives tolerance retunes.
       // Before injection: max of seed = 167.
-      final maxBefore = c.currentThresholds!.startAngle + 10;
+      final maxBefore =
+          c.currentThresholds!.startAngle + kProfileStartTolerance;
       // Inject: max inside the MAD band (accepted at 168°, slightly above
       // the prior window max of 167), min extreme (rejected).
       c.recordRepExtremes(5, 168);
-      final maxAfter = c.currentThresholds!.startAngle + 10;
+      final maxAfter = c.currentThresholds!.startAngle + kProfileStartTolerance;
       // Max dimension accepted AND higher than prior best → anchor moves
       // upward. Min dimension rejected → peak anchor stays flat.
       expect(maxAfter, greaterThan(maxBefore));
@@ -187,12 +193,13 @@ void main() {
       c.recordRepExtremes(82, 152);
       final t = c.currentThresholds!;
       // Anchor over post-reset window: min(80, 82) = 80, max(150, 152) = 152.
-      // peak  = 80 + 15 = 95   (NOT 95 from pre-reset 60° rep — that's gone)
-      // start = 152 - 10 = 142
-      // end   = 152 - 25 = 127
-      expect(t.peakAngle, closeTo(95, 1e-9));
-      expect(t.startAngle, closeTo(142, 1e-9));
-      expect(t.endAngle, closeTo(127, 1e-9));
+      // Tolerances halved 2026-05-16. The pre-reset 60° rep is gone.
+      // peak  = 80 + 7.5   = 87.5
+      // start = 152 - 5    = 147
+      // end   = 152 - 12.5 = 139.5
+      expect(t.peakAngle, closeTo(87.5, 1e-9));
+      expect(t.startAngle, closeTo(147, 1e-9));
+      expect(t.endAngle, closeTo(139.5, 1e-9));
     });
   });
 }

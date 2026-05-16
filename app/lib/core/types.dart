@@ -26,6 +26,14 @@ enum ExerciseType {
       this == ExerciseType.bicepsCurlSide ||
       // ignore: deprecated_member_use_from_same_package
       this == ExerciseType.bicepsCurl;
+
+  /// Whether this exercise may run with the phone physically rotated to
+  /// landscape. Push-up only — the horizontal body fills a landscape frame
+  /// far better than a portrait one (more pixels per joint → less jitter,
+  /// better hip-sag detection). Curl/squat stay portrait: every downstream
+  /// orientation path is a no-op when this is false, which is the
+  /// regression firewall (curl/squat are byte-for-byte unchanged).
+  bool get allowsLandscape => this == ExerciseType.pushUp;
 }
 
 /// Which side the user is training (affects which arm/leg we track).
@@ -95,6 +103,29 @@ enum FormError {
   /// TTS cue: "Push your hips back". Added 2026-05-15 to coach the
   /// canonical "sit back into the squat" initiation pattern.
   hipsForwardOnDescent,
+
+  /// Knee-led (quad-dominant) descent initiation. Over the SAME early
+  /// descent window as `hipsForwardOnDescent`, the knee's horizontal
+  /// travel out-paced the hip's vertical drop beyond `kSquatKneeLedMinRatio`
+  /// (`|Δknee.x| / Δhip.y_down`, leg-length-normalized). This is the
+  /// industry-standard "sit back into the squat" rule (NSCA/ACSM movement
+  /// screening) — the genuine fault the retired "knees must not pass toes"
+  /// myth gestured at. TTS cue: "Sit back — lead with your hips, not your
+  /// knees." Added 2026-05-16 (Squat Form Audit accuracy rebuild, Phase 2).
+  /// CUE-ONLY — no quality-score deduction until telemetry validates the
+  /// detector (decision 2026-05-16).
+  kneeLedDescent,
+
+  /// Compound knee-dominant pattern. Fires at rep commit ONLY when the
+  /// peak forward-knee-shift AND the peak heel-lift BOTH exceeded their
+  /// warn thresholds in the same rep. Knee-past-ankle alone is
+  /// informational (`forwardKneeShift`, the retired-myth signal); the
+  /// conjunction with heel-lift is the recognized ankle-mobility /
+  /// quad-dominance red flag. TTS cue: "Keep your heels down and weight
+  /// mid-foot." Added 2026-05-16 (Squat Form Audit accuracy rebuild,
+  /// Phase 3). CUE-ONLY — no quality-score deduction until telemetry
+  /// validates the detector (decision 2026-05-16).
+  kneeDominantPattern,
   // Push-up
   hipSag, // shoulder-hip-ankle collinearity deviation > 15°
   pushUpShortRom, // rep completed without elbow reaching bottom threshold
@@ -105,6 +136,19 @@ enum FormError {
   asymmetryLeftLag, // left arm min-angle higher (shallower flexion) — "Left arm is lagging"
   asymmetryRightLag, // right arm min-angle higher (shallower flexion) — "Right arm is lagging"
   fatigue, // concentric velocity degrading across reps
+  // Squat tempo/fatigue (2026-05-16, curl-parity). DESCENDING = eccentric
+  // (lowering), ASCENDING = concentric (lift). Per-exercise enums (not the
+  // generic curl ones) so summary/telemetry/CSV stay unambiguous — matches
+  // the squatDepth / pushUpShortRom exercise-scoped convention.
+  squatEccentricTooFast, // descent phase < kSquatMinEccentricSec
+  squatConcentricTooFast, // ascent phase < kSquatMinConcentricSec
+  squatTempoInconsistent, // ascent variance > kSquatTempoInconsistencyRatio over last N
+  squatFatigue, // ascent velocity degrading across reps
+  // Push-up tempo/fatigue (2026-05-16, curl-parity).
+  pushUpEccentricTooFast, // descent phase < kPushUpMinEccentricSec
+  pushUpConcentricTooFast, // ascent phase < kPushUpMinConcentricSec
+  pushUpTempoInconsistent, // ascent variance > kPushUpTempoInconsistencyRatio over last N
+  pushUpFatigue, // ascent velocity degrading across reps
 }
 
 /// Squat variant — toggles the lean threshold. User-declared at workout start
@@ -157,20 +201,26 @@ enum FeedbackSensitivity {
 /// thresholds are). Verbosity controls *how often the voice fires for a form
 /// error that has already been called out earlier in the session*:
 ///
-/// * [high] — every fire passes the time-cooldown is spoken. Same as the
-///   pre-2026-05-13 behavior. Use when you want maximum coaching audio.
+/// * [high] — every fire that passes the time-cooldown is spoken. Same as
+///   the pre-2026-05-13 behavior. Use when you want maximum coaching audio.
 /// * [medium] — voice fires at most [kTtsVerbosityMediumCap] times per
-///   error per session. Subsequent occurrences are suppressed at the voice
-///   layer only. The visual highlight, the `errorCounts` map, and the
-///   session-end summary still surface every fire — this control silences
-///   *audio*, not detection. Default.
-/// * [low] — voice fires at most [kTtsVerbosityLowCap] time(s) per error
-///   per session. For users who've internalized the cue and want a quiet
-///   workout.
+///   error, THEN mutes — but a *persistent* fault re-alerts once every
+///   [kTtsPersistenceReArmRepsMedium] further faulty reps and re-mutes
+///   (persistence re-arm, 2026-05-16). Suppression is at the voice layer
+///   only; the visual highlight, the `errorCounts` map, and the session-end
+///   summary still surface every fire — this control shapes *audio*, not
+///   detection. Default.
+/// * [low] — voice fires at most [kTtsVerbosityLowCap] time(s) per error,
+///   then mutes; a persistent fault re-alerts on the wider
+///   [kTtsPersistenceReArmRepsLow] window. For users who've internalized the
+///   cue and want a quiet workout but should still be re-nudged if they keep
+///   making the same mistake.
 ///
-/// The cap is **per-error**, not global: hearing "torso swing" three times
-/// does not silence a future "elbow rise" — silencing only tracks the cue
-/// the user has already been told about.
+/// The cap (and its re-arm) is **per-error**, not global: hearing "torso
+/// swing" repeatedly does not silence a future "elbow rise" — tracking only
+/// follows the cue the user has already been told about. A user who *fixes*
+/// a fault stops clearing its cooldown, so the re-arm streak never advances
+/// and they never hear it again; only a persistently-wrong user is re-nudged.
 enum TtsVerbosity {
   low('Low'),
   medium('Medium'),

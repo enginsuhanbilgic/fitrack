@@ -196,6 +196,17 @@ class SessionCard extends StatelessWidget {
     FormError.asymmetryLeftLag => 'Left Arm Lagging',
     FormError.asymmetryRightLag => 'Right Arm Lagging',
     FormError.fatigue => 'Fatigue',
+    // Squat + push-up tempo/fatigue (2026-05-16, curl-parity). Explicit
+    // cases so history cards show clean labels instead of the raw enum
+    // name via the `_ => e.name` fallback (which still covers the
+    // non-tempo squat/push-up form errors as before).
+    FormError.squatEccentricTooFast ||
+    FormError.pushUpEccentricTooFast => 'Lowering Too Fast',
+    FormError.squatConcentricTooFast => 'Driving Up Too Fast',
+    FormError.pushUpConcentricTooFast => 'Pressing Too Fast',
+    FormError.squatTempoInconsistent ||
+    FormError.pushUpTempoInconsistent => 'Unsteady Pace',
+    FormError.squatFatigue || FormError.pushUpFatigue => 'Fatigue',
     _ => e.name,
   };
 

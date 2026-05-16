@@ -524,19 +524,31 @@ void main() {
       },
     );
 
-    test(
-      'init() on squat does NOT query historical baseline (curl-only path)',
-      () async {
-        final spy = _SpyingSessionRepository();
-        final vm = buildVm(
-          exercise: ExerciseType.squat,
-          sessionRepository: spy,
-        );
-        await vm.init();
-        expect(spy.concentricQueries, isEmpty);
-        vm.dispose();
-      },
-    );
+    test('init() queries historical baseline for squat (2026-05-16 '
+        'curl-parity — was curl-only pre-tempo-feature)', () async {
+      // Contract change: the cross-session fatigue baseline is no longer
+      // curl-only. Squat + push-up now hydrate it too (SKILLS §6a). This
+      // test previously asserted the OLD curl-only contract; flipped to
+      // guard the NEW behavior.
+      final spy = _SpyingSessionRepository();
+      final vm = buildVm(exercise: ExerciseType.squat, sessionRepository: spy);
+      await vm.init();
+      expect(spy.concentricQueries, hasLength(1));
+      expect(spy.concentricQueries.first.exercise, ExerciseType.squat);
+      expect(spy.concentricQueries.first.window, const Duration(days: 30));
+      vm.dispose();
+    });
+
+    test('init() queries historical baseline for push-up (2026-05-16 '
+        'curl-parity)', () async {
+      final spy = _SpyingSessionRepository();
+      final vm = buildVm(exercise: ExerciseType.pushUp, sessionRepository: spy);
+      await vm.init();
+      expect(spy.concentricQueries, hasLength(1));
+      expect(spy.concentricQueries.first.exercise, ExerciseType.pushUp);
+      expect(spy.concentricQueries.first.window, const Duration(days: 30));
+      vm.dispose();
+    });
 
     test(
       'init() swallows repository errors and still succeeds (empty baseline fallback)',

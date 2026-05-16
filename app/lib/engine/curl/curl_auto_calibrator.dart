@@ -18,11 +18,12 @@
 ///   * `peakAngle` anchor  = min(_minSamples) → user's deepest demonstrated rep
 ///   * `start/endAngle` anchor = max(_maxSamples) → user's most extended demonstrated rep
 ///
-/// Margins (`kProfilePeakTolerance` etc.) are UNCHANGED — the +15° / −10° /
-/// −25° tolerance bands stay; only the anchor moves from "average" to
-/// "demonstrated best within recent window." Rolling-window (not absolute-
-/// session) so genuine fatigue across a long set gradually relaxes the
-/// anchor — early-set PRs don't lock the threshold forever.
+/// Margins (`kProfilePeakTolerance` etc.) follow the shared constants — as of
+/// the 2026-05-16 halving the bands are +7.5° / −5° / −12.5°; only the anchor
+/// moves from "average" to "demonstrated best within recent window."
+/// Rolling-window (not absolute-session) so genuine fatigue across a long set
+/// gradually relaxes the anchor — early-set PRs don't lock the threshold
+/// forever.
 library;
 
 import 'dart:math' as math;

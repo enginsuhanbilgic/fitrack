@@ -567,6 +567,17 @@ class _SummaryScreenState extends State<SummaryScreen> {
     FormError.hipLead => 'Hip Lead',
     FormError.noKneeFlexion => 'No Knee Flexion',
     FormError.hipsForwardOnDescent => 'Hips Forward on Descent',
+    FormError.kneeLedDescent => 'Knee-Led Descent',
+    FormError.kneeDominantPattern => 'Knee-Dominant Pattern',
+    // Squat + push-up tempo/fatigue (2026-05-16, curl-parity).
+    FormError.squatEccentricTooFast => 'Lowering Too Fast',
+    FormError.squatConcentricTooFast => 'Driving Up Too Fast',
+    FormError.squatTempoInconsistent => 'Unsteady Pace',
+    FormError.squatFatigue => 'Fatigue',
+    FormError.pushUpEccentricTooFast => 'Lowering Too Fast',
+    FormError.pushUpConcentricTooFast => 'Pressing Too Fast',
+    FormError.pushUpTempoInconsistent => 'Unsteady Pace',
+    FormError.pushUpFatigue => 'Fatigue',
   };
 
   /// 5-tier knee-shift bucket label (plan flow-decision plan-time #1).

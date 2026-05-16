@@ -39,7 +39,11 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     required this.variant,
     required this.longFemurLifter,
     SquatFormThresholds formThresholds = SquatFormThresholds.defaults,
+    List<Duration> historicalConcentricDurations = const [],
   }) : _formThresholds = formThresholds,
+       _historicalConcentricDurations = List<Duration>.unmodifiable(
+         historicalConcentricDurations,
+       ),
        _leanWarnDeg = formThresholds.leanWarnFor(
          variant,
          longFemur: longFemurLifter,
@@ -97,12 +101,80 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   /// not yet run for the current rep. Surfaced for telemetry.
   double? _lastRepHipsForwardRatio;
 
+  // ── Knee-led-descent detector (per-rep, 2026-05-16) ───────
+  /// Knee.x and hip.y captured at the t=0 anchor of the SHARED descent
+  /// window (the same `_descentStartTime` the hips-forward sampler opens —
+  /// no second timer). Used to compute the early-descent knee-forward vs
+  /// hip-drop dominance ratio. Null until the first valid anchor frame.
+  double? _descentStartKneeX;
+  double? _descentStartHipY;
+
+  /// Most recent knee.x sample inside the window — the window-close value
+  /// is differenced against `_descentStartKneeX`. Updated every sampled
+  /// frame; the hip-Y counterpart is read from the live pose at close.
+  double? _lastDescentKneeX;
+  double? _lastDescentHipY;
+
+  /// Set during the descent-window evaluation when early knee-forward
+  /// travel dominated hip-drop beyond [kSquatKneeLedMinRatio]. Drained at
+  /// rep completion into the FormError set.
+  bool _kneeLedDescentFired = false;
+
+  /// Count of frames sampled inside the shared descent window for the
+  /// knee-led check (includes the anchor frame). Gates the fail-open floor
+  /// [kSquatKneeLedMinFrames] — a too-short window is dominated by
+  /// pose-detector noise. Mirrors the hips-forward sampler's
+  /// `_descentHipXSamples.length` guard.
+  int _kneeLedSampleCount = 0;
+
+  /// Most recent knee-led ratio (`|Δknee.x| / max(ε, Δhip.y_down)`,
+  /// leg-length-normalized) measured at the close of the descent window.
+  /// > [kSquatKneeLedMinRatio] = knee darted forward instead of hips
+  /// sitting back. Null between rep commit and the next window close.
+  /// Surfaced for the `squat.knee_led` telemetry line.
+  double? _lastRepKneeLedRatio;
+
   /// Latest signed lean reading from the most recent `evaluate()` frame.
   /// Drives the HUD's live forward-lean readout. Distinct from
   /// `_maxLeanDeg` (per-rep peak magnitude); this one is per-frame and
   /// preserves sign so the HUD can show "+32°" (forward) vs "−8°"
   /// (backward) in real time.
   double? _currentSignedLeanDeg;
+
+  // ── Sustained forward-lean gate (per-rep) ─────────────────
+  /// Count of evaluated frames this rep whose signed forward lean exceeded
+  /// `_leanWarnDeg`. Numerator of the sustained-lean fraction. Reset at
+  /// `onDescendingStart` and rep commit.
+  int _leanExceedFrameCount = 0;
+
+  /// Count of frames this rep where a valid (non-null) signed lean was
+  /// measured at all. Denominator of the sustained-lean fraction — only
+  /// frames with a usable shoulder/hip pair count. Reset alongside
+  /// `_leanExceedFrameCount`.
+  int _leanTotalEvalFrameCount = 0;
+
+  // ── Lean sign-convention diagnostics (per-rep, 2026-05-16) ──
+  /// SIGNED lean at the frame where |lean| peaked this rep. Distinct from
+  /// `_maxLeanDeg` (which is `abs(lean)` and loses the sign — the reason a
+  /// `lean_deg=38` telemetry value can't tell us whether the camera saw a
+  /// forward (+) or backward (−) lean). Added to diagnose Bug 4: every
+  /// pre-flight rep logged `lean_deg≈38` yet `lean_exceed_frac=0.0000`,
+  /// which is consistent with the signed value being NEGATIVE at this
+  /// camera angle (so `lean > +30°` never trips). Surfaced as
+  /// `signed_lean=` on `squat.rep` so the next session is conclusive.
+  double? _lastRepSignedLeanAtPeak;
+
+  /// Count of frames this rep that fired `excessiveBackwardLean`
+  /// (`lean < -kSquatBackwardLeanWarnDeg`). If the sign is inverted at the
+  /// user's camera, a genuinely forward-leaning squat will rack up backward
+  /// fires while forward never triggers — this counter is the smoking gun.
+  /// Surfaced as `backward_lean_frames=` on `squat.rep`.
+  int _backwardLeanFrameCount = 0;
+
+  /// Commit-time snapshot of `_backwardLeanFrameCount` (the live counter
+  /// drains at the next `onDescendingStart`; the host reads this getter
+  /// post-commit). Mirrors the `_lastRepLeanExceedFrac` snapshot pattern.
+  int _lastRepBackwardLeanFrameCount = 0;
 
   // ── Hip-lead detection (per-rep) ────────────────────────────
   /// True between `onAscendingStart` and `onAscendingEnd`. Gates per-frame
@@ -141,6 +213,82 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   double? _lastRepKneeShiftRatio;
   double? _lastRepHeelLiftRatio;
 
+  /// Fraction of the last rep's evaluated frames whose forward lean
+  /// exceeded `_leanWarnDeg` (`_leanExceedFrameCount / _leanTotalEvalFrameCount`).
+  /// Snapshotted at commit before the per-rep counters drain. Null when the
+  /// rep had zero evaluable lean frames. Surfaced for the `squat.rep`
+  /// `lean_exceed_frac` telemetry field — this is the channel the offline
+  /// threshold-derivation workflow consumes to retune
+  /// `kSquatLeanSustainedFraction`.
+  double? _lastRepLeanExceedFrac;
+
+  // ── Tempo / fatigue tracking (2026-05-16, curl-parity) ──────────────
+  // Phase mapping: DESCENDING = eccentric (lowering), ASCENDING =
+  // concentric (lift). The STRATEGY pushes the injected `input.now`
+  // timestamp in via stampDescentStart/stampAscentStart/stampAscentEnd
+  // (NOT curl's DateTime.now() — squat uses the test-injectable clock).
+  //
+  // HALF-SQUAT VETO INTERACTION: `stampAscentEnd` computes
+  // `_lastConcentricDuration` (so the per-rep too-fast cue still fires as
+  // feedback on a vetoed half-squat — the user DID rush it), but does NOT
+  // append to `_ascentDurations`. The strategy calls `commitAscentToWindow`
+  // ONLY when the rep actually commits (`!missedDepth`), so a vetoed
+  // half-squat never poisons the tempo-consistency / fatigue rolling
+  // window. This is the one place squat deliberately diverges from curl
+  // (curl has no depth veto, so it appends in onPeakReached).
+  DateTime? _descentStart;
+  DateTime? _ascentStart;
+  Duration? _lastEccentricDuration;
+  Duration? _lastConcentricDuration;
+  int _tempoReArmRepsRemaining = 0;
+  bool _lastRepTempoInconsistent = false;
+  final List<Duration> _ascentDurations = [];
+  bool _fatigueFired = false;
+  final List<Duration> _historicalConcentricDurations;
+
+  /// Ascent (concentric/lift) duration of the most recently committed
+  /// rep, or null on a rep with no measured ascent. Pass-through to the
+  /// host for `concentric_ms` persistence + the cross-session fatigue
+  /// baseline. Mirrors `CurlSideFormAnalyzer.lastConcentricDuration`.
+  Duration? get lastConcentricDuration => _lastConcentricDuration;
+
+  /// Strategy stamps this at IDLE→DESCENDING (alongside the existing
+  /// no-arg `onDescendingStart`). Resets per-rep phase timers.
+  void stampDescentStart(DateTime now) {
+    _descentStart = now;
+    _ascentStart = null;
+    _lastEccentricDuration = null;
+    _lastConcentricDuration = null;
+  }
+
+  /// Strategy stamps this at BOTTOM→ASCENDING. Closes the eccentric
+  /// (descent) timer, opens the concentric (ascent) timer.
+  void stampAscentStart(DateTime now) {
+    if (_descentStart != null) {
+      _lastEccentricDuration = now.difference(_descentStart!);
+    }
+    _ascentStart = now;
+  }
+
+  /// Strategy stamps this at ASCENDING→IDLE BEFORE
+  /// `consumeCompletionErrorsWithDepth`. Closes the concentric timer.
+  /// Does NOT append to the rolling window — see [commitAscentToWindow].
+  void stampAscentEnd(DateTime now) {
+    if (_ascentStart != null) {
+      _lastConcentricDuration = now.difference(_ascentStart!);
+    }
+  }
+
+  /// Strategy calls this ONLY when the rep actually commits (passes the
+  /// half-squat depth veto). Appends the just-measured ascent duration to
+  /// the rolling window the tempo-consistency + fatigue signals read, so
+  /// a vetoed half-squat never contaminates the window.
+  void commitAscentToWindow() {
+    if (_lastConcentricDuration != null) {
+      _ascentDurations.add(_lastConcentricDuration!);
+    }
+  }
+
   /// Active lean threshold (deg) for the lifetime of this analyzer.
   double get leanWarnDeg => _leanWarnDeg;
 
@@ -156,6 +304,24 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
 
   /// Most recent peak heel-lift ratio. Null until first commit.
   double? get lastRepHeelLiftRatio => _lastRepHeelLiftRatio;
+
+  /// Fraction of the most recent rep's evaluated frames whose forward lean
+  /// exceeded the active threshold. Null until first commit OR when the rep
+  /// had zero evaluable lean frames. Read by the host for the `squat.rep`
+  /// `lean_exceed_frac` telemetry field.
+  double? get lastRepLeanExceedFrac => _lastRepLeanExceedFrac;
+
+  /// SIGNED lean at the |lean| peak of the just-committed rep (forward = +,
+  /// backward = −). Diagnostic for the Bug-4 sign-convention question.
+  /// Null until first commit. Read by the host for `squat.rep`
+  /// `signed_lean=`.
+  double? get lastRepSignedLeanAtPeak => _lastRepSignedLeanAtPeak;
+
+  /// Frames in the just-committed rep that fired `excessiveBackwardLean`.
+  /// Read by the host for `squat.rep` `backward_lean_frames=`. A high
+  /// value with `lean_exceed_frac=0` ⇒ sign inversion at the camera.
+  /// Snapshotted at commit (the live counter drains at the next descent).
+  int get lastRepBackwardLeanFrameCount => _lastRepBackwardLeanFrameCount;
 
   /// Most recent hip-lead ratio (`mean(v_y_hip) / mean(v_y_shoulder)` over
   /// the first 30% of ASCENDING). Null when the check hasn't run yet OR
@@ -185,6 +351,14 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   /// telemetry's `ascending_frame_count` field.
   int get ascendingFrameCount => _ascendingFrames.length;
 
+  /// Number of frames sampled inside the shared early-descent window for
+  /// the knee-led check (includes the anchor frame). Reset by
+  /// `onDescendingStart`, so the host reads it between commit and the next
+  /// rep. Exposed for the `squat.knee_led` telemetry's `window_frames`
+  /// field — contextualizes the ratio the same way `ascending_frame_count`
+  /// does for hip-lead.
+  int get kneeLedSampleCount => _kneeLedSampleCount;
+
   /// Live signed forward-lean angle (deg) from the most recent `evaluate()`
   /// frame. Positive = forward lean; negative = backward; null when no
   /// high-confidence shoulder/hip pair was observed yet. The HUD binds to
@@ -196,6 +370,15 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   /// hinged back (correct). Null between rep commit and the next
   /// window close. Surfaced for telemetry.
   double? get lastRepHipsForwardRatio => _lastRepHipsForwardRatio;
+
+  /// Most recent knee-led-descent ratio (`|Δknee.x| / max(ε,
+  /// Δhip.y_down)`, leg-length-normalized) measured at the close of the
+  /// shared descent window. Greater than [kSquatKneeLedMinRatio] means the
+  /// knee darted forward instead of the hips sitting back — the inverse of
+  /// "sit back into the squat." Null between rep commit and the next
+  /// window close. The host reads this for the `squat.knee_led` telemetry
+  /// line.
+  double? get lastRepKneeLedRatio => _lastRepKneeLedRatio;
 
   /// Call at IDLE → DESCENDING. Resets per-rep extremes; preserves the
   /// `_lastRep*` outputs so the strategy can still read the previous rep's
@@ -233,6 +416,17 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _descentHipXSamples.clear();
     _hipsForwardOnDescentFired = false;
     _lastRepHipsForwardRatio = null;
+    _leanExceedFrameCount = 0;
+    _leanTotalEvalFrameCount = 0;
+    _backwardLeanFrameCount = 0;
+    _lastRepSignedLeanAtPeak = null;
+    _descentStartKneeX = null;
+    _descentStartHipY = null;
+    _lastDescentKneeX = null;
+    _lastDescentHipY = null;
+    _kneeLedDescentFired = false;
+    _kneeLedSampleCount = 0;
+    _lastRepKneeLedRatio = null;
   }
 
   /// Call at BOTTOM → ASCENDING. Enables per-frame hip+shoulder Y
@@ -359,10 +553,21 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       final absLean = lean.abs();
       if (_maxLeanDeg == null || absLean > _maxLeanDeg!) {
         _maxLeanDeg = absLean;
+        // Capture the SIGNED value at the magnitude peak — the diagnostic
+        // that survives the abs(). Tells us forward(+) vs backward(−).
+        _lastRepSignedLeanAtPeak = lean;
       }
+      // Sustained-lean gate: accumulate evidence per frame, emit the
+      // verdict ONCE at rep commit (see `consumeCompletionErrorsWithDepth`).
+      // A single over-threshold frame at the deepest point of an otherwise
+      // good rep no longer false-fires `excessiveForwardLean`.
+      _leanTotalEvalFrameCount++;
       if (lean > _leanWarnDeg) {
-        errors.add(FormError.excessiveForwardLean);
+        _leanExceedFrameCount++;
       } else if (lean < -kSquatBackwardLeanWarnDeg) {
+        // Backward lean stays instantaneous — lumbar hyperextension is a
+        // genuine single-frame injury vector, not a sustained-pattern fault.
+        _backwardLeanFrameCount++;
         errors.add(FormError.excessiveBackwardLean);
       }
     }
@@ -395,6 +600,13 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     // `onDescendingStart` itself cannot anchor t=0 because it may fire on
     // a frame where landmarks weren't yet visible.
     _maybeSampleDescentHipX(current, side, now);
+
+    // Knee-led-descent: sample knee.x vs hip.y over the SAME early-descent
+    // window the hip-X sampler opens (shared `_descentStartTime` — no
+    // second timer). Detects knees darting forward instead of hips sitting
+    // back. Called after the hip-X sampler so the t=0 anchor is already
+    // open on the first valid frame.
+    _maybeSampleKneeLedDescent(current, side, now);
 
     return errors;
   }
@@ -473,6 +685,91 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     }
   }
 
+  /// Knee-led-descent sampler. Mirrors [_maybeSampleDescentHipX]'s window
+  /// machinery but measures a different signal: how far the knee travels
+  /// horizontally vs how far the hip drops vertically in the first
+  /// [kSquatHipsForwardWindowMs] of the descent. A correct squat *sits
+  /// back* — large hip-Y drop, small knee-X travel. A knee-dominant fault
+  /// *darts the knee forward* — large knee-X travel, small hip drop.
+  ///
+  /// Shares `_descentStartTime` with the hip-X sampler (the plan forbids a
+  /// second timer): both anchor on the first valid frame and close the
+  /// window at the same elapsed time, so the two early-descent signals are
+  /// directly comparable. This sampler keys its own anchor off
+  /// `_descentStartKneeX == null` (rather than `_descentStartTime`) so the
+  /// call ordering with the hip-X sampler doesn't matter — whichever opens
+  /// the timer, this one captures its own anchor on the same frame.
+  ///
+  /// Sign convention: in screen coords Y=0 is top, so a descending hip has
+  /// INCREASING y. `Δhip.y_down = endHipY - startHipY` is positive on a
+  /// real descent. Knee-X travel is taken as an absolute magnitude — the
+  /// fault is "knee moved a lot horizontally regardless of direction"
+  /// relative to a small hip drop. Both deltas are leg-length-normalized so
+  /// the ratio is scale-invariant; `ratio = |Δknee.x| / max(ε, Δhip.y_down)`.
+  void _maybeSampleKneeLedDescent(
+    PoseResult current,
+    ExerciseSide side,
+    DateTime? now,
+  ) {
+    if (_lastRepKneeLedRatio != null) return; // window already graded
+    final hip = current.landmark(
+      side == ExerciseSide.left ? LM.leftHip : LM.rightHip,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final knee = current.landmark(
+      side == ExerciseSide.left ? LM.leftKnee : LM.rightKnee,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    final ankle = current.landmark(
+      side == ExerciseSide.left ? LM.leftAnkle : LM.rightAnkle,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    if (hip == null || knee == null || ankle == null) return;
+    final t = now ?? DateTime.now();
+    // First valid frame for THIS sampler: anchor the knee.x / hip.y
+    // reference. `_descentStartTime` may already be set by the hip-X
+    // sampler (called first) — that's fine, we reuse it as the shared
+    // window clock. If for some reason this sampler sees a valid frame
+    // before the hip-X one, set the shared timer here too.
+    if (_descentStartKneeX == null) {
+      _descentStartTime ??= t;
+      _descentStartKneeX = knee.x;
+      _descentStartHipY = hip.y;
+      _descentStartLegLen ??= _euclidean(hip, ankle);
+      _lastDescentKneeX = knee.x;
+      _lastDescentHipY = hip.y;
+      _kneeLedSampleCount = 1;
+      return;
+    }
+    _lastDescentKneeX = knee.x;
+    _lastDescentHipY = hip.y;
+    _kneeLedSampleCount++;
+    final elapsedMs = t.difference(_descentStartTime!).inMilliseconds;
+    if (elapsedMs < kSquatHipsForwardWindowMs) return;
+    if (_kneeLedSampleCount < kSquatKneeLedMinFrames) {
+      // Fail-open: too few samples in the window to grade. Mark as graded
+      // (null ratio) so the check doesn't re-run later in the same rep.
+      _lastRepKneeLedRatio = 0.0;
+      return;
+    }
+    final legLen = _descentStartLegLen;
+    if (legLen == null || legLen < 1e-6) {
+      _lastRepKneeLedRatio = 0.0;
+      return;
+    }
+    final kneeTravel = (_lastDescentKneeX! - _descentStartKneeX!).abs();
+    // Hip drop in screen-Y (positive on a real descent). Clamp the
+    // denominator at a small epsilon so a near-zero hip drop (the user
+    // barely sank) doesn't explode the ratio into a false positive — a
+    // shallow rep is already caught by `squatDepth`, not this detector.
+    final hipDrop = math.max(1e-6, _lastDescentHipY! - _descentStartHipY!);
+    final ratio = (kneeTravel / legLen) / (hipDrop / legLen);
+    _lastRepKneeLedRatio = ratio;
+    if (ratio > kSquatKneeLedMinRatio) {
+      _kneeLedDescentFired = true;
+    }
+  }
+
   /// Base-contract stub. Squat completion requires the effective bottom
   /// angle (long-femur adaptation), so callers must use
   /// [consumeCompletionErrorsWithDepth] instead.
@@ -503,6 +800,17 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       errors.add(FormError.hipLead);
     }
 
+    // Sustained forward-lean verdict. Emitted once per rep iff a meaningful
+    // fraction of the rep's evaluated frames held the lean over threshold.
+    // Fails OPEN below the min-frame floor (mirrors `kSquatHipsForwardMinFrames`
+    // / `kHipLeadMinAscendingFrames`) — a too-short rep can't carry enough
+    // signal to grade, so it's silently passed rather than false-flagged.
+    if (_leanTotalEvalFrameCount >= kSquatLeanMinEvalFrames &&
+        _leanExceedFrameCount / _leanTotalEvalFrameCount >=
+            kSquatLeanSustainedFraction) {
+      errors.add(FormError.excessiveForwardLean);
+    }
+
     // No-knee-flexion: user pivoted at the hip without bending the knees.
     // Fires only when BOTH the peak lean was substantial AND the knee delta
     // from descent-start to bottom was small. Either condition alone is
@@ -525,22 +833,134 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       errors.add(FormError.hipsForwardOnDescent);
     }
 
+    // Knee-led-descent: early knee-X travel dominated hip-Y drop beyond
+    // `kSquatKneeLedMinRatio` over the shared descent window. Flag was set
+    // inside `_maybeSampleKneeLedDescent` when the window closed. Distinct
+    // from `hipsForwardOnDescent` — that detector measures the hip drifting
+    // toward the toes; this one measures the knee out-pacing the hip drop.
+    // Both can fire on the same rep (different facets of the same
+    // knee-dominant initiation), or independently.
+    if (_kneeLedDescentFired) {
+      errors.add(FormError.kneeLedDescent);
+    }
+
+    // Compound knee-dominant pattern (Phase 3, 2026-05-16). Knee-past-ankle
+    // ALONE is informational only (`forwardKneeShift` — the retired "knees
+    // must not pass toes" myth lives there, no TTS, no penalty). It becomes
+    // a genuine fault ONLY when it co-occurs with heel-lift in the same
+    // rep: forward knee travel WITH the heel coming up is the recognized
+    // ankle-dorsiflexion-restriction / quad-dominance red flag (the heel
+    // lifting is what makes the knee travel pathological rather than the
+    // normal forward tracking of a deep squat). The conjunction is the
+    // signal; either condition alone is benign-or-already-covered.
+    if (_maxKneeShiftRatio != null &&
+        _maxKneeShiftRatio! > _formThresholds.kneeShiftWarnRatio &&
+        _maxHeelLiftRatio != null &&
+        _maxHeelLiftRatio! > _formThresholds.heelLiftWarnRatio) {
+      errors.add(FormError.kneeDominantPattern);
+    }
+
+    // Tempo / fatigue (curl-parity). The strategy has already called
+    // `stampAscentEnd` before this, so the phase durations are final.
+    // These per-rep cues fire as feedback EVEN on a vetoed half-squat
+    // (the user did rush it). Tempo-inconsistency + fatigue read
+    // `_ascentDurations`, which only ever contains committed reps (the
+    // strategy calls `commitAscentToWindow` only on `!missedDepth`), so
+    // a half-squat can't skew them.
+    if (_lastEccentricDuration != null &&
+        _lastEccentricDuration!.inMilliseconds < kSquatMinEccentricSec * 1000) {
+      errors.add(FormError.squatEccentricTooFast);
+    }
+    if (_lastConcentricDuration != null &&
+        _lastConcentricDuration!.inMilliseconds <
+            kSquatMinConcentricSec * 1000) {
+      errors.add(FormError.squatConcentricTooFast);
+    }
+
+    _lastRepTempoInconsistent = false;
+    if (_tempoReArmRepsRemaining > 0) {
+      _tempoReArmRepsRemaining--;
+    } else if (_ascentDurations.length >= kSquatTempoConsistencyWindow) {
+      final window = _ascentDurations.sublist(
+        _ascentDurations.length - kSquatTempoConsistencyWindow,
+      );
+      final ms = window.map((d) => d.inMilliseconds.toDouble()).toList();
+      final mean = ms.reduce((a, b) => a + b) / ms.length;
+      if (mean > 0) {
+        final spread =
+            ms.reduce((a, b) => a > b ? a : b) -
+            ms.reduce((a, b) => a < b ? a : b);
+        if (spread / mean > kSquatTempoInconsistencyRatio) {
+          _lastRepTempoInconsistent = true;
+          _tempoReArmRepsRemaining = kSquatTempoConsistencyReArmReps;
+        }
+      }
+    }
+    if (_lastRepTempoInconsistent) {
+      errors.add(FormError.squatTempoInconsistent);
+    }
+
+    if (!_fatigueFired && _ascentDurations.length >= kSquatFatigueMinReps) {
+      final firstAvg = _avgDurationMs(
+        _ascentDurations.sublist(0, kSquatFatigueWindowSize),
+      );
+      final lastAvg = _avgDurationMs(
+        _ascentDurations.sublist(
+          _ascentDurations.length - kSquatFatigueWindowSize,
+        ),
+      );
+      final baseline = math.max(firstAvg, _historicalMedianMs());
+      if (baseline > 0 && lastAvg / baseline > kSquatFatigueSlowdownRatio) {
+        errors.add(FormError.squatFatigue);
+        _fatigueFired = true;
+      }
+    }
+
     _lastRepQuality = _computeQualityScore(
       effectiveBottomAngle: effectiveBottomAngle,
     );
     _lastRepLeanDeg = _maxLeanDeg;
     _lastRepKneeShiftRatio = _maxKneeShiftRatio;
     _lastRepHeelLiftRatio = _maxHeelLiftRatio;
+    // Snapshot the sustained-lean fraction BEFORE the counters drain below
+    // so the host can emit it on the `squat.rep` telemetry line. Null when
+    // the rep had no evaluable lean frames (no usable shoulder/hip pair).
+    _lastRepLeanExceedFrac = _leanTotalEvalFrameCount > 0
+        ? _leanExceedFrameCount / _leanTotalEvalFrameCount
+        : null;
+    // Snapshot the backward-fire count before it drains (Bug-4 sign
+    // diagnostic). `_lastRepSignedLeanAtPeak` needs no snapshot — it is
+    // only assigned on a |lean| peak and reset at `onDescendingStart`, so
+    // it already holds the just-committed rep's value here.
+    _lastRepBackwardLeanFrameCount = _backwardLeanFrameCount;
 
     _minKneeAngle = null;
     _maxLeanDeg = null;
     _maxKneeShiftRatio = null;
     _maxHeelLiftRatio = null;
     _startKneeAngle = null;
+    _leanExceedFrameCount = 0;
+    _leanTotalEvalFrameCount = 0;
     // `_ascendingFrames` is cleared at the NEXT `onDescendingStart` so a
     // test that inspects mid-rep state can still read the buffer
     // post-commit. `_lastRepHipLead*` fields drain the same way.
     return errors;
+  }
+
+  static double _avgDurationMs(List<Duration> durations) {
+    if (durations.isEmpty) return 0;
+    final totalMs = durations.fold<int>(0, (sum, d) => sum + d.inMilliseconds);
+    return totalMs / durations.length;
+  }
+
+  double _historicalMedianMs() {
+    if (_historicalConcentricDurations.isEmpty) return 0.0;
+    final sorted =
+        _historicalConcentricDurations.map((d) => d.inMilliseconds).toList()
+          ..sort();
+    final n = sorted.length;
+    if (n.isOdd) return sorted[n ~/ 2].toDouble();
+    return (sorted[n ~/ 2 - 1] + sorted[n ~/ 2]) / 2.0;
   }
 
   @override
@@ -553,6 +973,7 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _lastRepLeanDeg = null;
     _lastRepKneeShiftRatio = null;
     _lastRepHeelLiftRatio = null;
+    _lastRepLeanExceedFrac = null;
     _ascendingPhaseActive = false;
     _ascendingFrames.clear();
     _lastRepHipLeadFired = false;
@@ -568,6 +989,30 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _hipsForwardOnDescentFired = false;
     _lastRepHipsForwardRatio = null;
     _currentSignedLeanDeg = null;
+    _leanExceedFrameCount = 0;
+    _leanTotalEvalFrameCount = 0;
+    _backwardLeanFrameCount = 0;
+    _lastRepBackwardLeanFrameCount = 0;
+    _lastRepSignedLeanAtPeak = null;
+    _descentStartKneeX = null;
+    _descentStartHipY = null;
+    _lastDescentKneeX = null;
+    _lastDescentHipY = null;
+    _kneeLedDescentFired = false;
+    _kneeLedSampleCount = 0;
+    _lastRepKneeLedRatio = null;
+    // Tempo / fatigue state — cleared on reset, mirroring
+    // CurlSideFormAnalyzer.reset(). Fresh analyzer per session, so this is
+    // the session-boundary clear; the fatigue one-shot + tempo window do
+    // NOT survive a reset (parity with curl).
+    _descentStart = null;
+    _ascentStart = null;
+    _lastEccentricDuration = null;
+    _lastConcentricDuration = null;
+    _ascentDurations.clear();
+    _tempoReArmRepsRemaining = 0;
+    _lastRepTempoInconsistent = false;
+    _fatigueFired = false;
   }
 
   // ── Internals ────────────────────────────────────────────

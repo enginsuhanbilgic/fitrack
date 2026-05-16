@@ -118,6 +118,32 @@ WorkoutCompletedEvent buildSquatEvent({
   );
 }
 
+/// Minimal push-up event (2026-05-16, tempo/fatigue parity). Push-up has no
+/// per-rep metrics struct of its own; the only per-rep persisted field is
+/// `concentric_ms` (the ascent duration), supplied via the
+/// `concentricDurations` arg to `insertCompletedSession` like curl/squat.
+WorkoutCompletedEvent buildPushUpEvent({int reps = 4}) {
+  final qualities = List<double>.generate(reps, (i) => 0.70 + 0.02 * i);
+  return WorkoutCompletedEvent(
+    exercise: ExerciseType.pushUp,
+    totalReps: reps,
+    totalSets: 1,
+    sessionDuration: const Duration(seconds: 60),
+    averageQuality: qualities.reduce((a, b) => a + b) / qualities.length,
+    detectedView: CurlCameraView.unknown,
+    repQualities: qualities,
+    fatigueDetected: false,
+    asymmetryDetected: false,
+    eccentricTooFastCount: 0,
+    errorsTriggered: const {FormError.pushUpShortRom},
+    curlRepRecords: const [],
+    curlBucketSummaries: const [],
+    squatVariant: SquatVariant.bodyweight,
+    squatLongFemurLifter: false,
+    squatRepMetrics: const [],
+  );
+}
+
 void main() {
   initSqfliteFfi();
 
@@ -516,6 +542,46 @@ void main() {
       );
       expect(result, hasLength(2));
     });
+
+    test(
+      'push-up + squat concentric durations round-trip, filtered by exercise '
+      '(2026-05-16 curl-parity)',
+      () async {
+        await repo.insertCompletedSession(
+          buildPushUpEvent(reps: 3),
+          startedAt: DateTime.now().subtract(const Duration(days: 3)),
+          concentricDurations: const [
+            Duration(milliseconds: 700),
+            Duration(milliseconds: 720),
+            Duration(milliseconds: 740),
+          ],
+        );
+        await repo.insertCompletedSession(
+          buildSquatEvent(reps: 2),
+          startedAt: DateTime.now().subtract(const Duration(days: 1)),
+          concentricDurations: const [
+            Duration(milliseconds: 900),
+            Duration(milliseconds: 950),
+          ],
+        );
+        final pushUps = await repo.recentConcentricDurations(
+          exercise: ExerciseType.pushUp,
+          window: const Duration(days: 30),
+        );
+        expect(
+          pushUps.map((d) => d.inMilliseconds).toList(),
+          [700, 720, 740],
+          reason: 'push-up now persists concentric_ms (was the parity gap)',
+        );
+        final squats = await repo.recentConcentricDurations(
+          exercise: ExerciseType.squat,
+          window: const Duration(days: 30),
+        );
+        expect(squats.map((d) => d.inMilliseconds).toList(), [900, 950]);
+        // Cross-exercise isolation: a push-up query must not see squat rows.
+        expect(pushUps, isNot(contains(const Duration(milliseconds: 900))));
+      },
+    );
   });
 
   group(
@@ -678,6 +744,44 @@ void main() {
         expect(result.map((d) => d.inMilliseconds).toList(), [150, 160]);
       },
     );
+
+    test('getSession populates RepRow.concentricMs — InMemory mirrors SQLite '
+        '(2026-05-16 — the one DB-layer parity gap that was fixed)', () async {
+      // Curl path.
+      final curlId = await repo.insertCompletedSession(
+        buildCurlEvent(reps: 2),
+        startedAt: DateTime.now(),
+        concentricDurations: const [
+          Duration(milliseconds: 210),
+          Duration(milliseconds: 220),
+        ],
+      );
+      final curl = (await repo.getSession(curlId))!;
+      expect(
+        curl.reps.map((r) => r.concentricMs).toList(),
+        [210, 220],
+        reason: 'curl getSession must round-trip concentricMs',
+      );
+      // Non-curl (push-up) path — the gap was that this returned null.
+      final pushId = await repo.insertCompletedSession(
+        buildPushUpEvent(reps: 3),
+        startedAt: DateTime.now(),
+        concentricDurations: const [
+          Duration(milliseconds: 700),
+          Duration(milliseconds: 720),
+          Duration(milliseconds: 740),
+        ],
+      );
+      final push = (await repo.getSession(pushId))!;
+      expect(
+        push.reps.map((r) => r.concentricMs).toList(),
+        [700, 720, 740],
+        reason:
+            'non-curl getSession must populate concentricMs identically '
+            'to SQLite (was null pre-fix → fatigue baseline broke for '
+            'squat/push-up in any InMemory-backed test)',
+      );
+    });
   });
 
   group('Squat per-rep metrics — schema v3 round-trip', () {
