@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants.dart';
+import '../core/exercise_targets.dart';
 import '../core/theme.dart';
 import '../core/types.dart';
 import '../engine/rep_counter.dart' show RepSnapshot;
@@ -33,11 +34,15 @@ class WorkoutScreen extends StatefulWidget {
   /// legacy behavior treats `both` as sideLeft seeding).
   final ExerciseSide curlSide;
 
+  /// Target reps for rep exercises, or target clean seconds for plank.
+  final int? targetCount;
+
   const WorkoutScreen({
     super.key,
     required this.exercise,
     this.forceCalibration = false,
     this.curlSide = ExerciseSide.both,
+    this.targetCount,
   });
 
   @override
@@ -46,6 +51,7 @@ class WorkoutScreen extends StatefulWidget {
 
 class _WorkoutScreenState extends State<WorkoutScreen> {
   late final WorkoutViewModel _vm;
+  late final int _targetCount;
   StreamSubscription<WorkoutCompletedEvent>? _completionSub;
 
   /// Latch so `_onVmTick` only pops once even though `notifyListeners` fires
@@ -57,8 +63,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   void initState() {
     super.initState();
     final services = AppServicesScope.read(context);
+    _targetCount = ExerciseTargetConfig.forExercise(
+      widget.exercise,
+    ).sanitize(widget.targetCount);
     _vm = WorkoutViewModel(
       exercise: widget.exercise,
+      targetCount: _targetCount,
       forceCalibration: widget.forceCalibration,
       curlSide: widget.curlSide,
       profileRepository: services.profileRepository,
@@ -734,6 +744,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                   child: _MinimalHud(
                     snapshot: s.snap,
                     exercise: widget.exercise,
+                    targetCount: _targetCount,
                   ),
                 )
               : const SizedBox.shrink(),
@@ -1441,9 +1452,13 @@ const List<_CoachTip> _kCoachTips = [
 class _MinimalHud extends StatefulWidget {
   final RepSnapshot snapshot;
   final ExerciseType exercise;
-  const _MinimalHud({required this.snapshot, required this.exercise});
+  final int targetCount;
+  const _MinimalHud({
+    required this.snapshot,
+    required this.exercise,
+    required this.targetCount,
+  });
 
-  static const int _targetReps = 12;
   static const int _secsPerTipRotation = 4;
 
   static String _formErrorLabel(FormError e) {
@@ -1515,7 +1530,7 @@ class _MinimalHudState extends State<_MinimalHud> {
   Widget build(BuildContext context) {
     final snapshot = widget.snapshot;
     final isPlank = widget.exercise == ExerciseType.plank;
-    final target = isPlank ? kPlankTargetHoldSeconds : _MinimalHud._targetReps;
+    final target = widget.targetCount;
     final ft = FiTrackColors.of(context);
     final isLight = Theme.of(context).brightness == Brightness.light;
     final errors = snapshot.formErrors;

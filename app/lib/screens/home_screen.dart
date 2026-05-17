@@ -5,11 +5,13 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants.dart';
+import '../core/exercise_targets.dart';
 import '../core/theme.dart';
 import '../core/types.dart';
 import '../engine/curl/curl_rom_profile.dart';
@@ -247,9 +249,16 @@ class _HomeScreenState extends State<HomeScreen> {
       await prefs.setSquatVariant(selected);
       if (!mounted) return;
     }
+    final targetCount = await _showTargetPicker(exercise);
+    if (targetCount == null) return;
+    if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => WorkoutScreen(exercise: exercise, curlSide: curlSide),
+        builder: (_) => WorkoutScreen(
+          exercise: exercise,
+          curlSide: curlSide,
+          targetCount: targetCount,
+        ),
       ),
     );
     if (!mounted) return;
@@ -257,6 +266,114 @@ class _HomeScreenState extends State<HomeScreen> {
     await _homeVm?.load();
     if (!mounted) return;
     await _historyTabKey.currentState?.reloadFromSettingsPop();
+  }
+
+  Future<int?> _showTargetPicker(ExerciseType exercise) async {
+    final config = ExerciseTargetConfig.forExercise(exercise);
+    final controller = TextEditingController();
+    try {
+      return await showModalBottomSheet<int>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: FiTrackColors.of(context).surface2,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        builder: (ctx) {
+          final ft = FiTrackColors.of(ctx);
+          final cs = Theme.of(ctx).colorScheme;
+          var customValue = config.defaultValue;
+          bool customValid = true;
+
+          return StatefulBuilder(
+            builder: (ctx, setModalState) {
+              final bottomInset = MediaQuery.viewInsetsOf(ctx).bottom;
+              final unit = config.isTimed ? 'seconds' : 'reps';
+              final customText = config.isTimed
+                  ? '${config.labelFor(customValue)} target'
+                  : '$customValue reps target';
+
+              void updateCustom(String value) {
+                final parsed = int.tryParse(value.trim());
+                setModalState(() {
+                  customValid = parsed != null &&
+                      parsed >= config.min &&
+                      parsed <= config.max;
+                  if (parsed != null) customValue = parsed;
+                });
+              }
+
+              return SafeArea(
+                top: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(16, 16, 16, bottomInset + 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        config.isTimed ? 'Set hold target' : 'Set rep target',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: cs.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${exercise.label} target: ${config.min}-${config.max} $unit',
+                        style: TextStyle(color: ft.textDim, fontSize: 13),
+                      ),
+                      const SizedBox(height: 16),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          for (final value in config.presets)
+                            _TargetOptionButton(
+                              label: config.labelFor(value),
+                              onTap: () => Navigator.of(ctx).pop(value),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      TextField(
+                        controller: controller,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        decoration: InputDecoration(
+                          labelText: 'Custom $unit',
+                          helperText: customValid
+                              ? customText
+                              : 'Enter ${config.min}-${config.max} $unit',
+                          errorText: customValid ? null : 'Out of range',
+                          border: const OutlineInputBorder(),
+                        ),
+                        onChanged: updateCustom,
+                      ),
+                      const SizedBox(height: 14),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: customValid && controller.text.isNotEmpty
+                              ? () => Navigator.of(ctx).pop(customValue)
+                              : null,
+                          child: const Text('Start'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      controller.dispose();
+    }
   }
 
   Future<void> _openSettings() async {
@@ -1346,6 +1463,28 @@ class _ExerciseCard extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tab 2 — History
 // ─────────────────────────────────────────────────────────────────────────────
+
+class _TargetOptionButton extends StatelessWidget {
+  const _TargetOptionButton({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ft = FiTrackColors.of(context);
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Theme.of(context).colorScheme.onSurface,
+        side: BorderSide(color: ft.stroke),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      ),
+      child: Text(label),
+    );
+  }
+}
 
 class _HistoryTab extends StatefulWidget {
   const _HistoryTab({super.key});

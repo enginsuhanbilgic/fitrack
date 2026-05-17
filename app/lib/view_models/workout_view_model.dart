@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/constants.dart';
+import '../core/exercise_targets.dart';
 import '../core/form_thresholds.dart';
 import '../core/squat_form_thresholds.dart';
 import '../core/platform_config.dart';
@@ -396,6 +398,7 @@ class WorkoutViewModel extends ChangeNotifier {
   final SessionRepository _sessionRepository;
   final PreferencesRepository _preferencesRepository;
   late final RepCounter _repCounter;
+  final int targetCount;
 
   // ── Engine ─────────────────────────────────────────────
   final LandmarkSmoother _displaySmoother = LandmarkSmoother(
@@ -725,12 +728,16 @@ class WorkoutViewModel extends ChangeNotifier {
     required ProfileRepository profileRepository,
     required SessionRepository sessionRepository,
     required PreferencesRepository preferencesRepository,
+    int? targetCount,
     this.forceCalibration = false,
     this.curlSide = ExerciseSide.both,
     CameraService? camera,
     PoseService? pose,
     TtsService? tts,
-  }) : _camera = camera ?? CameraService(),
+  }) : targetCount = ExerciseTargetConfig.forExercise(
+         exercise,
+       ).sanitize(targetCount),
+       _camera = camera ?? CameraService(),
        _pose = pose ?? MlKitPoseService(),
        _tts = tts ?? TtsService(),
        _profileRepository = profileRepository,
@@ -3150,20 +3157,27 @@ class WorkoutViewModel extends ChangeNotifier {
         }
       }
       if (snapshot.formErrors.isNotEmpty) _onFormErrors(snapshot.formErrors);
-      // Rep-commit TTS: one short number per counted rep. Guarded against set
-      // reset (where reps rolls back to 0). Suppressed during a debug
+      // Progress audio: rep exercises speak counts; plank uses milestone
+      // speech plus a light click between milestones. Suppressed during debug
       // session — the user explicitly opted into silent observation. Squat
       // mirrors the curl contract.
+      final previousReps = _snapshot.reps;
+      final advanced = snapshot.reps > previousReps;
       final isDebugSilent =
           (kCurlDebugSessionEnabled && _isCurlDebugSession) ||
           (kSquatDebugSessionEnabled && _isSquatDebugSession) ||
           (kPushUpDebugSessionEnabled && _isPushUpDebugSession);
-      if (!isDebugSilent && snapshot.reps > _snapshot.reps) {
-        _tts.speak('${snapshot.reps}');
-      }
       _landmarks = smoothed;
       _snapshot = snapshot;
       notifyListeners();
+      if (advanced && snapshot.reps >= targetCount) {
+        if (!isDebugSilent) unawaited(_tts.speak('Well done'));
+        _triggerCompleted();
+        return;
+      }
+      if (!isDebugSilent && advanced) {
+        _playProgressCue(snapshot.reps);
+      }
     } else if (hasPartialPose) {
       // Partial occlusion — user still present.
       _absenceStart = null;
@@ -3197,6 +3211,24 @@ class WorkoutViewModel extends ChangeNotifier {
         _triggerCompleted();
       }
     }
+  }
+
+  void _playProgressCue(int count) {
+    if (exercise == ExerciseType.plank) {
+      if (_shouldSpeakPlankTime(count)) {
+        unawaited(_tts.speak('$count seconds'));
+      } else {
+        unawaited(SystemSound.play(SystemSoundType.click));
+      }
+      return;
+    }
+    unawaited(_tts.speak('$count'));
+  }
+
+  bool _shouldSpeakPlankTime(int seconds) {
+    if (seconds <= 0) return false;
+    if (seconds <= 120) return seconds % 10 == 0;
+    return seconds % 30 == 0;
   }
 
   /// Whether the given form error should be suppressed from the TTS path.
