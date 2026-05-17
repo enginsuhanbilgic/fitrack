@@ -88,6 +88,7 @@ class SessionSummaryViewModel {
     if (input.exercise.isCurl) return _fromCurl(input);
     if (input.exercise == ExerciseType.squat) return _fromSquat(input);
     if (input.exercise == ExerciseType.pushUp) return _fromPushUp(input);
+    if (input.exercise == ExerciseType.plank) return _fromPlank(input);
     throw StateError('Unhandled exercise: ${input.exercise}');
   }
 }
@@ -545,5 +546,78 @@ List<String> _pushUpInsights(SessionSummaryInput input) {
   }
 
   _appendFallbackInsight(insights, input);
+  return insights;
+}
+
+SessionSummaryViewModel _fromPlank(SessionSummaryInput input) {
+  final quality = input.repQualities.isNotEmpty
+      ? input.repQualities.reduce((a, b) => a + b) / input.repQualities.length
+      : input.averageQuality;
+
+  const plankErrors = <FormError>{
+    FormError.plankArmAngle,
+    FormError.plankBodyLine,
+  };
+  final issues = input.errorsTriggered.where(plankErrors.contains).toList();
+
+  final audit = const FormAuditor().auditPlank(
+    holdSeconds: input.totalReps,
+    errorCounts: input.errorCounts,
+  );
+
+  return SessionSummaryViewModel(
+    exerciseLabel: input.exercise.label,
+    qualityPct: _qualityPct(quality),
+    grade: _gradeLabel(quality),
+    heroSubtitle: _plankQualitySubtitle(quality, input.totalReps),
+    reps: input.totalReps,
+    sets: input.totalSets,
+    duration: input.sessionDuration,
+    variantLabels: const [],
+    repQualities: input.repQualities,
+    formIssues: issues,
+    formIssueCounts: input.errorCounts,
+    insights: _plankInsights(input),
+    formAudit: audit,
+  );
+}
+
+String _plankQualitySubtitle(double? q, int holdSeconds) {
+  if (holdSeconds == 0) {
+    return 'No clean hold seconds were recorded.';
+  }
+  if (q == null) return 'No quality data captured for this hold.';
+  if (q >= 0.85) return 'Strong hold. Keep that straight body line.';
+  if (q >= 0.70) return 'Good hold. A few posture breaks were detected.';
+  return 'Form broke during the hold. Review the cues below.';
+}
+
+List<String> _plankInsights(SessionSummaryInput input) {
+  final insights = <String>[];
+
+  if (input.totalReps == 0) {
+    insights.add(
+      'No clean plank time was counted. Set the phone to a side view a few '
+      'meters away so shoulders, elbows, hips, and ankles stay visible.',
+    );
+    return insights;
+  }
+
+  if (input.errorsTriggered.contains(FormError.plankArmAngle)) {
+    insights.add(
+      'Your support position drifted. Keep elbows close to 90 degrees and '
+      'stack shoulders over elbows.',
+    );
+  }
+  if (input.errorsTriggered.contains(FormError.plankBodyLine)) {
+    insights.add(
+      'Your back or hips moved out of line. Brace your core and keep a '
+      'straight line from shoulders through hips to ankles.',
+    );
+  }
+
+  if (insights.isEmpty) {
+    insights.add('Clean plank hold. Add time gradually while preserving form.');
+  }
   return insights;
 }

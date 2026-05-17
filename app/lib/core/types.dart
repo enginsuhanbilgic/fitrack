@@ -14,7 +14,8 @@ enum ExerciseType {
   @Deprecated('Use bicepsCurlSide')
   bicepsCurl('Biceps Curl'),
   squat('Squat'),
-  pushUp('Push-up');
+  pushUp('Push-up'),
+  plank('Plank');
 
   final String label;
   const ExerciseType(this.label);
@@ -33,7 +34,8 @@ enum ExerciseType {
   /// better hip-sag detection). Curl/squat stay portrait: every downstream
   /// orientation path is a no-op when this is false, which is the
   /// regression firewall (curl/squat are byte-for-byte unchanged).
-  bool get allowsLandscape => this == ExerciseType.pushUp;
+  bool get allowsLandscape =>
+      this == ExerciseType.pushUp || this == ExerciseType.plank;
 }
 
 /// Which side the user is training (affects which arm/leg we track).
@@ -149,6 +151,9 @@ enum FormError {
   pushUpConcentricTooFast, // ascent phase < kPushUpMinConcentricSec
   pushUpTempoInconsistent, // ascent variance > kPushUpTempoInconsistencyRatio over last N
   pushUpFatigue, // ascent velocity degrading across reps
+  // Plank
+  plankArmAngle, // elbow angle or shoulder-elbow stack is outside the hold window
+  plankBodyLine, // shoulder-hip-ankle line lost during the hold
 }
 
 /// Squat variant — toggles the lean threshold. User-declared at workout start
@@ -456,6 +461,7 @@ class ExerciseRequirements {
       case ExerciseType.squat:
         return const ExerciseRequirements([23, 24, 25, 26, 27, 28]);
       case ExerciseType.pushUp:
+      case ExerciseType.plank:
         return const ExerciseRequirements([
           11,
           12,

@@ -216,5 +216,7 @@ class _RepCounterDisplayState extends State<RepCounterDisplay> {
     FormError.pushUpConcentricTooFast => 'Control the press',
     FormError.pushUpTempoInconsistent => 'Keep steady tempo',
     FormError.pushUpFatigue => "You're slowing down, stay strong",
+    FormError.plankArmAngle => 'Stack shoulders over elbows',
+    FormError.plankBodyLine => 'Keep back and hips straight',
   };
 }

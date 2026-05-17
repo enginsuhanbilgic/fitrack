@@ -556,6 +556,24 @@ class WorkoutViewModel extends ChangeNotifier {
     LM.rightHip,
     LM.rightAnkle,
   ];
+  static const List<int> _plankLeftCoreLandmarks = [
+    LM.leftShoulder,
+    LM.leftElbow,
+    LM.leftHip,
+  ];
+  static const List<int> _plankRightCoreLandmarks = [
+    LM.rightShoulder,
+    LM.rightElbow,
+    LM.rightHip,
+  ];
+  static const List<int> _plankLeftLowerLandmarks = [
+    LM.leftKnee,
+    LM.leftAnkle,
+  ];
+  static const List<int> _plankRightLowerLandmarks = [
+    LM.rightKnee,
+    LM.rightAnkle,
+  ];
 
   // Per-frame display state.
   List<PoseLandmark> _landmarks = [];
@@ -684,6 +702,22 @@ class WorkoutViewModel extends ChangeNotifier {
       LM.rightAnkle,
     ],
     FormError.pushUpShortRom: [LM.leftElbow, LM.rightElbow],
+    FormError.plankArmAngle: [
+      LM.leftShoulder,
+      LM.rightShoulder,
+      LM.leftElbow,
+      LM.rightElbow,
+      LM.leftWrist,
+      LM.rightWrist,
+    ],
+    FormError.plankBodyLine: [
+      LM.leftShoulder,
+      LM.rightShoulder,
+      LM.leftHip,
+      LM.rightHip,
+      LM.leftAnkle,
+      LM.rightAnkle,
+    ],
   };
 
   WorkoutViewModel({
@@ -2578,15 +2612,19 @@ class WorkoutViewModel extends ChangeNotifier {
           // ignore: deprecated_member_use_from_same_package
           exercise == ExerciseType.bicepsCurl &&
               _detectedCurlView != CurlCameraView.front;
-      final isSidePushUp = exercise == ExerciseType.pushUp;
+      final isPushUp = exercise == ExerciseType.pushUp;
+      final isPlank = exercise == ExerciseType.plank;
       final List<int> gatePrimary;
       final List<int>? gateAlt;
       if (isSideCurl) {
         gatePrimary = const [11, 13, 15]; // left arm trio
         gateAlt = const [12, 14, 16]; // right arm trio
-      } else if (isSidePushUp) {
+      } else if (isPushUp) {
         gatePrimary = _pushUpLeftSideLandmarks;
         gateAlt = _pushUpRightSideLandmarks;
+      } else if (isPlank) {
+        gatePrimary = _plankLeftCoreLandmarks;
+        gateAlt = _plankRightCoreLandmarks;
       } else {
         gatePrimary = ExerciseRequirements.forExerciseAndView(
           exercise,
@@ -2602,8 +2640,21 @@ class WorkoutViewModel extends ChangeNotifier {
       // simply skips that frame).
       final double? gateFloor = isSideCurl
           ? kPoseGateMinConfidenceSideRelaxed
+          : isPlank
+          ? kPlankMinLandmarkConfidence
           : null;
-      final Set<int>? gateBestEffort = isSideCurl ? const {15, 16} : null;
+      final Set<int>? gateBestEffort = isSideCurl
+          ? const {15, 16}
+          : isPlank
+          ? const {
+              LM.leftWrist,
+              LM.rightWrist,
+              LM.leftKnee,
+              LM.rightKnee,
+              LM.leftAnkle,
+              LM.rightAnkle,
+            }
+          : null;
 
       // Push-up landscape uses the OS-coherent rotation model: the push-up
       // WorkoutScreen unlocks landscape via SystemChrome, so iOS/Android
@@ -2716,6 +2767,50 @@ class WorkoutViewModel extends ChangeNotifier {
         minConfidence: minConfidence,
       );
 
+  bool _plankSideVisible(PoseResult result, {required double minConfidence}) =>
+      _plankSideCoreAndLowerVisible(
+        result,
+        _plankLeftCoreLandmarks,
+        _plankLeftLowerLandmarks,
+        minConfidence: minConfidence,
+      ) ||
+      _plankSideCoreAndLowerVisible(
+        result,
+        _plankRightCoreLandmarks,
+        _plankRightLowerLandmarks,
+        minConfidence: minConfidence,
+      );
+
+  bool _plankSideCoreAndLowerVisible(
+    PoseResult result,
+    List<int> core,
+    List<int> lowerBody, {
+    required double minConfidence,
+  }) =>
+      _landmarkGroupVisible(result, core, minConfidence: minConfidence) &&
+      lowerBody.any(
+        (idx) => result.landmark(idx, minConfidence: minConfidence) != null,
+      );
+
+  bool _plankAnySideLandmarkVisible(
+    PoseResult result, {
+    required double minConfidence,
+  }) {
+    for (final idx in {
+      ..._plankLeftCoreLandmarks,
+      ..._plankRightCoreLandmarks,
+      ..._plankLeftLowerLandmarks,
+      ..._plankRightLowerLandmarks,
+      LM.leftWrist,
+      LM.rightWrist,
+    }) {
+      if (result.landmark(idx, minConfidence: minConfidence) != null) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool _pushUpAnySideLandmarkVisible(
     PoseResult result, {
     required double minConfidence,
@@ -2729,6 +2824,49 @@ class WorkoutViewModel extends ChangeNotifier {
       }
     }
     return false;
+  }
+
+  Map<int, Color> _plankSetupLandmarkColors(
+    PoseResult result, {
+    required double minConfidence,
+  }) {
+    final leftVisible = _plankSideCoreAndLowerVisible(
+      result,
+      _plankLeftCoreLandmarks,
+      _plankLeftLowerLandmarks,
+      minConfidence: minConfidence,
+    );
+    final rightVisible = _plankSideCoreAndLowerVisible(
+      result,
+      _plankRightCoreLandmarks,
+      _plankRightLowerLandmarks,
+      minConfidence: minConfidence,
+    );
+    if (leftVisible || rightVisible) {
+      final core =
+          leftVisible ? _plankLeftCoreLandmarks : _plankRightCoreLandmarks;
+      final lower =
+          leftVisible ? _plankLeftLowerLandmarks : _plankRightLowerLandmarks;
+      return {
+        for (final idx in core) idx: const Color(0xFF00E676),
+        for (final idx in lower)
+          if (result.landmark(idx, minConfidence: minConfidence) != null)
+            idx: const Color(0xFF00E676),
+      };
+    }
+
+    final colors = <int, Color>{};
+    for (final idx in {
+      ..._plankLeftCoreLandmarks,
+      ..._plankRightCoreLandmarks,
+      ..._plankLeftLowerLandmarks,
+      ..._plankRightLowerLandmarks,
+    }) {
+      colors[idx] = result.landmark(idx, minConfidence: minConfidence) != null
+          ? const Color(0xFF00E676)
+          : Colors.redAccent;
+    }
+    return colors;
   }
 
   Map<int, Color> _pushUpSetupLandmarkColors(
@@ -2781,11 +2919,19 @@ class WorkoutViewModel extends ChangeNotifier {
     // bystanders whose landmarks are partially visible at the frame edges.
     final double setupConfidence = exercise.isCurl
         ? kSetupCurlMinConfidence
+        : exercise == ExerciseType.plank
+        ? kPlankMinLandmarkConfidence
         : kMinLandmarkConfidence;
 
     if (exercise == ExerciseType.pushUp) {
       allVisible = _pushUpSideVisible(result, minConfidence: setupConfidence);
       colors = _pushUpSetupLandmarkColors(
+        result,
+        minConfidence: setupConfidence,
+      );
+    } else if (exercise == ExerciseType.plank) {
+      allVisible = _plankSideVisible(result, minConfidence: setupConfidence);
+      colors = _plankSetupLandmarkColors(
         result,
         minConfidence: setupConfidence,
       );
@@ -2890,11 +3036,17 @@ class WorkoutViewModel extends ChangeNotifier {
     }
 
     final requirements = ExerciseRequirements.forExercise(exercise);
-    final allVisible = exercise == ExerciseType.pushUp
-        ? _pushUpSideVisible(result, minConfidence: kMinLandmarkConfidence)
+    final visibilityConfidence = exercise == ExerciseType.plank
+        ? kPlankMinLandmarkConfidence
+        : kMinLandmarkConfidence;
+    final allVisible =
+        exercise == ExerciseType.pushUp
+        ? _pushUpSideVisible(result, minConfidence: visibilityConfidence)
+        : exercise == ExerciseType.plank
+        ? _plankSideVisible(result, minConfidence: visibilityConfidence)
         : requirements.landmarkIndices.every(
             (idx) =>
-                result.landmark(idx, minConfidence: kMinLandmarkConfidence) !=
+                result.landmark(idx, minConfidence: visibilityConfidence) !=
                 null,
           );
 
@@ -2924,21 +3076,33 @@ class WorkoutViewModel extends ChangeNotifier {
     }
 
     final requirements = ExerciseRequirements.forExercise(exercise);
+    final visibilityConfidence = exercise == ExerciseType.plank
+        ? kPlankMinLandmarkConfidence
+        : kMinLandmarkConfidence;
     final total = requirements.landmarkIndices.length;
     final visible = requirements.landmarkIndices
         .where(
           (idx) =>
-              result.landmark(idx, minConfidence: kMinLandmarkConfidence) !=
+              result.landmark(idx, minConfidence: visibilityConfidence) !=
               null,
         )
         .length;
-    final hasRequiredPose = exercise == ExerciseType.pushUp
-        ? _pushUpSideVisible(result, minConfidence: kMinLandmarkConfidence)
+    final hasRequiredPose =
+        exercise == ExerciseType.pushUp
+        ? _pushUpSideVisible(result, minConfidence: visibilityConfidence)
+        : exercise == ExerciseType.plank
+        ? _plankSideVisible(result, minConfidence: visibilityConfidence)
         : visible == total;
-    final hasPartialPose = exercise == ExerciseType.pushUp
+    final hasPartialPose =
+        exercise == ExerciseType.pushUp
         ? _pushUpAnySideLandmarkVisible(
             result,
-            minConfidence: kMinLandmarkConfidence,
+            minConfidence: visibilityConfidence,
+          )
+        : exercise == ExerciseType.plank
+        ? _plankAnySideLandmarkVisible(
+            result,
+            minConfidence: visibilityConfidence,
           )
         : visible > 0;
 
@@ -3721,6 +3885,8 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.pushUpConcentricTooFast => 'Control the press',
     FormError.pushUpTempoInconsistent => 'Keep steady tempo',
     FormError.pushUpFatigue => "You're slowing down, stay strong",
+    FormError.plankArmAngle => 'Stack shoulders over elbows',
+    FormError.plankBodyLine => 'Keep your back and hips straight',
   };
 
   /// Per-error highlight color. `forwardKneeShift` is informational (no TTS,
@@ -3854,11 +4020,17 @@ class WorkoutViewModel extends ChangeNotifier {
             )
           : null,
     );
-    // Emit first — the UI's SummaryScreen push is latency-critical and must
-    // not wait for a SQLite round-trip. Persistence is fire-and-forget; any
-    // failure is logged to telemetry and never crashes the session.
+    // Save first, then emit so Home/History reloads see the inserted row.
+    unawaited(_persistThenEmitCompletion(event, _activeStart ?? DateTime.now()));
+  }
+
+  Future<void> _persistThenEmitCompletion(
+    WorkoutCompletedEvent event,
+    DateTime startedAt,
+  ) async {
+    await _persistCompletedSession(event, startedAt);
+    if (_completionCtrl.isClosed) return;
     _completionCtrl.add(event);
-    unawaited(_persistCompletedSession(event, _activeStart ?? DateTime.now()));
   }
 
   Future<void> _persistCompletedSession(

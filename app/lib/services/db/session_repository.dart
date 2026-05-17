@@ -192,7 +192,7 @@ class SqliteSessionRepository implements SessionRepository {
         await txn.insert('form_errors', <String, Object?>{
           'session_id': sessionId,
           'error': err.name,
-          'count': 1,
+          'count': event.errorCounts[err] ?? 1,
         });
       }
 
@@ -556,7 +556,7 @@ class InMemorySessionRepository implements SessionRepository {
     final s = _sessions[idx];
     final formErrors = <FormError, int>{};
     for (final e in s.event.errorsTriggered) {
-      formErrors[e] = (formErrors[e] ?? 0) + 1;
+      formErrors[e] = s.event.errorCounts[e] ?? ((formErrors[e] ?? 0) + 1);
     }
     final reps = s.event.curlRepRecords.isNotEmpty
         ? s.event.curlRepRecords

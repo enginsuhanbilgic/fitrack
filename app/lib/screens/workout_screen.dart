@@ -730,7 +730,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         Selector<WorkoutViewModel, ({WorkoutPhase phase, RepSnapshot snap})>(
           selector: (_, vm) => (phase: vm.phase, snap: vm.snapshot),
           builder: (_, s, _) => s.phase == WorkoutPhase.active
-              ? Positioned.fill(child: _MinimalHud(snapshot: s.snap))
+              ? Positioned.fill(
+                  child: _MinimalHud(
+                    snapshot: s.snap,
+                    exercise: widget.exercise,
+                  ),
+                )
               : const SizedBox.shrink(),
         ),
 
@@ -1087,7 +1092,7 @@ class _SetupBanner extends StatelessWidget {
     final text = setupOkFrames > 0
         ? 'Almost there… ($setupOkFrames / $kSetupCheckFrames)'
         : setupFramingHint ??
-              (exercise == ExerciseType.pushUp
+              (exercise == ExerciseType.pushUp || exercise == ExerciseType.plank
                   ? 'Side view: keep shoulder, elbow, wrist, hip and ankle visible'
                   : exercise == ExerciseType.squat
                   ? 'Stand sideways — left or right side to the camera'
@@ -1435,12 +1440,15 @@ const List<_CoachTip> _kCoachTips = [
 
 class _MinimalHud extends StatefulWidget {
   final RepSnapshot snapshot;
-  const _MinimalHud({required this.snapshot});
+  final ExerciseType exercise;
+  const _MinimalHud({required this.snapshot, required this.exercise});
 
   static const int _targetReps = 12;
   static const int _secsPerTipRotation = 4;
 
   static String _formErrorLabel(FormError e) {
+    if (e == FormError.plankArmAngle) return 'Stack shoulders over elbows';
+    if (e == FormError.plankBodyLine) return 'Keep back and hips straight';
     if (e == FormError.pushUpShortRom) return 'Go lower';
     if (e == FormError.hipSag) return 'Keep your body straight';
     if (e == FormError.squatDepth) return 'Go deeper';
@@ -1506,10 +1514,12 @@ class _MinimalHudState extends State<_MinimalHud> {
   @override
   Widget build(BuildContext context) {
     final snapshot = widget.snapshot;
+    final isPlank = widget.exercise == ExerciseType.plank;
+    final target = isPlank ? kPlankTargetHoldSeconds : _MinimalHud._targetReps;
     final ft = FiTrackColors.of(context);
     final isLight = Theme.of(context).brightness == Brightness.light;
     final errors = snapshot.formErrors;
-    final progress = (snapshot.reps / _MinimalHud._targetReps).clamp(0.0, 1.0);
+    final progress = (snapshot.reps / target).clamp(0.0, 1.0);
     final size = MediaQuery.sizeOf(context);
     final bottomPad = MediaQuery.paddingOf(context).bottom;
     final repFontSize = size.height < 700 ? 70.0 : 84.0;
@@ -1541,7 +1551,9 @@ class _MinimalHudState extends State<_MinimalHud> {
                   children: [
                     // The rep number — sole rep readout on screen.
                     Text(
-                      '${snapshot.reps}',
+                      isPlank
+                          ? '${(target - snapshot.reps).clamp(0, target)}'
+                          : '${snapshot.reps}',
                       style: TextStyle(
                         fontSize: repFontSize,
                         fontWeight: FontWeight.w900,
@@ -1557,7 +1569,7 @@ class _MinimalHudState extends State<_MinimalHud> {
                       ),
                     ),
                     Text(
-                      '/${_MinimalHud._targetReps}',
+                      isPlank ? 's left' : '/$target',
                       style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
@@ -1600,7 +1612,9 @@ class _MinimalHudState extends State<_MinimalHud> {
                   children: [
                     // Two-cell stats row: TEMPO · TIME
                     _StatsRow(
-                      tempoLabel: _formatTempo(snapshot.reps, _elapsedSeconds),
+                      tempoLabel: isPlank
+                          ? '${snapshot.reps} s'
+                          : _formatTempo(snapshot.reps, _elapsedSeconds),
                       timeLabel: _formatTime(_elapsedSeconds),
                       isLight: isLight,
                       ft: ft,
@@ -1610,7 +1624,7 @@ class _MinimalHudState extends State<_MinimalHud> {
                     Row(
                       children: [
                         Text(
-                          'REP PROGRESS',
+                          isPlank ? 'CLEAN HOLD' : 'REP PROGRESS',
                           style: TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.w700,

@@ -143,6 +143,8 @@ IconData _iconFor(FormError err) => switch (err) {
   FormError.pushUpConcentricTooFast => Icons.rocket_launch,
   FormError.pushUpTempoInconsistent => Icons.shuffle,
   FormError.pushUpFatigue => Icons.battery_alert,
+  FormError.plankArmAngle => Icons.accessibility_new_rounded,
+  FormError.plankBodyLine => Icons.straighten_rounded,
   _ => Icons.error_outline,
 };
 
@@ -184,4 +186,6 @@ String _labelFor(FormError err) => switch (err) {
   FormError.pushUpConcentricTooFast => 'Pressing Too Fast',
   FormError.pushUpTempoInconsistent => 'Unsteady Pace',
   FormError.pushUpFatigue => 'Fatigue',
+  FormError.plankArmAngle => 'Arm Stack',
+  FormError.plankBodyLine => 'Body Line Lost',
 };

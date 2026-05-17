@@ -7,6 +7,7 @@ import '../models/pose_result.dart';
 import 'curl/curl_form_analyzer_extras.dart';
 import 'curl/curl_strategy.dart';
 import 'exercise_strategy.dart';
+import 'plank/plank_strategy.dart';
 import 'push_up/push_up_rom_profile.dart';
 import 'push_up/push_up_strategy.dart';
 import 'squat/squat_strategy.dart';
@@ -17,6 +18,7 @@ export 'curl/curl_strategy.dart'
 export 'push_up/push_up_rom_profile.dart'
     show PushUpRomProfile, PushUpRomThresholds;
 export 'push_up/push_up_strategy.dart' show PushUpRomThresholdsProvider;
+export 'plank/plank_strategy.dart' show PlankStrategy;
 export 'squat/squat_strategy.dart'
     show
         SquatRomThresholdsProvider,
@@ -129,6 +131,12 @@ class RepCounter {
 
   /// Per-rep push-up quality scores accumulated this session (push-up only).
   final List<double> _pushUpRepQualities = [];
+
+  /// Per-second plank quality scores accumulated this session (plank only).
+  /// Clean seconds advance `_reps`; bad-pose seconds are retained only for
+  /// the average-quality score.
+  final List<double> _plankQualitySamples = [];
+  int _lastPlankSampleIndex = 0;
 
   /// Squat-only completion callback. Fires once per committed squat rep
   /// with the analyzer's per-rep snapshot. Squat workouts use this to
@@ -266,6 +274,7 @@ class RepCounter {
       thresholdsProvider: pushUpThresholdsProvider,
       historicalConcentricDurations: historicalConcentricDurations,
     ),
+    ExerciseType.plank => PlankStrategy(),
   };
 
   /// Strategy's extremes callback — buffers min/max for the unified
@@ -293,7 +302,9 @@ class RepCounter {
     final smoothed = _angleBuffer.reduce((a, b) => a + b) / _angleBuffer.length;
 
     // Stuck-state watchdog (invariant 2).
-    if (_state != RepState.idle && _stateStartTime != null) {
+    if (_strategy is! PlankStrategy &&
+        _state != RepState.idle &&
+        _stateStartTime != null) {
       if (now.difference(_stateStartTime!) > kStuckStateLimit) {
         _resetToIdle();
         return _snapshot();
@@ -317,6 +328,7 @@ class RepCounter {
     );
 
     _lastErrors = output.formErrors;
+    _capturePlankSecondSample();
 
     if (output.repCommitted) {
       _reps++;
@@ -369,6 +381,8 @@ class RepCounter {
     _lastAngle = null;
     _squatRepQualities.clear();
     _pushUpRepQualities.clear();
+    _plankQualitySamples.clear();
+    _lastPlankSampleIndex = 0;
     _strategy.onReset();
   }
 
@@ -498,6 +512,15 @@ class RepCounter {
     );
   }
 
+  void _capturePlankSecondSample() {
+    final strategy = _strategy;
+    if (strategy is! PlankStrategy) return;
+    final sample = strategy.lastSecondSample;
+    if (sample == null || sample.index == _lastPlankSampleIndex) return;
+    _lastPlankSampleIndex = sample.index;
+    _plankQualitySamples.add(sample.quality);
+  }
+
   RepSnapshot _snapshot() {
     // Surface exercise-specific fields only when the active strategy matches.
     // One-per-frame downcast — acceptable cost for cross-layer clarity.
@@ -505,12 +528,17 @@ class RepCounter {
     final isCurl = strategy is CurlStrategy;
     final isSquat = strategy is SquatStrategy;
     final isPushUp = strategy is PushUpStrategy;
+    final isPlank = strategy is PlankStrategy;
     final squatAvg = isSquat && _squatRepQualities.isNotEmpty
         ? _squatRepQualities.reduce((a, b) => a + b) / _squatRepQualities.length
         : null;
     final pushUpAvg = isPushUp && _pushUpRepQualities.isNotEmpty
         ? _pushUpRepQualities.reduce((a, b) => a + b) /
               _pushUpRepQualities.length
+        : null;
+    final plankAvg = isPlank && _plankQualitySamples.isNotEmpty
+        ? _plankQualitySamples.reduce((a, b) => a + b) /
+              _plankQualitySamples.length
         : null;
     return RepSnapshot(
       reps: _reps,
@@ -523,17 +551,23 @@ class RepCounter {
           ? strategy.formExtras.lastRepQuality
           : (isSquat
                 ? strategy.lastRepQuality
-                : (isPushUp ? strategy.lastRepQuality : null)),
+                : (isPushUp
+                      ? strategy.lastRepQuality
+                      : (isPlank ? plankAvg : null))),
       averageQuality: isCurl
           ? strategy.formExtras.averageQuality
-          : (isSquat ? squatAvg : (isPushUp ? pushUpAvg : null)),
+          : (isSquat
+                ? squatAvg
+                : (isPushUp ? pushUpAvg : (isPlank ? plankAvg : null))),
       repQualities: isCurl
           ? strategy.formExtras.repQualities
           : (isSquat
                 ? List.unmodifiable(_squatRepQualities)
                 : (isPushUp
                       ? List.unmodifiable(_pushUpRepQualities)
-                      : const [])),
+                      : (isPlank
+                            ? List.unmodifiable(_plankQualitySamples)
+                            : const []))),
       fatigueDetected: isCurl ? strategy.formExtras.fatigueDetected : false,
       eccentricTooFastCount: isCurl
           ? strategy.formExtras.eccentricTooFastCount

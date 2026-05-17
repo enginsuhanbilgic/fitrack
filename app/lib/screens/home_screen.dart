@@ -252,7 +252,11 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => WorkoutScreen(exercise: exercise, curlSide: curlSide),
       ),
     );
-    _refreshBadge();
+    if (!mounted) return;
+    await _refreshBadge();
+    await _homeVm?.load();
+    if (!mounted) return;
+    await _historyTabKey.currentState?.reloadFromSettingsPop();
   }
 
   Future<void> _openSettings() async {
@@ -1004,6 +1008,14 @@ class _TrainTab extends StatelessWidget {
                     'Side camera · place phone at floor level, 1.5 m away',
                 onTap: () => _startNormalPushUp(context),
               ),
+              const SizedBox(height: 10),
+              _ExerciseCard(
+                icon: Icons.self_improvement_rounded,
+                title: ExerciseType.plank.label,
+                subtitle:
+                    'Side camera - stay a few meters away, full body visible',
+                onTap: () => _startNormalPlank(context),
+              ),
               // Debug-session entry cards. Outer compile-time consts gate
               // whether the machinery exists at all; the runtime
               // `getShowDebugTools()` pref (default ON, toggled in
@@ -1121,6 +1133,11 @@ class _TrainTab extends StatelessWidget {
   Future<void> _startNormalPushUp(BuildContext context) async {
     if (!context.mounted) return;
     await onStartWorkout(ExerciseType.pushUp);
+  }
+
+  Future<void> _startNormalPlank(BuildContext context) async {
+    if (!context.mounted) return;
+    await onStartWorkout(ExerciseType.plank);
   }
 
   /// "Push-up Debug Session" entry. Sets the debug flag, launches the workout,
@@ -1689,7 +1706,9 @@ class _SessionRow extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(
-                    Icons.fitness_center,
+                    summary.exercise == ExerciseType.plank
+                        ? Icons.self_improvement_rounded
+                        : Icons.fitness_center,
                     size: 18,
                     color: ft.textPrimary,
                   ),
@@ -1775,7 +1794,9 @@ class _SessionRow extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          'REPS',
+                          summary.exercise == ExerciseType.plank
+                              ? 'SEC'
+                              : 'REPS',
                           style: TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
@@ -2492,6 +2513,7 @@ class _HistoryFilterSheet extends StatelessWidget {
     ExerciseType.bicepsCurlSide,
     ExerciseType.squat,
     ExerciseType.pushUp,
+    ExerciseType.plank,
   ];
 
   @override

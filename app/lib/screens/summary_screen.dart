@@ -578,6 +578,8 @@ class _SummaryScreenState extends State<SummaryScreen> {
     FormError.pushUpConcentricTooFast => 'Pressing Too Fast',
     FormError.pushUpTempoInconsistent => 'Unsteady Pace',
     FormError.pushUpFatigue => 'Fatigue',
+    FormError.plankArmAngle => 'Arm Stack',
+    FormError.plankBodyLine => 'Body Line Lost',
   };
 
   /// 5-tier knee-shift bucket label (plan flow-decision plan-time #1).
@@ -1279,7 +1281,16 @@ class _SummaryScreenState extends State<SummaryScreen> {
                 exerciseLabel: vm.exerciseLabel,
               ),
               const SizedBox(height: 12),
-              SummaryStatsGrid(reps: vm.reps, duration: vm.duration),
+              SummaryStatsGrid(
+                reps: vm.reps,
+                duration: vm.duration,
+                repsLabel: exercise == ExerciseType.plank
+                    ? 'CLEAN HOLD'
+                    : 'REPS',
+                repsSemanticLabel: exercise == ExerciseType.plank
+                    ? 'Clean hold seconds: ${vm.reps}'
+                    : null,
+              ),
               if (vm.variantLabels.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 SummaryVariantChips(labels: vm.variantLabels),
@@ -2171,7 +2182,12 @@ class _ShareCard extends StatelessWidget {
                 children: [
                   _ShareStat(label: 'Time', value: _fmtDuration()),
                   const SizedBox(width: 20),
-                  _ShareStat(label: 'Reps', value: '$totalReps'),
+                  _ShareStat(
+                    label: exercise == ExerciseType.plank ? 'Hold' : 'Reps',
+                    value: exercise == ExerciseType.plank
+                        ? '${totalReps}s'
+                        : '$totalReps',
+                  ),
                   if (quality != null) ...[
                     const SizedBox(width: 20),
                     _ShareStat(

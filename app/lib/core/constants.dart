@@ -890,6 +890,34 @@ const double kQualityPushUpHipSagMaxDeduction = 0.35;
 /// bottom elbow angle.
 const double kQualityPushUpShortRomDeduction = 0.30;
 
+// Plank form thresholds.
+/// Target hold length shown in the live HUD. The hold timer only advances
+/// while the analyzer sees a clean plank.
+const int kPlankTargetHoldSeconds = 30;
+
+/// Plank is measured from farther away than most rep exercises, so use a
+/// lower landmark gate than the shared engine default.
+const double kPlankMinLandmarkConfidence = 0.20;
+
+/// Forearm plank elbow angle. This is intentionally broad because ML Kit sees
+/// the user from a few meters away and forearm/wrist landmarks are noisy.
+const double kPlankElbowMinAngle = 45.0;
+const double kPlankElbowMaxAngle = 150.0;
+
+/// Maximum shoulder-hip-ankle deviation before the plank line is considered
+/// broken. Separate from push-up so plank can be retuned independently.
+const double kPlankBodyLineDeviation = 35.0;
+
+/// Shoulder should stay roughly stacked above the supporting elbow. Measured
+/// as horizontal shoulder-elbow offset divided by shoulder-hip torso length.
+const double kPlankShoulderElbowMaxOffsetRatio = 0.75;
+
+/// Brief landmark jitter should not reset a timed hold.
+const Duration kPlankInvalidGrace = Duration(milliseconds: 750);
+
+const double kQualityPlankBodyLineMaxDeduction = 0.30;
+const double kQualityPlankArmMaxDeduction = 0.20;
+
 // ── Visual feedback ──────────────────────────────────────
 /// Duration in ms to highlight offending landmarks after a form error.
 const int kHighlightDurationMs = 1500;

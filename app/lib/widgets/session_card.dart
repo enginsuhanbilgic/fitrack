@@ -142,6 +142,7 @@ class SessionCard extends StatelessWidget {
     ExerciseType.bicepsCurl => Icons.fitness_center,
     ExerciseType.squat => Icons.airline_seat_legroom_extra,
     ExerciseType.pushUp => Icons.sports_gymnastics,
+    ExerciseType.plank => Icons.self_improvement_rounded,
   };
 
   /// "Apr 25, 14:32" — locale-agnostic short form. Avoids pulling intl.
@@ -207,6 +208,8 @@ class SessionCard extends StatelessWidget {
     FormError.squatTempoInconsistent ||
     FormError.pushUpTempoInconsistent => 'Unsteady Pace',
     FormError.squatFatigue || FormError.pushUpFatigue => 'Fatigue',
+    FormError.plankArmAngle => 'Arm Stack',
+    FormError.plankBodyLine => 'Body Line Lost',
     _ => e.name,
   };
 
@@ -214,7 +217,9 @@ class SessionCard extends StatelessWidget {
     final parts = <String>[
       summary.exercise.label,
       _dateLabel(summary.startedAt),
-      '${summary.totalReps} reps',
+      summary.exercise == ExerciseType.plank
+          ? '${summary.totalReps} clean hold seconds'
+          : '${summary.totalReps} reps',
       _durationLabel(summary.duration),
     ];
     if (summary.averageQuality != null) {

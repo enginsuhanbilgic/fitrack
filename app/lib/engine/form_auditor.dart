@@ -37,6 +37,8 @@
 ///     apply (e.g. side-view-only metrics in a front-view session).
 library;
 
+import 'dart:math' as math;
+
 import '../core/constants.dart';
 import '../core/form_thresholds.dart';
 import '../core/rom_thresholds.dart';
@@ -611,6 +613,54 @@ class FormAuditor {
       // Surface the coverage limitation honestly — the user shouldn't infer
       // that "passed depth + start = perfect form" given the missing channels.
       notApplicableReason: null,
+    );
+  }
+
+  FormAudit auditPlank({
+    required int holdSeconds,
+    required Map<FormError, int> errorCounts,
+  }) {
+    if (holdSeconds <= 0 && errorCounts.isEmpty) {
+      return const FormAudit(
+        repsClean: 0,
+        repsEvaluated: 0,
+        repsTotal: 0,
+        perCriterion: [],
+        oneShotFlags: {},
+        applicable: false,
+        notApplicableReason: 'No hold time recorded this session.',
+      );
+    }
+
+    final bodyLine = _CriterionBuilder('Body line');
+    final arms = _CriterionBuilder('Arm stack');
+    final bodyFires = errorCounts[FormError.plankBodyLine] ?? 0;
+    final armFires = errorCounts[FormError.plankArmAngle] ?? 0;
+    final evaluated = math.max(holdSeconds + bodyFires + armFires, 1);
+    for (var i = 0; i < evaluated; i++) {
+      bodyLine.record(fired: i < bodyFires);
+      arms.record(fired: i < armFires);
+    }
+    final clean = math.max(0, evaluated - bodyFires - armFires);
+
+    return FormAudit(
+      repsClean: clean,
+      repsEvaluated: evaluated,
+      repsTotal: holdSeconds,
+      perCriterion: [
+        CriterionResult(
+          name: bodyLine.name,
+          evaluated: bodyLine.evaluated,
+          fired: bodyLine.fired,
+        ),
+        CriterionResult(
+          name: arms.name,
+          evaluated: arms.evaluated,
+          fired: arms.fired,
+        ),
+      ],
+      oneShotFlags: {},
+      applicable: true,
     );
   }
 }

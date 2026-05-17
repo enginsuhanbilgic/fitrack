@@ -14,10 +14,14 @@ class SummaryStatsGrid extends StatelessWidget {
     super.key,
     required this.reps,
     required this.duration,
+    this.repsLabel = 'REPS',
+    this.repsSemanticLabel,
   });
 
   final int reps;
   final Duration duration;
+  final String repsLabel;
+  final String? repsSemanticLabel;
 
   static String _formatDuration(Duration d) {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -41,9 +45,9 @@ class SummaryStatsGrid extends StatelessWidget {
         Expanded(
           child: _StatTile(
             icon: Icons.repeat_rounded,
-            label: 'REPS',
+            label: repsLabel,
             value: '$reps',
-            semanticLabel: 'Reps: $reps',
+            semanticLabel: repsSemanticLabel ?? 'Reps: $reps',
           ),
         ),
       ],
