@@ -460,6 +460,17 @@ class RepCounter {
   void _resetToIdle() {
     _state = RepState.idle;
     _stateStartTime = null;
+    // 2026-05-21: hand the reset down to the strategy so its per-rep state
+    // (analyzer phase clocks, `_bottomEntryTs`, `_minAngleThisRep`,
+    // `_activeThresholds`) doesn't leak into the next attempt. Without
+    // this, a watchdog-triggered reset would clear the FSM's `_state` but
+    // leave the strategy thinking it was still mid-rep — the next BOTTOM
+    // entry would inherit a stale `_bottomEntryTs` and commit a rep with
+    // a corrupted concentric timer. `onNextSet` is the closest existing
+    // hook (it also clears per-rep state); session-scoped state like
+    // long-femur classification correctly survives, mirroring a normal
+    // set boundary.
+    _strategy.onNextSet();
   }
 
   /// Called once per committed rep, regardless of exercise. Squat-specific

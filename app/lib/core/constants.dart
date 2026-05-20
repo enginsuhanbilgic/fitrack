@@ -709,6 +709,19 @@ const int kSquatLeanMinEvalFrames = 6;
 /// affects when the ascent can commit a rep.
 const int kSquatBottomDwellMs = 200;
 
+/// Maximum time (ms) the FSM will remain in BOTTOM before forcing a return
+/// to IDLE without committing a rep. Added 2026-05-21 alongside the squat
+/// audit cleanup. A user who sits in BOTTOM for >2.5s is no longer mid-rep —
+/// they are either resting between attempts or have been visually occluded
+/// long enough that the analyzer's per-rep state is stale. Bailing out to
+/// IDLE clears `_bottomEntryTs`, `_minAngleThisRep`, and the analyzer's
+/// phase clocks so the next attempt starts fresh.
+///
+/// Set below the 5-second stuck-state watchdog (`kStuckStateLimit`) so this
+/// FSM-side timeout fires first; the watchdog remains as a coarser fallback
+/// that catches DESCENDING / ASCENDING hangs as well.
+const int kSquatBottomMaxHoldMs = 2500;
+
 /// Backward-lean threshold (degrees). Signed lean more negative than this
 /// (i.e., trunk leaning *backward* from vertical) fires
 /// `FormError.excessiveBackwardLean`. Added 2026-05-15.
@@ -791,6 +804,16 @@ const double kSquatNoKneeFlexionMinLeanDeg = 25.0;
 /// PRELIMINARY — awaiting telemetry-derived tuning. Source: biomechanics
 /// of squat patterning (deep-research spec, 2026-05-15).
 const double kSquatNoKneeFlexionMaxKneeDeltaDeg = 20.0;
+
+/// Stiff-legged-miss floor (deg): if the rep's knee-flexion delta from
+/// descent-start to bottom is below this, [FormError.noKneeFlexion] fires
+/// REGARDLESS of lean. Added 2026-05-21 to close the conjunction hole where
+/// a user with modest lean (e.g. 15°) and minimal knee bend (e.g. 10°)
+/// falls through every existing check — they're hip-pivoting in either
+/// direction. Lower than [kSquatNoKneeFlexionMaxKneeDeltaDeg] (20°) so the
+/// stiff-legged case is the *stricter* condition: only fires when there is
+/// barely any knee bend at all, regardless of how the torso behaves.
+const double kSquatNoKneeFlexionStiffLeggedMaxDeltaDeg = 15.0;
 
 // ── Hips-forward-on-descent detector (2026-05-15) ────────
 /// Time window (ms) after `onDescendingStart` during which the hip-X

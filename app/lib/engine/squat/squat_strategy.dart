@@ -330,8 +330,30 @@ class SquatStrategy extends ExerciseStrategy {
         // per rep and the result is locked for the rest of this rep — the
         // FSM never re-resolves mid-rep (threshold-lock invariant). When
         // no provider is wired, fall back to the construction-time tuple.
-        final resolved =
-            _thresholdsProvider?.call(input.repIndexInSet) ?? _romThresholds;
+        //
+        // Defensive guard (2026-05-21): wrap the host call in try/catch so
+        // a thrown exception in the tier-priority resolver (DB read, null
+        // deref in `SquatRomProfile`, etc.) doesn't propagate up through
+        // `RepCounter.update` and stall the entire pose pipeline. On
+        // failure we silently fall back to the construction-time tuple.
+        // The assert-only print keeps this engine pure-Dart (no
+        // `package:flutter`, no I/O) while still surfacing the failure in
+        // dev builds where the offline replay harness runs.
+        SquatRomThresholdSet resolved;
+        try {
+          resolved =
+              _thresholdsProvider?.call(input.repIndexInSet) ?? _romThresholds;
+        } catch (e) {
+          resolved = _romThresholds;
+          assert(() {
+            // ignore: avoid_print
+            print(
+              '[SquatStrategy] thresholdsProvider threw ($e) — '
+              'fallback to construction-time tuple',
+            );
+            return true;
+          }());
+        }
         if (smoothed < resolved.startAngle) {
           _activeThresholds = resolved;
           // `_maxAngleThisRep` is tracked continuously while IDLE above,
@@ -354,20 +376,43 @@ class SquatStrategy extends ExerciseStrategy {
           _resetPerRepState();
         }
       case RepState.bottom:
-        // Transition to ascending only when (a) hip is actually rising AND
-        // (b) the user has held BOTTOM for at least [kSquatBottomDwellMs].
-        // The dwell gate filters single-frame sit-down/stand-up patterns
-        // that previously committed reps with no real bottom phase. The
-        // hip-rising gate remains the velocity signal — both must clear.
-        // Screen coords: Y=0 is top, so rising = Y decreasing.
+        // Three possible transitions out of BOTTOM:
+        //   1. BOTTOM → IDLE (timeout — no rep emitted): the user held the
+        //      bottom for longer than `kSquatBottomMaxHoldMs`. Either
+        //      mid-rep occlusion or a rest pause. Bail to IDLE so the
+        //      analyzer's per-rep state is fresh for the next attempt.
+        //      Fires BEFORE the 5s stuck-state watchdog in RepCounter,
+        //      which would also reset but coarser.
+        //   2. BOTTOM → ASCENDING (rep in progress): dwell satisfied AND
+        //      either the knee angle is meaningfully rising OR the hip is
+        //      rising in screen-Y. Angle-OR-hip prevents single-frame
+        //      pose-jitter from committing a rep with no real ascent (the
+        //      original hipY-only gate misfired at 60fps on ~1px noise).
+        //   3. (Implicit) BOTTOM stays BOTTOM if dwell hasn't passed yet
+        //      or neither rising signal is present.
+        final bottomAgeMs = _bottomEntryTs == null
+            ? 0
+            : input.now.difference(_bottomEntryTs!).inMilliseconds;
+        if (bottomAgeMs >= kSquatBottomMaxHoldMs) {
+          nextState = RepState.idle;
+          _resetPerRepState();
+          break;
+        }
         final bottomDwellOk =
-            _bottomEntryTs != null &&
-            input.now.difference(_bottomEntryTs!).inMilliseconds >=
-                kSquatBottomDwellMs;
-        if (bottomDwellOk &&
-            hipY != null &&
-            _prevHipY != null &&
-            hipY < _prevHipY!) {
+            _bottomEntryTs != null && bottomAgeMs >= kSquatBottomDwellMs;
+        // Angle-based rising signal: knee has re-extended at least 2°
+        // past the rep's deepest point. Sign-immune to screen-Y
+        // conventions and immune to landmark Y-jitter at the millimeter
+        // scale (a 2° knee swing is ~3-4 cm of foot-to-hip travel).
+        final angleRising =
+            _minAngleThisRep != null && smoothed > _minAngleThisRep! + 2.0;
+        // Screen-Y rising signal (legacy): Y=0 at top, so rising = Y
+        // decreasing frame-over-frame. Kept as a complementary gate so
+        // a slow grind out of the hole (knee angle moves <2° between
+        // frames) can still commit if hip motion is clear.
+        final hipRising =
+            hipY != null && _prevHipY != null && hipY < _prevHipY!;
+        if (bottomDwellOk && (angleRising || hipRising)) {
           // Arm the analyzer's per-frame hip+shoulder Y accumulator —
           // hip-lead is evaluated over the first 30% of ASCENDING.
           _form.onAscendingStart();

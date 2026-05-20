@@ -3220,14 +3220,22 @@ class WorkoutViewModel extends ChangeNotifier {
 
   /// Whether the given form error should be suppressed from the TTS path.
   /// Visual highlight still fires, but no spoken cue and no cooldown slot
-  /// is consumed. The current suppression set is `{forwardKneeShift}` —
-  /// informational metric, plan flow-decision: no TTS, no quality penalty.
+  /// is consumed.
+  ///
+  /// Current suppression set (2026-05-21 squat audit):
+  ///   - `forwardKneeShift` — informational only; "knees over toes" was
+  ///     retired as a fault but the visual highlight is kept.
+  ///   - `excessiveBackwardLean` — telemetry only. True backward lean in
+  ///     bodyweight squats is rare and the instantaneous (no sustained-
+  ///     frame gate) detection is jitter-prone. We still log the
+  ///     backward-frame count for Bug-4 sign-convention diagnostics.
   ///
   /// Exposed for unit testing in `workout_view_model_test.dart` so the
   /// suppression contract is locked against future enum-switch additions.
   @visibleForTesting
   static bool isTtsSuppressed(FormError err) =>
-      err == FormError.forwardKneeShift;
+      err == FormError.forwardKneeShift ||
+      err == FormError.excessiveBackwardLean;
 
   /// Test seam exposing the spoken cue for a given form error. Lets
   /// the test suite pin the user-visible TTS phrasing — without this,
@@ -3867,14 +3875,18 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.backLean => "Don't lean back",
     FormError.shortRomStart => 'Full extension down',
     FormError.shortRomPeak => 'Curl all the way up',
-    FormError.squatDepth => 'Go deeper',
-    FormError.trunkTibia => 'Keep your chest up',
-    FormError.excessiveForwardLean => 'Chest up — keep your back tall',
-    FormError.excessiveBackwardLean =>
-      'Stop leaning back — stack ribs over hips',
-    FormError.heelLift => 'Drive your heels into the floor',
-    FormError.hipLead => 'Lead with your chest',
-    FormError.noKneeFlexion => 'Sit into the squat — bend your knees',
+    // Squat cues — terse vocabulary (2026-05-21 audit). Each cue names
+    // ONE body part and ONE direction. The view-model emits at most one
+    // cue per rep; list-order in the analyzer's returned errors defines
+    // priority. `excessiveBackwardLean` keeps a fallback string for any
+    // legacy code path but is suppressed at the TTS layer above.
+    FormError.squatDepth => 'Deeper',
+    FormError.trunkTibia => 'Chest up',
+    FormError.excessiveForwardLean => 'Chest up',
+    FormError.excessiveBackwardLean => "Don't lean back",
+    FormError.heelLift => 'Heels down',
+    FormError.hipLead => 'Chest up',
+    FormError.noKneeFlexion => 'Bend your knees',
     FormError.hipsForwardOnDescent => 'Push your hips back',
     FormError.kneeLedDescent =>
       'Sit back — lead with your hips, not your knees',
@@ -3891,10 +3903,12 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.asymmetryLeftLag => 'Left arm is lagging',
     FormError.asymmetryRightLag => 'Right arm is lagging',
     FormError.fatigue => "You're slowing down, stay strong",
-    // Squat tempo/fatigue (2026-05-16, curl-parity). Same biomechanical
-    // instruction as the curl cues — the message is movement-agnostic; the
-    // per-exercise enum exists only so summary/telemetry stay unambiguous.
-    FormError.squatEccentricTooFast => 'Lower slowly',
+    // Squat tempo/fatigue. After the 2026-05-21 audit, only
+    // `squatEccentricTooFast` is emitted as a TTS cue; the other three
+    // FormError values are tombstoned (still in the enum, no longer
+    // emitted from the analyzer). Strings kept here for telemetry/UI
+    // surfaces that label the enum value directly.
+    FormError.squatEccentricTooFast => 'Slow down',
     FormError.squatConcentricTooFast => 'Control the drive up',
     FormError.squatTempoInconsistent => 'Keep steady tempo',
     FormError.squatFatigue => "You're slowing down, stay strong",

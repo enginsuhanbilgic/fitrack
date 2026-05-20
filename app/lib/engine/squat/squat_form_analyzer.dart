@@ -222,6 +222,17 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   /// `kSquatLeanSustainedFraction`.
   double? _lastRepLeanExceedFrac;
 
+  // ── Tombstoned-detector commit snapshots (2026-05-21) ──
+  // These three booleans capture whether the corresponding tombstoned
+  // detector triggered on the just-committed rep. The detectors still
+  // compute (their underlying samplers feed telemetry), but they no
+  // longer emit a FormError. The snapshots survive past the per-rep
+  // counter drain so the host can log them on the `squat.rep` telemetry
+  // line. See enum-tombstone note in `consumeCompletionErrorsWithDepth`.
+  bool _lastRepHipsForwardOnDescentFired = false;
+  bool _lastRepKneeLedDescentFired = false;
+  bool _lastRepTempoInconsistentSnapshot = false;
+
   // ── Tempo / fatigue tracking (2026-05-16, curl-parity) ──────────────
   // Phase mapping: DESCENDING = eccentric (lowering), ASCENDING =
   // concentric (lift). The STRATEGY pushes the injected `input.now`
@@ -379,6 +390,20 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   /// window close. The host reads this for the `squat.knee_led` telemetry
   /// line.
   double? get lastRepKneeLedRatio => _lastRepKneeLedRatio;
+
+  /// Whether the (now tombstoned) hips-forward-on-descent detector
+  /// triggered on the just-committed rep. The host reads this for
+  /// telemetry; no TTS is emitted. False between resets.
+  bool get lastRepHipsForwardOnDescentFired =>
+      _lastRepHipsForwardOnDescentFired;
+
+  /// Whether the (now tombstoned) knee-led-descent detector triggered on
+  /// the just-committed rep. Telemetry only; no TTS.
+  bool get lastRepKneeLedDescentFired => _lastRepKneeLedDescentFired;
+
+  /// Whether the (now tombstoned) tempo-inconsistency detector triggered
+  /// on the just-committed rep. Telemetry only; no TTS.
+  bool get lastRepTempoInconsistent => _lastRepTempoInconsistentSnapshot;
 
   /// Call at IDLE → DESCENDING. Resets per-rep extremes; preserves the
   /// `_lastRep*` outputs so the strategy can still read the previous rep's
@@ -792,91 +817,91 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   List<FormError> consumeCompletionErrorsWithDepth(
     double effectiveBottomAngle,
   ) {
+    // ── Emission order = priority order (2026-05-21 audit). ────────────
+    // The view-model's `_onFormErrors` walks this list and `break`s at the
+    // first speakable item, so list-position IS the cue priority. Final
+    // shipped order: depth → noKneeFlexion → hipLead → forwardLean →
+    // eccentricTooFast. Frame-level errors (heelLift, backwardLean) are
+    // merged BEFORE this list by SquatStrategy, so heelLift naturally
+    // lands between noKneeFlexion and hipLead at the priority slot it
+    // deserves.
+    //
+    // ENUM-TOMBSTONE NOTE: the following FormError values are no longer
+    // emitted but remain in `types.dart` per project policy (no clean
+    // deletes without dev-mode authorization):
+    //   - kneeDominantPattern (subsumed by noKneeFlexion + heelLift firing
+    //     independently)
+    //   - hipsForwardOnDescent, kneeLedDescent (subsumed by noKneeFlexion;
+    //     small-window detectors with fragile sign normalization)
+    //   - squatConcentricTooFast (explosive ascent is good form unloaded)
+    //   - squatTempoInconsistent, squatFatigue (statistical, low confidence
+    //     at typical rep counts)
+    // Their underlying metrics are STILL COMPUTED below so the telemetry
+    // pipeline remains intact — only the `errors.add(...)` calls are gone.
     final errors = <FormError>[];
+
+    // 1. Depth — the dominant fault. If you didn't reach depth, no other
+    // cue is more important; the half-squat veto in SquatStrategy also
+    // suppresses rep-counting on this verdict.
     if (_minKneeAngle != null && _minKneeAngle! >= effectiveBottomAngle) {
       errors.add(FormError.squatDepth);
     }
+
+    // 2. noKneeFlexion — broadened 2026-05-21. Two firing conditions:
+    //   (a) Stiff-legged miss (lone trigger): kneeDelta < 15° regardless
+    //       of lean. Covers the user who barely bent their knees at all,
+    //       which is hip-pivoting in either lean direction.
+    //   (b) Hip-pivot conjunction (legacy): lean ≥ 25° AND kneeDelta < 20°.
+    //       Covers the user who pivoted at the hip with a torso dive but
+    //       slightly-more-than-stiff-legged knee bend.
+    final kneeDelta = (_startKneeAngle != null && _minKneeAngle != null)
+        ? _startKneeAngle! - _minKneeAngle!
+        : null;
+    final stiffLegged =
+        kneeDelta != null &&
+        kneeDelta < kSquatNoKneeFlexionStiffLeggedMaxDeltaDeg;
+    final hipPivotConjunction =
+        _maxLeanDeg != null &&
+        _maxLeanDeg! >= kSquatNoKneeFlexionMinLeanDeg &&
+        kneeDelta != null &&
+        kneeDelta < kSquatNoKneeFlexionMaxKneeDeltaDeg;
+    if (stiffLegged || hipPivotConjunction) {
+      errors.add(FormError.noKneeFlexion);
+    }
+
+    // 3. hipLead — "good morning out of the hole." Y-velocity only, so the
+    // sign-immune by construction. Catches the cause ~300ms earlier than
+    // the forward-lean detector catches the symptom.
     if (_lastRepHipLeadFired) {
       errors.add(FormError.hipLead);
     }
 
-    // Sustained forward-lean verdict. Emitted once per rep iff a meaningful
+    // 4. Sustained forward-lean verdict. Emitted once per rep iff a meaningful
     // fraction of the rep's evaluated frames held the lean over threshold.
-    // Fails OPEN below the min-frame floor (mirrors `kSquatHipsForwardMinFrames`
-    // / `kHipLeadMinAscendingFrames`) — a too-short rep can't carry enough
-    // signal to grade, so it's silently passed rather than false-flagged.
+    // Fails OPEN below the min-frame floor — a too-short rep can't carry
+    // enough signal to grade, so it's silently passed rather than false-flagged.
     if (_leanTotalEvalFrameCount >= kSquatLeanMinEvalFrames &&
         _leanExceedFrameCount / _leanTotalEvalFrameCount >=
             kSquatLeanSustainedFraction) {
       errors.add(FormError.excessiveForwardLean);
     }
 
-    // No-knee-flexion: user pivoted at the hip without bending the knees.
-    // Fires only when BOTH the peak lean was substantial AND the knee delta
-    // from descent-start to bottom was small. Either condition alone is
-    // ambiguous (deep squat with appropriate lean / stiff-legged miss with
-    // no lean) — the conjunction is what makes the cue specific.
-    final kneeDelta = (_startKneeAngle != null && _minKneeAngle != null)
-        ? _startKneeAngle! - _minKneeAngle!
-        : null;
-    if (_maxLeanDeg != null &&
-        _maxLeanDeg! >= kSquatNoKneeFlexionMinLeanDeg &&
-        kneeDelta != null &&
-        kneeDelta < kSquatNoKneeFlexionMaxKneeDeltaDeg) {
-      errors.add(FormError.noKneeFlexion);
-    }
-
-    // Hips-forward-on-descent: the t=0→window-close hip drift was toward
-    // the toes by more than `kSquatHipsForwardMinRatio`. Flag was set
-    // inside `_maybeSampleDescentHipX` when the window closed.
-    if (_hipsForwardOnDescentFired) {
-      errors.add(FormError.hipsForwardOnDescent);
-    }
-
-    // Knee-led-descent: early knee-X travel dominated hip-Y drop beyond
-    // `kSquatKneeLedMinRatio` over the shared descent window. Flag was set
-    // inside `_maybeSampleKneeLedDescent` when the window closed. Distinct
-    // from `hipsForwardOnDescent` — that detector measures the hip drifting
-    // toward the toes; this one measures the knee out-pacing the hip drop.
-    // Both can fire on the same rep (different facets of the same
-    // knee-dominant initiation), or independently.
-    if (_kneeLedDescentFired) {
-      errors.add(FormError.kneeLedDescent);
-    }
-
-    // Compound knee-dominant pattern (Phase 3, 2026-05-16). Knee-past-ankle
-    // ALONE is informational only (`forwardKneeShift` — the retired "knees
-    // must not pass toes" myth lives there, no TTS, no penalty). It becomes
-    // a genuine fault ONLY when it co-occurs with heel-lift in the same
-    // rep: forward knee travel WITH the heel coming up is the recognized
-    // ankle-dorsiflexion-restriction / quad-dominance red flag (the heel
-    // lifting is what makes the knee travel pathological rather than the
-    // normal forward tracking of a deep squat). The conjunction is the
-    // signal; either condition alone is benign-or-already-covered.
-    if (_maxKneeShiftRatio != null &&
-        _maxKneeShiftRatio! > _formThresholds.kneeShiftWarnRatio &&
-        _maxHeelLiftRatio != null &&
-        _maxHeelLiftRatio! > _formThresholds.heelLiftWarnRatio) {
-      errors.add(FormError.kneeDominantPattern);
-    }
-
-    // Tempo / fatigue (curl-parity). The strategy has already called
-    // `stampAscentEnd` before this, so the phase durations are final.
-    // These per-rep cues fire as feedback EVEN on a vetoed half-squat
-    // (the user did rush it). Tempo-inconsistency + fatigue read
-    // `_ascentDurations`, which only ever contains committed reps (the
-    // strategy calls `commitAscentToWindow` only on `!missedDepth`), so
-    // a half-squat can't skew them.
+    // 5. Eccentric (descent) too fast. The strategy has already called
+    // `stampAscentEnd` before this, so phase durations are final. Fires
+    // as feedback EVEN on a vetoed half-squat (the user did rush it).
     if (_lastEccentricDuration != null &&
         _lastEccentricDuration!.inMilliseconds < kSquatMinEccentricSec * 1000) {
       errors.add(FormError.squatEccentricTooFast);
     }
-    if (_lastConcentricDuration != null &&
-        _lastConcentricDuration!.inMilliseconds <
-            kSquatMinConcentricSec * 1000) {
-      errors.add(FormError.squatConcentricTooFast);
-    }
 
+    // ── Tombstoned detectors: metrics still compute, no errors.add. ────
+    // The view-model and telemetry pipeline read the underlying
+    // `_lastRepHipsForwardRatio`, `_lastRepKneeLedRatio`,
+    // `_lastConcentricDuration`, the tempo rolling window, and the
+    // historical concentric-duration baseline. The book-keeping below
+    // preserves those reads without surfacing TTS or quality penalties.
+
+    // Tempo-inconsistency book-keeping (telemetry only — no errors.add).
     _lastRepTempoInconsistent = false;
     if (_tempoReArmRepsRemaining > 0) {
       _tempoReArmRepsRemaining--;
@@ -896,10 +921,8 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
         }
       }
     }
-    if (_lastRepTempoInconsistent) {
-      errors.add(FormError.squatTempoInconsistent);
-    }
 
+    // Fatigue book-keeping (telemetry only — no errors.add).
     if (!_fatigueFired && _ascentDurations.length >= kSquatFatigueMinReps) {
       final firstAvg = _avgDurationMs(
         _ascentDurations.sublist(0, kSquatFatigueWindowSize),
@@ -911,7 +934,6 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       );
       final baseline = math.max(firstAvg, _historicalMedianMs());
       if (baseline > 0 && lastAvg / baseline > kSquatFatigueSlowdownRatio) {
-        errors.add(FormError.squatFatigue);
         _fatigueFired = true;
       }
     }
@@ -928,6 +950,15 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _lastRepLeanExceedFrac = _leanTotalEvalFrameCount > 0
         ? _leanExceedFrameCount / _leanTotalEvalFrameCount
         : null;
+    // Snapshot the tombstoned-detector verdicts before per-rep counters
+    // drain at `onDescendingStart`. The host reads the getters
+    // (`lastRepHipsForwardOnDescentFired`, `lastRepKneeLedDescentFired`,
+    // `lastRepTempoInconsistent`) on the `squat.rep` telemetry line. The
+    // detectors still compute — only their FormError emission was retired
+    // by the 2026-05-21 audit.
+    _lastRepHipsForwardOnDescentFired = _hipsForwardOnDescentFired;
+    _lastRepKneeLedDescentFired = _kneeLedDescentFired;
+    _lastRepTempoInconsistentSnapshot = _lastRepTempoInconsistent;
     // Snapshot the backward-fire count before it drains (Bug-4 sign
     // diagnostic). `_lastRepSignedLeanAtPeak` needs no snapshot — it is
     // only assigned on a |lean| peak and reset at `onDescendingStart`, so
@@ -1047,7 +1078,20 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   }
 
   /// Signed forward-lean angle (degrees). Positive = forward (hip ahead of
-  /// shoulder along the camera's +x axis); negative = backward.
+  /// shoulder along the user's toes direction); negative = backward.
+  ///
+  /// **Sign-normalized against the user's facing direction (2026-05-21).**
+  /// The previous formula `dx = hip.x − shoulder.x` was direction-dependent:
+  /// a left-facing user leaning forward produced a NEGATIVE `dx`, which
+  /// suppressed `excessiveForwardLean` and false-fired `excessiveBackwardLean`.
+  /// The "Bug-4" diagnostic block above documents the inversion symptom.
+  ///
+  /// Fix: anchor "forward" against the heel→hip X direction. The toes are
+  /// (approximately) opposite the heel along the foot's long axis, so a hip
+  /// drifting AWAY from the heel along that axis is leaning forward. We use
+  /// `sign(hip.x − heel.x)` as the forward direction and multiply the raw
+  /// `dx` by it — the result is positive for forward lean regardless of
+  /// whether the camera sees the user from their left or right side.
   ///
   /// `atan2(dx, dy)` is used so the magnitude matches the trunk's tilt
   /// from vertical regardless of how far apart the two landmarks are
@@ -1061,15 +1105,35 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       side == ExerciseSide.left ? LM.leftHip : LM.rightHip,
       minConfidence: kMinLandmarkConfidence,
     );
-    if (shoulder == null || hip == null) return null;
-    final dx = hip.x - shoulder.x;
+    final heel = p.landmark(
+      side == ExerciseSide.left ? LM.leftHeel : LM.rightHeel,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    if (shoulder == null || hip == null || heel == null) return null;
     final dy = (hip.y - shoulder.y).abs();
     if (dy < 1e-6) return null;
+    // Forward direction: the X axis pointing from heel toward hip projection.
+    // Returns null sign when hip stacks exactly over heel (degenerate frame,
+    // typically a fully upright standing pose where lean is ~0 anyway).
+    final hipHeelOffset = hip.x - heel.x;
+    if (hipHeelOffset.abs() < 1e-6) return 0.0;
+    final forwardSign = hipHeelOffset >= 0 ? 1.0 : -1.0;
+    final dx = (hip.x - shoulder.x) * forwardSign;
     return math.atan2(dx, dy) * 180.0 / math.pi;
   }
 
-  /// Forward knee shift ratio. Positive only — backward (knee behind
-  /// ankle) is clamped to 0 since the cue would never fire there.
+  /// Knee shift ratio: how far the knee is displaced horizontally from the
+  /// ankle, normalized by femur length.
+  ///
+  /// **Direction-agnostic (2026-05-21).** The previous formula
+  /// `max(0, knee.x − ankle.x)` clamped to zero for left-facing users (whose
+  /// knee tracks toward lower x as it travels forward), making the entire
+  /// `forwardKneeShift` and `kneeDominantPattern` codepath dead for half the
+  /// user population. The new formula uses `.abs()` — the fault is "knee
+  /// displaced from ankle by a lot," regardless of which side of the ankle
+  /// it sits on. In a real side-view squat the knee virtually never sits
+  /// BEHIND the ankle, so the abs is equivalent to the original intent for
+  /// right-facing users while also working for left-facing users.
   double? _kneeShiftRatio(PoseResult p, ExerciseSide side) {
     final hip = p.landmark(
       side == ExerciseSide.left ? LM.leftHip : LM.rightHip,
@@ -1086,7 +1150,7 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     if (hip == null || knee == null || ankle == null) return null;
     final femurLen = _euclidean(hip, knee);
     if (femurLen < 1e-6) return null;
-    final shift = math.max(0.0, knee.x - ankle.x);
+    final shift = (knee.x - ankle.x).abs();
     return shift / femurLen;
   }
 
