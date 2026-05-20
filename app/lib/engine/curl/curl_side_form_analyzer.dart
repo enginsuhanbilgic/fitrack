@@ -22,15 +22,25 @@ import 'curl_form_analyzer_extras.dart';
 /// front so iteration on side cannot regress front.
 ///
 /// Frame-level errors (evaluated during CONCENTRIC/ECCENTRIC):
-///   - `torsoSwing`: lateral X-shift OR forward trunk-lean angle delta
-///     above [kTorsoLeanThresholdDeg]. Combined into one cue because the
-///     user experiences both as "torso momentum cheat."
-///   - `shoulderArc`: hip-pivot rotation — 2D shoulder displacement in
-///     hip-relative coordinates / torso length > [kSwingThreshold].
+///   - `depthSwing`: forward sagittal trunk lean — trunk-from-vertical
+///     angle delta above [kTorsoLeanThresholdDeg]. TTS cue: "Don't rock
+///     forward". Replaces the prior `torsoSwing` lean leg (renamed 2026-05-21
+///     so the cue and the math agree on what they measure).
+///   - `shoulderArc`: hip-pivot rotation around the vertical axis. Computed
+///     as the X-component (only) of the shoulder displacement in hip-relative
+///     coordinates, normalized by torso length, > [kSwingThreshold]. The Y
+///     component is intentionally dropped so a forward sagittal lean (which
+///     also moves the shoulder in Y) does not re-introduce the lean confound.
 ///   - `elbowDrift`: torso-perpendicular projection of the elbow offset
 ///     `(E − S) · n̂ / |S − H|` — magnitude > [kDriftThreshold]. Lean-invariant
 ///     by construction; sign is preserved on `lastSignedElbowDriftRatio` for
 ///     telemetry. See `docs/biceps/BICEPS_CURL_SIDE_VIEW_SPEC.md §B`.
+///
+/// `FormError.torsoSwing` is intentionally NOT emitted by the side analyzer.
+/// Lateral momentum in the user's frontal plane projects into screen depth
+/// in a 2D side-view camera and is geometrically unobservable here. The
+/// enum value still exists for legacy deserialization and potential future
+/// front-view use.
 ///
 /// Rep-boundary errors:
 ///   - `shortRomStart`, `shortRomPeak`: classified against active thresholds.
@@ -39,9 +49,13 @@ import 'curl_form_analyzer_extras.dart';
 ///
 /// Features intentionally NOT present (front-only):
 ///   - Bilateral asymmetry — only one arm visible in side view.
-///   - Depth-swing — apparent torso length doesn't change usefully when
-///     the user is already side-on; the cheat axis is sagittal lean,
-///     which the trunk-lean angle check covers.
+///
+/// Note: `depthSwing` USED to mean "front-view scale-invariant detector of
+/// torso-toward-camera motion" — that detector was deleted with the rest
+/// of the front analyzer on 2026-05-13. The enum value was repurposed
+/// 2026-05-21 for the side-view forward-lean cue described above (the cue
+/// strings "Don't rock forward" / "Rocking Forward" were always aligned
+/// with forward lean and remain unchanged).
 class CurlSideFormAnalyzer extends CurlAnalyzer {
   CurlSideFormAnalyzer({
     FormThresholds formThresholds = FormThresholds.medium,
@@ -99,7 +113,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
   final List<Duration> _historicalConcentricDurations;
 
   // ── Per-rep extremes for quality scoring ─────────────
-  double _maxSwingRatio = 0.0;
   double _maxDriftRatio = 0.0;
   double _maxLeanDeltaDeg = 0.0;
   double _maxShoulderArcRatio = 0.0;
@@ -186,7 +199,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     _concentricStart = DateTime.now();
     _eccentricStart = null;
     _lastEccentricDuration = null;
-    _maxSwingRatio = 0.0;
     _maxDriftRatio = 0.0;
     _maxLeanDeltaDeg = 0.0;
     _maxShoulderArcRatio = 0.0;
@@ -313,30 +325,16 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     final torsoLen = _computeTorsoLen(current, useLeft);
     if (torsoLen == null || torsoLen < 0.01) return errors;
 
-    // Lateral torso swing — check whichever shoulder is visible.
+    // Forward trunk lean — side-view sagittal projection.
     //
-    // Dead-band: below the effective dead-band the lateral shift is
-    // indistinguishable from ML-Kit jitter on a clean rep. We still record
-    // the magnitude into `_maxSwingRatio` (telemetry sees the truth) but
-    // suppress the cue. Above the dead-band but below the audit threshold,
-    // the user's "minimal movement budget" applies — natural body shift
-    // during heavy curls passes through silently. The effective dead-band
-    // is `kFormMinMovementSwingRatio` at tolerance=0 and widens toward
-    // `swingThreshold` as the user opens the Form Tolerance slider; see
-    // `FormThresholds._effectiveDeadband`.
-    final swing = useLeft
-        ? horizontalShift(ref, current, LM.leftShoulder)
-        : horizontalShift(ref, current, LM.rightShoulder);
-    if (swing != null) {
-      final ratio = swing / torsoLen;
-      if (ratio > _maxSwingRatio) _maxSwingRatio = ratio;
-      if (ratio > _formThresholds.effectiveSwingDeadband &&
-          ratio > _formThresholds.swingThreshold) {
-        errors.add(FormError.torsoSwing);
-      }
-    }
-
-    // Forward trunk lean angle — side-view sagittal projection.
+    // Emits `depthSwing` ("Don't rock forward"). The lateral-X swing leg
+    // that used to live above this block and ALSO fired `torsoSwing` was
+    // deleted 2026-05-21 — in a 2D side-view camera, the user's lateral
+    // axis projects into screen depth and the absolute screen-X shift of
+    // the shoulder is, in practice, dominated by the same forward sagittal
+    // lean this block already detects. Keeping both gave two cues for one
+    // physical motion and named them "swing" while the user was actually
+    // leaning.
     //
     // Dead-band: pose-estimation noise on the shoulder-hip vector is
     // ~1-2°. The effective dead-band (3° at tolerance=0, widening toward
@@ -352,15 +350,24 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
         final delta = (currentAngle - baseline).abs();
         if (delta > _maxLeanDeltaDeg) _maxLeanDeltaDeg = delta;
         if (delta > _formThresholds.effectiveLeanDeadband &&
-            delta > _formThresholds.torsoLeanThresholdDeg &&
-            !errors.contains(FormError.torsoSwing)) {
-          errors.add(FormError.torsoSwing);
+            delta > _formThresholds.torsoLeanThresholdDeg) {
+          errors.add(FormError.depthSwing);
         }
       }
     }
 
-    // Shoulder arc — hip-pivot rotation, hip-relative coordinates.
-    if (_baselineShoulderRelX != null && _baselineShoulderRelY != null) {
+    // Shoulder arc — hip-pivot rotation around the vertical axis.
+    //
+    // Hip-pivot rotation manifests as a screen-X swing of the shoulder
+    // relative to the hip. The Y component of the displacement is
+    // intentionally dropped: a forward sagittal lean ALSO moves the
+    // shoulder in Y (the torso pitches forward, lowering the shoulder
+    // in screen space), so including it would re-introduce the lean
+    // confound that already lives on the `depthSwing` detector above.
+    // Pre-2026-05-21 this metric was the Euclidean magnitude
+    // sqrt(dx² + dy²) / torsoLen and false-fired "Stop rotating" on a
+    // pure 14°+ forward lean — see GLOSSARY and CHANGELOG.
+    if (_baselineShoulderRelX != null) {
       final shoulder = current.landmark(
         useLeft ? LM.leftShoulder : LM.rightShoulder,
         minConfidence: kMinLandmarkConfidence,
@@ -371,10 +378,8 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
       );
       if (shoulder != null && hip != null) {
         final relX = shoulder.x - hip.x;
-        final relY = shoulder.y - hip.y;
         final dx = relX - _baselineShoulderRelX!;
-        final dy = relY - _baselineShoulderRelY!;
-        final disp = math.sqrt(dx * dx + dy * dy);
+        final disp = dx.abs();
         final ratio = disp / torsoLen;
         if (ratio > _maxShoulderArcRatio) _maxShoulderArcRatio = ratio;
         // Shoulder-arc shares the swing dead-band — both measure hip-relative
@@ -581,7 +586,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     _lastConcentricDuration = null;
     _concentricDurations.clear();
     _fatigueFired = false;
-    _maxSwingRatio = 0.0;
     _maxDriftRatio = 0.0;
     _maxLeanDeltaDeg = 0.0;
     _maxShoulderArcRatio = 0.0;
@@ -709,14 +713,11 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     var score = 1.0;
     final ft = _formThresholds;
 
-    if (_maxSwingRatio > ft.swingThreshold) {
-      final severity =
-          ((_maxSwingRatio - ft.swingThreshold) / ft.swingThreshold).clamp(
-            0.0,
-            1.0,
-          );
-      score -= severity * kQualitySwingMaxDeduction;
-    }
+    // The lateral-X swing deduction (`_maxSwingRatio`) was removed 2026-05-21
+    // when the lateral leg of `torsoSwing` was deleted from the side analyzer.
+    // The lean leg below — now firing as `depthSwing` — already deducts for
+    // the same physical motion the deleted leg also fired on, so this is a
+    // double-count removal, not an unpunished cheat.
     if (_maxLeanDeltaDeg > ft.torsoLeanThresholdDeg) {
       final severity =
           ((_maxLeanDeltaDeg - ft.torsoLeanThresholdDeg) /

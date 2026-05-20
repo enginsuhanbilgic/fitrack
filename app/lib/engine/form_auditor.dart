@@ -266,8 +266,14 @@ class FormAuditor {
           if (fired) perRepFired[i]++;
         }
         if (sm.shoulderDriftRatio != null) {
-          // Side analyzer's shoulder-arc check uses the same drift threshold.
-          final fired = sm.shoulderDriftRatio! > strictForm.driftThreshold;
+          // Side analyzer's shoulder-arc check fires on `swingThreshold`
+          // (0.25), not `driftThreshold` (0.20). Pre-2026-05-21 the metric
+          // was a direction-blind Euclidean magnitude and the audit
+          // borrowed the elbow-drift bar; post-fix the metric is X-only
+          // hip-pivot rotation and must be graded against the same scalar
+          // bar the live cue ("Stop rotating") uses, otherwise the audit
+          // report can flag rows the user never heard cued live.
+          final fired = sm.shoulderDriftRatio! > strictForm.swingThreshold;
           by('Shoulder drift').record(fired: fired);
           if (fired) perRepFired[i]++;
         }

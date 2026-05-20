@@ -186,10 +186,13 @@ void main() {
     // site that DROPS the dead-band guard entirely would let sub-baseline
     // motion fire. We test the sub-baseline silence for each cue.
 
-    test('lateral torsoSwing stays silent at sub-baseline magnitude '
-        'across every tolerance', () {
-      // swingRatio = ΔX_shoulder / torsoLen. Baseline = 0.08.
-      // Use shift = 0.01 → ratio ≈ 0.025 < 0.08.
+    test('shoulderArc stays silent at sub-baseline X-shift magnitude '
+        'across every tolerance (X-only metric, post-2026-05-21)', () {
+      // shoulderArc ratio = |ΔrelX| / torsoLen. Baseline = effectiveSwingDeadband
+      // (0.08 at percent=0, widening). Use shift = 0.01 → ratio ≈ 0.025 < 0.08.
+      // Pre-2026-05-21 this would have been the lateral-`torsoSwing` test;
+      // post-fix the lateral-`torsoSwing` leg is deleted and the X-only
+      // rotation gate is the surviving consumer of the swing dead-band.
       final ref = buildSidePose(
         shoulderX: 0.50,
         shoulderY: 0.30,
@@ -209,10 +212,18 @@ void main() {
       for (final percent in [0, 50, 100]) {
         final a = makeAnalyzer(percent);
         a.onRepStart(ref);
+        final errors = a.evaluate(evaluated);
         expect(
-          a.evaluate(evaluated),
+          errors,
+          isNot(contains(FormError.shoulderArc)),
+          reason: 'shoulderArc stays silent at percent=$percent',
+        );
+        // Also verify torsoSwing is never emitted by the side analyzer
+        // (lateral leg removed 2026-05-21).
+        expect(
+          errors,
           isNot(contains(FormError.torsoSwing)),
-          reason: 'lateral swing stays silent at percent=$percent',
+          reason: 'side analyzer must never emit torsoSwing post-2026-05-21',
         );
       }
     });

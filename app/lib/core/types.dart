@@ -57,9 +57,9 @@ enum RepState {
 /// Types of form errors we can detect.
 enum FormError {
   // Biceps curl
-  torsoSwing, // momentum abuse — lateral (X-axis) shoulder shift
-  depthSwing, // sagittal swing toward/away from camera — detected via scale-invariant torso features (front view only)
-  shoulderArc, // hip-pivot rotation — detected via shoulder displacement in hip-relative frame (side views only)
+  torsoSwing, // momentum abuse — lateral (frontal-plane) shoulder shift. No longer emitted by side analyzer (lateral momentum is unobservable in 2D side view, since the user's frontal plane projects into screen depth). Enum value retained for legacy session deserialization and potential future front-view use.
+  depthSwing, // forward sagittal trunk lean — emitted by `CurlSideFormAnalyzer` when the trunk-from-vertical angle delta exceeds `FormThresholds.torsoLeanThresholdDeg` (default `kTorsoLeanThresholdDeg = 12°`). Replaces the front-view scale-invariant detector that was deleted with the rest of the front analyzer on 2026-05-13. TTS cue: "Don't rock forward".
+  shoulderArc, // hip-pivot rotation around the vertical axis — emitted by `CurlSideFormAnalyzer` from the X-component (only) of the shoulder displacement in hip-relative coordinates, normalized by torso length. The Y component is intentionally dropped so a forward sagittal lean (which also moves the shoulder in Y) does not false-fire this cue. Side views only.
   elbowDrift, // elbow moving forward/backward
   shoulderShrug, // lifting shoulders up (trapezius involvement)
   backLean, // excessive backward lean (hyperextension)
