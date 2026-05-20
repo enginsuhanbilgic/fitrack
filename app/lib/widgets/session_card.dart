@@ -186,7 +186,6 @@ class SessionCard extends StatelessWidget {
     FormError.depthSwing => 'Rocking Forward',
     FormError.shoulderArc => 'Hip Rotation',
     FormError.elbowDrift => 'Elbow Moving Out',
-    FormError.elbowRise => 'Elbow Rising Up',
     FormError.shoulderShrug => 'Shoulder Shrug',
     FormError.backLean => 'Leaning Back',
     FormError.shortRomStart => 'Arm Not Extended',

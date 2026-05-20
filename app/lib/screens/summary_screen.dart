@@ -61,9 +61,8 @@ class SummaryScreen extends StatefulWidget {
   final List<SquatRepMetrics> squatRepMetrics;
 
   /// Per-rep biceps side-view metrics — lean, shoulder arc, elbow drift,
-  /// back lean, shrug, elbow rise. Index-aligned with the rep order.
-  /// Empty for front curl, squat, push-up, and reconstructed sessions
-  /// predating schema v5.
+  /// back lean, shrug. Index-aligned with the rep order. Empty for front
+  /// curl, squat, push-up, and reconstructed sessions predating schema v5.
   final List<BicepsSideRepMetrics> bicepsSideRepMetrics;
 
   /// Personal curl ROM profile in effect — drives the Form Audit's Tier-1
@@ -242,8 +241,7 @@ class SummaryScreen extends StatefulWidget {
               r.bicepsShoulderDriftRatio != null ||
               r.bicepsElbowDriftRatio != null ||
               r.bicepsBackLeanDeg != null ||
-              r.bicepsShrugRatio != null ||
-              r.bicepsElbowRiseRatio != null,
+              r.bicepsShrugRatio != null,
         )
         .map(
           (r) => BicepsSideRepMetrics(
@@ -254,7 +252,6 @@ class SummaryScreen extends StatefulWidget {
             backLeanDeg: r.bicepsBackLeanDeg,
             elbowDriftSigned: r.bicepsElbowDriftSigned,
             shrugRatio: r.bicepsShrugRatio,
-            elbowRiseRatio: r.bicepsElbowRiseRatio,
           ),
         )
         .toList(growable: false);
@@ -545,7 +542,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
     FormError.depthSwing => 'Rocking Toward Camera',
     FormError.shoulderArc => 'Hip Rotation',
     FormError.elbowDrift => 'Elbow Moving Out',
-    FormError.elbowRise => 'Elbow Rising Up',
     FormError.shoulderShrug => 'Shoulder Shrug',
     FormError.backLean => 'Leaning Back',
     FormError.shortRomStart => 'Arm Not Fully Extended',
@@ -1483,7 +1479,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
     final avgElbowDrift = avg((r) => r.elbowDriftRatio);
     final avgBackLean = avg((r) => r.backLeanDeg);
     final avgShrug = avg((r) => r.shrugRatio);
-    final avgElbowRise = avg((r) => r.elbowRiseRatio);
 
     if ([
       avgLean,
@@ -1491,7 +1486,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
       avgElbowDrift,
       avgBackLean,
       avgShrug,
-      avgElbowRise,
     ].every((v) => v == null)) {
       return const SizedBox.shrink();
     }
@@ -1546,13 +1540,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
             label: 'Shoulder shrug',
             value: avgShrug,
             threshold: kShrugThreshold,
-            unit: '',
-          ),
-        if (avgElbowRise != null)
-          _SideMetricRow(
-            label: 'Elbow rise',
-            value: avgElbowRise,
-            threshold: kElbowRiseThreshold,
             unit: '',
           ),
       ],

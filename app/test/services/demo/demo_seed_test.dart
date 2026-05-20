@@ -99,7 +99,6 @@ void main() {
       expect(rep['biceps_lean_deg'], isA<double>());
       expect(rep['biceps_shoulder_drift_ratio'], isA<double>());
       expect(rep['biceps_shrug_ratio'], isA<double>());
-      expect(rep['biceps_elbow_rise_ratio'], isA<double>());
       expect(rep['side'], isNotNull);
       expect(rep['view'], isNotNull);
       expect(rep['threshold_source'], ThresholdSource.calibrated.name);

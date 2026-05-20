@@ -11,7 +11,6 @@ void main() {
       expect(m.backLeanThresholdDeg, kBackLeanThresholdDeg);
       expect(m.shrugThreshold, kShrugThreshold);
       expect(m.driftThreshold, kDriftThreshold);
-      expect(m.elbowRiseThreshold, kElbowRiseThreshold);
     });
 
     test('all fields > 0', () {
@@ -21,7 +20,6 @@ void main() {
       expect(t.backLeanThresholdDeg, greaterThan(0));
       expect(t.shrugThreshold, greaterThan(0));
       expect(t.driftThreshold, greaterThan(0));
-      expect(t.elbowRiseThreshold, greaterThan(0));
     });
   });
 }

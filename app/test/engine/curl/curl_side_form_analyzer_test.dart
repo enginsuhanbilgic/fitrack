@@ -1005,67 +1005,6 @@ void main() {
     });
   });
 
-  group('elbowRise detection', () {
-    test('elbow stays at baseline y → no elbowRise', () {
-      final ref = buildSidePose(
-        shoulderX: 0.50,
-        shoulderY: 0.30,
-        hipX: 0.50,
-        hipY: 0.70,
-        elbowX: 0.50,
-        elbowY: 0.50,
-      );
-      a.onRepStart(ref);
-      expect(a.evaluate(ref), isNot(contains(FormError.elbowRise)));
-    });
-
-    test('elbow rises by 0.144 screen units → fires elbowRise', () {
-      final ref = buildSidePose(
-        shoulderX: 0.50,
-        shoulderY: 0.30,
-        hipX: 0.50,
-        hipY: 0.70,
-        elbowX: 0.50,
-        elbowY: 0.50,
-      );
-      a.onRepStart(ref);
-      // baselineElbowRelY = 0.50 − 0.30 = 0.20
-      // 2× threshold: rise=0.36 → Δ=0.36×0.40=0.144 → elbowY = 0.50−0.144 = 0.356
-      // currentElbowRelY = 0.356−0.30 = 0.056, rise=(0.20−0.056)/0.40 = 0.36 > 0.18
-      final evaluated = buildSidePose(
-        shoulderX: 0.50,
-        shoulderY: 0.30,
-        hipX: 0.50,
-        hipY: 0.70,
-        elbowX: 0.50,
-        elbowY: 0.356,
-      );
-      expect(a.evaluate(evaluated), contains(FormError.elbowRise));
-    });
-
-    test('elbow drops below baseline → no elbowRise', () {
-      final ref = buildSidePose(
-        shoulderX: 0.50,
-        shoulderY: 0.30,
-        hipX: 0.50,
-        hipY: 0.70,
-        elbowX: 0.50,
-        elbowY: 0.50,
-      );
-      a.onRepStart(ref);
-      // elbowY increases (elbow moves down) → rise negative → no flag
-      final evaluated = buildSidePose(
-        shoulderX: 0.50,
-        shoulderY: 0.30,
-        hipX: 0.50,
-        hipY: 0.70,
-        elbowX: 0.50,
-        elbowY: 0.62,
-      );
-      expect(a.evaluate(evaluated), isNot(contains(FormError.elbowRise)));
-    });
-  });
-
   group('quality score — side-view', () {
     test('clean rep scores 1.0', () async {
       final ref = buildSidePose(
@@ -1123,38 +1062,9 @@ void main() {
       },
     );
 
-    test('elbowRise at 2× threshold → score 0.85', () async {
-      final ref = buildSidePose(
-        shoulderX: 0.50,
-        shoulderY: 0.30,
-        hipX: 0.50,
-        hipY: 0.70,
-        elbowX: 0.50,
-        elbowY: 0.50,
-      );
-      // Shoulder.y stays 0.30 → torsoLen_curr = 0.40 (unchanged).
-      // baselineElbowRelY = 0.20. currentElbowRelY = 0.356 − 0.30 = 0.056.
-      // rise = (0.20 − 0.056) / 0.40 = 0.36 = 2× kElbowRiseThreshold (0.18).
-      // severity = 1.0, deduction = 1.0 × 0.15 = 0.15. Score = 1.0 − 0.15 = 0.85.
-      final risePose = buildSidePose(
-        shoulderX: 0.50,
-        shoulderY: 0.30,
-        hipX: 0.50,
-        hipY: 0.70,
-        elbowX: 0.50,
-        elbowY: 0.356,
-      );
-      a.onRepStart(ref);
-      await Future<void>.delayed(const Duration(milliseconds: 350));
-      a.evaluate(risePose);
-      a.onPeakReached();
-      a.onRepEnd();
-      expect(a.lastRepQuality, closeTo(0.85, 1e-9));
-    });
-
     test('stacked deductions clamp to 0.0 lower bound', () async {
-      // Drive every deduction at once: shrug + elbowRise + lateral swing
-      // + elbowDrift + shoulderArc.
+      // Drive every deduction at once: shrug + lateral swing + elbowDrift
+      // + shoulderArc.
       final ref = buildSidePose(
         shoulderX: 0.50,
         shoulderY: 0.30,

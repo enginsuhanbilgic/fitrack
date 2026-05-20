@@ -85,6 +85,19 @@ abstract class SessionRepository {
   ///
   /// Returns the number of `sessions` rows deleted (excludes cascaded rows).
   Future<int> deleteDemoSessions();
+
+  /// Wipes every row in `sessions` where `is_demo = 0` (i.e. all real
+  /// user sessions, leaving demo sessions intact). Cascades to `reps` +
+  /// `form_errors` via FK ON DELETE CASCADE. Used by Settings → Reset
+  /// Sessions (2026-05-21).
+  ///
+  /// Does NOT touch the `profiles` table — calibration is preserved
+  /// across a session reset; the user still has the existing
+  /// `Recalibrate` buttons to clear ROM profiles per exercise.
+  ///
+  /// Returns the number of `sessions` rows deleted (excludes cascaded
+  /// rows). Idempotent — returns 0 on an empty / all-demo DB.
+  Future<int> deleteRealSessions();
 }
 
 class SqliteSessionRepository implements SessionRepository {
@@ -155,7 +168,6 @@ class SqliteSessionRepository implements SessionRepository {
             'biceps_back_lean_deg': bicepsMetric?.backLeanDeg,
             'biceps_elbow_drift_signed': bicepsMetric?.elbowDriftSigned,
             'biceps_shrug_ratio': bicepsMetric?.shrugRatio,
-            'biceps_elbow_rise_ratio': bicepsMetric?.elbowRiseRatio,
             // biceps_front_swing_ratio / biceps_front_depth_swing_ratio:
             // front view removed 2026-05; columns retained for schema
             // compatibility, always NULL on new writes.
@@ -372,6 +384,11 @@ class SqliteSessionRepository implements SessionRepository {
   }
 
   @override
+  Future<int> deleteRealSessions() async {
+    return _db.delete('sessions', where: 'is_demo = 0');
+  }
+
+  @override
   Future<List<Duration>> recentConcentricDurations({
     required ExerciseType exercise,
     required Duration window,
@@ -478,8 +495,6 @@ LIMIT ?
       bicepsElbowDriftSigned: (row['biceps_elbow_drift_signed'] as num?)
           ?.toDouble(),
       bicepsShrugRatio: (row['biceps_shrug_ratio'] as num?)?.toDouble(),
-      bicepsElbowRiseRatio: (row['biceps_elbow_rise_ratio'] as num?)
-          ?.toDouble(),
       bicepsFrontSwingRatio: (row['biceps_front_swing_ratio'] as num?)
           ?.toDouble(),
       bicepsFrontDepthSwingRatio:
@@ -599,7 +614,6 @@ class InMemorySessionRepository implements SessionRepository {
                   bicepsBackLeanDeg: bicepsMetric?.backLeanDeg,
                   bicepsElbowDriftSigned: bicepsMetric?.elbowDriftSigned,
                   bicepsShrugRatio: bicepsMetric?.shrugRatio,
-                  bicepsElbowRiseRatio: bicepsMetric?.elbowRiseRatio,
                   // Front view removed 2026-05; columns retained for schema
                   // compatibility, always NULL on new writes.
                   bicepsFrontSwingRatio: null,
@@ -717,6 +731,19 @@ class InMemorySessionRepository implements SessionRepository {
   Future<int> deleteDemoSessions() async {
     final count = _sessions.where((s) => s.isDemo).length;
     _sessions.removeWhere((s) => s.isDemo);
+    return count;
+  }
+
+  /// In-memory counterpart of [SessionRepository.deleteRealSessions]:
+  /// wipes only the non-demo rows, leaving demo sessions intact.
+  /// The in-memory representation holds `reps` + `formErrors` *inside*
+  /// each `_StoredSession`, so removing the parent entry transitively
+  /// drops them without an explicit CASCADE — matches the SQLite
+  /// behavior.
+  @override
+  Future<int> deleteRealSessions() async {
+    final count = _sessions.where((s) => !s.isDemo).length;
+    _sessions.removeWhere((s) => !s.isDemo);
     return count;
   }
 

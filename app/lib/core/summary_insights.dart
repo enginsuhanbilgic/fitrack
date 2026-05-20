@@ -63,14 +63,6 @@ List<String> buildCurlInsights({
       return vals.reduce((a, b) => a + b) / vals.length;
     }
 
-    final avgElbowRise = avg((r) => r.elbowRiseRatio);
-    if (avgElbowRise != null && avgElbowRise > kElbowRiseThreshold) {
-      insights.add(
-        'Your elbow rose during the curl. Keep it pinned to your side — '
-        'lifting it shifts load away from the bicep.',
-      );
-    }
-
     final avgShoulderArc = avg((r) => r.shoulderDriftRatio);
     if (avgShoulderArc != null && avgShoulderArc > kSwingThreshold) {
       insights.add(

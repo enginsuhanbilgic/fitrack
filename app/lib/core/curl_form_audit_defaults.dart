@@ -36,7 +36,4 @@ class CurlFormAuditDefaults {
 
   /// Elbow/shoulder drift warning ratio.
   static const double driftThreshold = kDriftThreshold;
-
-  /// Elbow-rise warning ratio.
-  static const double elbowRiseThreshold = kElbowRiseThreshold;
 }

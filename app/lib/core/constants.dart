@@ -258,24 +258,6 @@ const double kFormMinMovementShrugRatio = 0.06;
 /// (unsigned) perpendicular projection magnitude.
 const double kFormMinMovementDriftRatio = 0.08;
 
-/// Below this elbow-rise ratio, no `elbowRise` cue fires. Sign convention
-/// matches `kElbowRiseThreshold` — only positive (upward) rise is gated;
-/// negative rise (elbow dropping) was never a fault.
-const double kFormMinMovementRiseRatio = 0.08;
-
-/// Elbow rise: (elbow_y − shoulder_y) relative upward shift / L_torso.
-/// Fires when the upper arm swings forward and the elbow lifts away from
-/// the torso during the curl (side view only). Positive = elbow moving up.
-///
-/// Tuned from `kElbowRiseThreshold = 0.12` (2026-04-27) — at peak
-/// flexion the upper arm naturally tilts forward 5–10° even with strict
-/// form, translating to ~0.08–0.12 elbow rise on a typical torso. The
-/// old threshold sat right at the upper bound of natural form,
-/// producing constant warnings on textbook reps. 0.18 keeps real
-/// front-delt cheats (typical 0.24–0.36) flagged while permitting the
-/// natural arc. Same retune-from-real-data caveat as `kShrugThreshold`.
-const double kElbowRiseThreshold = 0.22;
-
 // ── Sagittal sway (front view depth swing) ──────────────
 // Composite scale-invariant features over a 1€-filtered, baseline z-scored
 // signal classified by per-second velocity with N-frame hysteresis. See
@@ -1102,9 +1084,6 @@ const double kQualityShrugMaxDeduction = 0.15;
 
 /// Maximum deduction for backward lean (back hyperextension).
 const double kQualityBackLeanMaxDeduction = 0.20;
-
-/// Maximum deduction for elbow rise (upper arm swinging forward/up).
-const double kQualityElbowRiseMaxDeduction = 0.15;
 
 /// Deduction for rushed eccentric.
 const double kQualityEccentricDeduction = 0.15;

@@ -138,7 +138,7 @@ void main() {
         // Fire once, wait past the cooldown, fire again — 5 cues total.
         // High verbosity does NOT cap, so every cue should be spoken.
         for (var i = 0; i < 5; i++) {
-          vm.triggerFormErrorsForTest([FormError.elbowRise]);
+          vm.triggerFormErrorsForTest([FormError.shoulderShrug]);
           await Future<void>.delayed(
             Duration(
               milliseconds: ((kFeedbackCooldownSec * 1000) + 50).toInt(),
@@ -150,7 +150,8 @@ void main() {
         expect(
           tts.spoken.every(
             (s) =>
-                s == WorkoutViewModel.errorMessageForTest(FormError.elbowRise),
+                s ==
+                WorkoutViewModel.errorMessageForTest(FormError.shoulderShrug),
           ),
           isTrue,
         );
@@ -169,7 +170,7 @@ void main() {
         // be spoken (kTtsVerbosityMediumCap == 3); fires 4 and 5 pass the
         // time-cooldown but the count cap silences the voice.
         for (var i = 0; i < 5; i++) {
-          vm.triggerFormErrorsForTest([FormError.elbowRise]);
+          vm.triggerFormErrorsForTest([FormError.shoulderShrug]);
           await Future<void>.delayed(
             Duration(
               milliseconds: ((kFeedbackCooldownSec * 1000) + 50).toInt(),
@@ -189,7 +190,7 @@ void main() {
         addTearDown(vm.dispose);
 
         for (var i = 0; i < 4; i++) {
-          vm.triggerFormErrorsForTest([FormError.elbowRise]);
+          vm.triggerFormErrorsForTest([FormError.shoulderShrug]);
           await Future<void>.delayed(
             Duration(
               milliseconds: ((kFeedbackCooldownSec * 1000) + 50).toInt(),
@@ -203,7 +204,7 @@ void main() {
     );
 
     test(
-      'cap is per-error: silencing elbowRise does not silence backLean',
+      'cap is per-error: silencing shoulderShrug does not silence backLean',
       () async {
         // The doc-comment on TtsVerbosity promises silencing tracks the
         // specific cue, not the category. Verifies that hitting the
@@ -212,13 +213,13 @@ void main() {
         final (:vm, :tts) = build(verbosity: TtsVerbosity.low);
         addTearDown(vm.dispose);
 
-        // First fire: elbowRise. Should be spoken (count 1 ≤ cap 1).
-        vm.triggerFormErrorsForTest([FormError.elbowRise]);
+        // First fire: shoulderShrug. Should be spoken (count 1 ≤ cap 1).
+        vm.triggerFormErrorsForTest([FormError.shoulderShrug]);
         await Future<void>.delayed(
           Duration(milliseconds: ((kFeedbackCooldownSec * 1000) + 50).toInt()),
         );
-        // Second fire: elbowRise again. Should be silenced (count 2 > cap 1).
-        vm.triggerFormErrorsForTest([FormError.elbowRise]);
+        // Second fire: shoulderShrug again. Should be silenced (count 2 > cap 1).
+        vm.triggerFormErrorsForTest([FormError.shoulderShrug]);
         await Future<void>.delayed(
           Duration(milliseconds: ((kFeedbackCooldownSec * 1000) + 50).toInt()),
         );
@@ -229,7 +230,7 @@ void main() {
         expect(tts.spoken, hasLength(2));
         expect(
           tts.spoken[0],
-          WorkoutViewModel.errorMessageForTest(FormError.elbowRise),
+          WorkoutViewModel.errorMessageForTest(FormError.shoulderShrug),
         );
         expect(
           tts.spoken[1],
@@ -250,7 +251,7 @@ void main() {
         addTearDown(vm.dispose);
 
         for (var i = 0; i < 4; i++) {
-          vm.triggerFormErrorsForTest([FormError.elbowRise]);
+          vm.triggerFormErrorsForTest([FormError.shoulderShrug]);
           await Future<void>.delayed(
             Duration(
               milliseconds: ((kFeedbackCooldownSec * 1000) + 50).toInt(),
@@ -299,7 +300,7 @@ void main() {
         // streak builds. Fire (3+window): re-alert → spoken, streak resets.
         await pumpSpaced(
           vm,
-          FormError.elbowRise,
+          FormError.shoulderShrug,
           kTtsVerbosityMediumCap + kTtsPersistenceReArmRepsMedium,
         );
 
@@ -322,7 +323,7 @@ void main() {
         // window later → total 2 re-alerts on top of the cap cues.
         await pumpSpaced(
           vm,
-          FormError.elbowRise,
+          FormError.shoulderShrug,
           kTtsVerbosityMediumCap + (kTtsPersistenceReArmRepsMedium * 2),
         );
 
@@ -341,7 +342,7 @@ void main() {
         // fires. Low uses the WIDER window than medium by design.
         await pumpSpaced(
           vm,
-          FormError.elbowRise,
+          FormError.shoulderShrug,
           kTtsVerbosityLowCap + kTtsPersistenceReArmRepsLow,
         );
 
@@ -358,7 +359,7 @@ void main() {
         final (:vm, :tts) = build(verbosity: TtsVerbosity.high);
         addTearDown(vm.dispose);
 
-        await pumpSpaced(vm, FormError.elbowRise, 8);
+        await pumpSpaced(vm, FormError.shoulderShrug, 8);
 
         expect(tts.spoken, hasLength(8));
       },
@@ -368,23 +369,23 @@ void main() {
     test(
       'medium: re-arm streak is per-error (one fault does not re-arm another)',
       () async {
-        // elbowRise gets muted and builds its streak; torsoSwing is a
+        // shoulderShrug gets muted and builds its streak; torsoSwing is a
         // distinct error with its own counter. torsoSwing's first cue must
-        // still be spoken (under its own cap), and elbowRise's streak must
+        // still be spoken (under its own cap), and shoulderShrug's streak must
         // not be advanced/reset by torsoSwing fires.
         final (:vm, :tts) = build(verbosity: TtsVerbosity.medium);
         addTearDown(vm.dispose);
 
-        // Push elbowRise just below its re-arm point: cap + (window-1)
+        // Push shoulderShrug just below its re-arm point: cap + (window-1)
         // fires → cap cues spoken, streak = window-1 (NOT re-alerted yet).
         await pumpSpaced(
           vm,
-          FormError.elbowRise,
+          FormError.shoulderShrug,
           kTtsVerbosityMediumCap + kTtsPersistenceReArmRepsMedium - 1,
         );
         final afterElbow = tts.spoken.length; // == kTtsVerbosityMediumCap
 
-        // Interleave a different error — must not touch elbowRise's streak.
+        // Interleave a different error — must not touch shoulderShrug's streak.
         await pumpSpaced(vm, FormError.torsoSwing, 1);
 
         expect(
@@ -392,14 +393,14 @@ void main() {
           afterElbow + 1,
           reason: 'torsoSwing first cue spoken under its own cap',
         );
-        // One more elbowRise → NOW its streak hits the window → re-alert.
-        await pumpSpaced(vm, FormError.elbowRise, 1);
+        // One more shoulderShrug → NOW its streak hits the window → re-alert.
+        await pumpSpaced(vm, FormError.shoulderShrug, 1);
 
         expect(
           tts.spoken.length,
           afterElbow + 2,
           reason:
-              'elbowRise re-alerts on its own window, unaffected by '
+              'shoulderShrug re-alerts on its own window, unaffected by '
               'the interleaved torsoSwing',
         );
       },
@@ -424,7 +425,7 @@ void main() {
       // One `elbowDrift` per bad rep, spaced past the time-cooldown.
       // Fires 1..cap: spoken. Fires (cap+1)..(cap+window-1): muted,
       // streak builds. Fire (cap+window): single re-alert, streak
-      // resets — identical contract to the elbowRise re-arm test above.
+      // resets — identical contract to the shoulderShrug re-arm test above.
       await pumpSpaced(
         vm,
         FormError.elbowDrift,

@@ -44,7 +44,6 @@ void main() {
         );
         expect(t.shrugThreshold, CurlFormAuditDefaults.shrugThreshold);
         expect(t.driftThreshold, CurlFormAuditDefaults.driftThreshold);
-        expect(t.elbowRiseThreshold, CurlFormAuditDefaults.elbowRiseThreshold);
       });
     },
   );

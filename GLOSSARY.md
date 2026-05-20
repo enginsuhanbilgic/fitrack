@@ -860,12 +860,39 @@ The canonical vocabulary for the first-launch demo prompt + Settings toggle + ca
 
 ---
 
+## 13j. Reset Sessions (2026-05-21)
+
+| Term | Definition |
+|---|---|
+| **`SessionRepository.deleteRealSessions()`** | Wipes every row in `sessions` where `is_demo = 0`. Cascades to `reps` + `form_errors` via the existing FK `ON DELETE CASCADE`. Does NOT touch the `profiles` table — calibration is preserved across a session reset. Returns the count of `sessions` rows deleted (excludes cascaded children). Symmetric counterpart to `deleteDemoSessions()` (which wipes `is_demo = 1` and is called by `DemoService.disable`). Added 2026-05-21. |
+| **Settings → Reset sessions** | User-facing action in `Settings → Diagnostics & Advanced`. Tap shows a confirmation `AlertDialog`; on confirm, calls `sessionRepository.deleteRealSessions()`, emits a `settings.reset_sessions` telemetry entry, calls `DemoService.notifyExternalRefresh()` so the home dashboard re-queries, and shows a SnackBar with the deleted count. Preserves demo data (`is_demo = 1` rows) AND personal ROM profiles. The existing per-exercise `Recalibrate` / `Reset Profile` controls remain the canonical way to clear ROM profiles. Added 2026-05-21. |
+| **`settings.reset_sessions`** | Telemetry-log line emitted from `_confirmResetSessions` after a successful wipe. Payload shape: `deleted=N` (the count returned by `deleteRealSessions`). Lets the diagnostics ring buffer record the operator action without needing to re-query the DB. |
+
+---
+
+## 13i. Plank Exercise + Predefined Targets (2026-05-17)
+
+| Term | Definition |
+|---|---|
+| **`ExerciseType.plank`** | Fourth exercise type added in `app/lib/core/types.dart`. Time-hold exercise (not rep-counted). Allows landscape orientation (`allowsLandscape` returns `true`). Uses the same `ExerciseRequirements` landmark set as push-up (upper-body: landmarks 11–16). |
+| **`PlankStrategy`** | FSM strategy in `app/lib/engine/plank/plank_strategy.dart`. Counts elapsed hold time (seconds) rather than reps. Emits form errors during the hold phase without ending the rep on error — the hold continues until the target duration or the user manually stops. |
+| **`PlankFormAnalyzer`** | Form-error classifier in `app/lib/engine/plank/plank_form_analyzer.dart`. Emits two errors: `FormError.plankArmAngle` (elbow angle or shoulder–elbow stack outside the hold window) and `FormError.plankBodyLine` (shoulder–hip–ankle alignment lost during hold). |
+| **`FormError.plankArmAngle`** | Plank-specific form error: the user's elbow angle or shoulder-elbow vertical stack has drifted outside the configured hold window. Defined in `app/lib/core/types.dart`. |
+| **`FormError.plankBodyLine`** | Plank-specific form error: the shoulder–hip–ankle collinearity is broken during the hold — indicating hip sag or pike. Defined in `app/lib/core/types.dart`. |
+| **`ExerciseTargetConfig`** | Value class in `app/lib/core/exercise_targets.dart`. Holds `presets` (list of quick-pick values), `min`, `max`, `defaultValue`, and `isTimed` (true for plank, false for rep-based exercises). `forExercise(ExerciseType)` returns the config for any exercise. `sanitize(int?)` clamps an arbitrary value to the valid range. `labelFor(int)` renders "N reps" or "N sec (M:SS)". |
+| **`isTimed`** | Boolean flag on `ExerciseTargetConfig`. When `true` the target is a duration in seconds (plank); when `false` the target is a rep count (curl, squat, push-up). Controls how the home-screen picker renders presets and how the session auto-end logic compares progress against the target. |
+| **Session auto-end** | Behavior added 2026-05-17: when the user's rep count (or elapsed hold time for plank) reaches the selected target, the workout session ends automatically without requiring the user to tap Stop. Implemented in `workout_view_model.dart` + `workout_screen.dart`. |
+| **`SessionSummaryViewModel`** | New `ChangeNotifier` in `app/lib/view_models/session_summary_view_model.dart`. Encapsulates plank-specific summary logic (hold time, form-error timeline) so `SummaryScreen` does not need plank-specific branches at the widget level. |
+
+---
+
 ## 14. Retired / Deprecated Terms
 
 When a term is retired, move its entry here with a `→ replacement` line and the retirement date. Do not delete outright — old commits still reference it.
 
 | Retired term | Retired on | Replacement |
 |---|---|---|
+| **`FormError.elbowRise`** + the whole curl elbow-rise stack (`kElbowRiseThreshold = 0.22`, `kQualityElbowRiseMaxDeduction = 0.15`, `kFormMinMovementRiseRatio = 0.08`, `FormThresholds.elbowRiseThreshold`, `FormThresholds.effectiveRiseDeadband`, `CurlFormAuditDefaults.elbowRiseThreshold`, `BicepsSideRepMetrics.elbowRiseRatio`, `RepRow.bicepsElbowRiseRatio`, `CurlSideFormAnalyzer._maxElbowRiseRatio`, `CurlSideFormAnalyzer._baselineElbowRelY`, `CurlFormAnalyzerExtras.maxElbowRiseRatioThisRep`, `reps.biceps_elbow_rise_ratio` SQLite column, Form-Audit "Elbow rise" criterion, Summary-screen "Elbow rise" stat row, summary-insight "Your elbow rose…" string, telemetry `elbow_rise_ratio` token in `rep.side_metrics`, the `'Elbow down'` TTS cue, the `arrow_upward_rounded` icon entry, all settings-help copy mentioning "elbow rise") | 2026-05-20 (Curl elbow-rise retirement) | **`FormError.elbowDrift` is now the sole elbow-related curl form audit.** Elbow rise was a side-view-only cheat detector with thresholds (0.12 pre-retune, then 0.22 post-retune) that either flagged textbook reps as faults or failed to discriminate front-delt cheats cleanly. Unlike the project's usual enum-tombstone pattern (`trunkTibia`, `bicepsCurlFront`, DTW), this is a **clean delete** — the enum value, the SQLite column, and every constant are gone, not preserved as `@Deprecated`. Authorized by the user as a dev-mode wipe (no production data to preserve). SQLite schema bumped `v10 → v11` (`app/lib/services/db/schema.dart`) with a portable table-rewrite migration that drops `reps.biceps_elbow_rise_ratio` on existing dev installs. Quality scoring no longer deducts the 15% elbow-rise penalty, so typical curl rep quality scores may drift upward for users who previously triggered the cue — a deliberate quality recalibration, not a bug. Tests that referenced `FormError.elbowRise` as a generic curl-only error (TTS verbosity, session-summary filter) migrated to `FormError.shoulderShrug`. |
 | **`FormError.lateralAsymmetry`** (generic "Even out both arms") | 2026-04-21 (Curl Hardening Phase 7 / F6) | `FormError.asymmetryLeftLag` / `FormError.asymmetryRightLag`. The directional split surfaces which arm lagged by preserving the sign of `(left − right)` at the insertion site (the record type `({double left, double right})`). The old generic cue is gone from code; this row is the historical pointer for commits prior to Phase 7. |
 | **`FormError.shortRom`** (generic "Full range of motion") | 2026-04-21 (Curl Hardening Phase 8 / F7) | `FormError.shortRomStart` (start not extended enough) / `FormError.shortRomPeak` (peak not deep enough). Classification uses the `RomThresholds` pushed via `setActiveThresholds` at IDLE→CONCENTRIC, compared against numeric extremes captured during the rep and passed through the widened `onAbortedRep({maxAngleAtStart, minAngleReached})`. Peak-short takes precedence. The old generic cue is gone from code; this row is the historical pointer for commits prior to Phase 8. |
 | **`CurlRomProfile.calibrationSkipped`** (persisted opt-out flag) | 2026-04-21 (Calibration-Opt-In invariant) | Field removed. With personal calibration now **opt-in only** (never auto-launched), there is no auto-prompt for the user to dismiss, so the persisted opt-out flag has no purpose. `WorkoutScreen._init` enters the calibration phase iff `forceCalibration == true` (the Settings / in-workout-gear entry). `fromJson` silently ignores the legacy key on disk; `toJson` stops writing it. No schema bump — old profiles load without migration. |

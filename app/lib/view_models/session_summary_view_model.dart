@@ -269,14 +269,6 @@ List<String> _curlInsights(SessionSummaryInput input) {
     return vals.reduce((a, b) => a + b) / vals.length;
   }
 
-  final avgElbowRise = avg((r) => r.elbowRiseRatio);
-  if (avgElbowRise != null && avgElbowRise > kElbowRiseThreshold) {
-    insights.add(
-      'Your elbow rose on your $armLabel during the curl. Keep it pinned '
-      'to your side — lifting it shifts load away from the bicep.',
-    );
-  }
-
   final avgBackLean = avg((r) => r.backLeanDeg);
   if (avgBackLean != null && avgBackLean > kBackLeanThresholdDeg) {
     insights.add(

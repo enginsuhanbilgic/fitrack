@@ -46,7 +46,6 @@ class FormThresholds {
     required this.backLeanThresholdDeg,
     required this.shrugThreshold,
     required this.driftThreshold,
-    required this.elbowRiseThreshold,
     this.formTolerancePercent = kDefaultFormTolerancePercent,
   });
 
@@ -55,7 +54,6 @@ class FormThresholds {
   final double backLeanThresholdDeg;
   final double shrugThreshold;
   final double driftThreshold;
-  final double elbowRiseThreshold;
 
   /// User-controlled "form tolerance" in `[0, 100]`. Scales the effective
   /// dead-band between the baseline (`kFormMinMovement*`, equivalent to
@@ -88,7 +86,6 @@ class FormThresholds {
     backLeanThresholdDeg: CurlFormAuditDefaults.backLeanThresholdDeg,
     shrugThreshold: CurlFormAuditDefaults.shrugThreshold,
     driftThreshold: CurlFormAuditDefaults.driftThreshold,
-    elbowRiseThreshold: CurlFormAuditDefaults.elbowRiseThreshold,
   );
 
   /// Copies [medium] with a user-supplied [percent]. Inputs outside
@@ -107,7 +104,6 @@ class FormThresholds {
     backLeanThresholdDeg: backLeanThresholdDeg,
     shrugThreshold: shrugThreshold,
     driftThreshold: driftThreshold,
-    elbowRiseThreshold: elbowRiseThreshold,
     formTolerancePercent: formTolerancePercent ?? this.formTolerancePercent,
   );
 
@@ -133,9 +129,6 @@ class FormThresholds {
 
   double get effectiveDriftDeadband =>
       _effectiveDeadband(kFormMinMovementDriftRatio, driftThreshold);
-
-  double get effectiveRiseDeadband =>
-      _effectiveDeadband(kFormMinMovementRiseRatio, elbowRiseThreshold);
 
   /// Pure interpolation helper.
   ///

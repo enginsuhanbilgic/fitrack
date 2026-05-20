@@ -248,37 +248,6 @@ void main() {
         );
       }
     });
-
-    test('elbowRise stays silent at sub-baseline magnitude '
-        'across every tolerance', () {
-      // rise = (baselineElbowRelY - currentElbowRelY) / torsoLen.
-      // Baseline = 0.08. Use elbow shift of 0.02 → rise ≈ 0.05 < 0.08.
-      final ref = buildSidePose(
-        shoulderX: 0.50,
-        shoulderY: 0.30,
-        hipX: 0.50,
-        hipY: 0.70,
-        elbowX: 0.50,
-        elbowY: 0.50,
-      );
-      final evaluated = buildSidePose(
-        shoulderX: 0.50,
-        shoulderY: 0.30,
-        hipX: 0.50,
-        hipY: 0.70,
-        elbowX: 0.50,
-        elbowY: 0.48,
-      );
-      for (final percent in [0, 50, 100]) {
-        final a = makeAnalyzer(percent);
-        a.onRepStart(ref);
-        expect(
-          a.evaluate(evaluated),
-          isNot(contains(FormError.elbowRise)),
-          reason: 'elbowRise stays silent at percent=$percent',
-        );
-      }
-    });
   });
 
   group('Quality-score invariance — tolerance must NOT '

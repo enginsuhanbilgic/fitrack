@@ -105,7 +105,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
   double _maxShoulderArcRatio = 0.0;
   double _maxShrugRatio = 0.0;
   double _maxBackLeanDeg = 0.0;
-  double _maxElbowRiseRatio = 0.0;
 
   /// Most recent signed perpendicular elbow-offset ratio. Sign convention:
   /// positive = elbow on the side of n̂ where n̂ = (−u_y, u_x) and
@@ -143,7 +142,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
   double? _baselineTorsoAngleSigned;
   double? _baselineShoulderRelX;
   double? _baselineShoulderRelY;
-  double? _baselineElbowRelY;
   bool? _facingRight;
 
   // ── Arm-resolution telemetry (snapshot at rep start) ─
@@ -194,7 +192,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     _maxShoulderArcRatio = 0.0;
     _maxShrugRatio = 0.0;
     _maxBackLeanDeg = 0.0;
-    _maxElbowRiseRatio = 0.0;
     _lastSignedElbowDriftRatio = null;
     _signedElbowDriftRatioAtMax = null;
     _driftExceedFrameCount = 0;
@@ -217,21 +214,12 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
       useLeft ? LM.leftHip : LM.rightHip,
       minConfidence: kMinLandmarkConfidence,
     );
-    final elbow = snapshot.landmark(
-      useLeft ? LM.leftElbow : LM.rightElbow,
-      minConfidence: kMinLandmarkConfidence,
-    );
     if (shoulder != null && hip != null) {
       _baselineShoulderRelX = shoulder.x - hip.x;
       _baselineShoulderRelY = shoulder.y - hip.y;
     } else {
       _baselineShoulderRelX = null;
       _baselineShoulderRelY = null;
-    }
-    if (shoulder != null && elbow != null) {
-      _baselineElbowRelY = elbow.y - shoulder.y;
-    } else {
-      _baselineElbowRelY = null;
     }
   }
 
@@ -513,35 +501,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
       }
     }
 
-    // Elbow rise — upper arm swinging forward/up during the curl.
-    // Measures how much the elbow moves upward relative to the shoulder
-    // compared to the rep-start baseline, normalised by torso length.
-    if (_baselineElbowRelY != null) {
-      final riseElbow = current.landmark(
-        useLeft ? LM.leftElbow : LM.rightElbow,
-        minConfidence: kMinLandmarkConfidence,
-      );
-      final riseShoulder = current.landmark(
-        useLeft ? LM.leftShoulder : LM.rightShoulder,
-        minConfidence: kMinLandmarkConfidence,
-      );
-      if (riseElbow != null && riseShoulder != null) {
-        final currentElbowRelY = riseElbow.y - riseShoulder.y;
-        // Negative dy = elbow moved UP relative to shoulder (screen-Y decreases upward).
-        final rise = (_baselineElbowRelY! - currentElbowRelY) / torsoLen;
-        if (rise > _maxElbowRiseRatio) _maxElbowRiseRatio = rise;
-        // Dead-band: at peak flexion the upper arm naturally tilts forward
-        // 5-10° even with strict form, producing rise ~0.08-0.12. The 0.08
-        // baseline dead-band ignores the bottom of that natural arc; the
-        // 0.22 audit threshold still catches real front-delt cheats
-        // (0.24-0.36). Tolerance slider widens toward `elbowRiseThreshold`.
-        if (rise > _formThresholds.effectiveRiseDeadband &&
-            rise > _formThresholds.elbowRiseThreshold) {
-          errors.add(FormError.elbowRise);
-        }
-      }
-    }
-
     return errors;
   }
 
@@ -628,7 +587,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     _maxShoulderArcRatio = 0.0;
     _maxShrugRatio = 0.0;
     _maxBackLeanDeg = 0.0;
-    _maxElbowRiseRatio = 0.0;
     _lastSignedElbowDriftRatio = null;
     _signedElbowDriftRatioAtMax = null;
     _driftExceedFrameCount = 0;
@@ -637,7 +595,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     _baselineTorsoAngleSigned = null;
     _baselineShoulderRelX = null;
     _baselineShoulderRelY = null;
-    _baselineElbowRelY = null;
     _facingRight = null;
     _leftArmConfSum = 0.0;
     _rightArmConfSum = 0.0;
@@ -718,12 +675,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
   @override
   double get maxShrugRatioThisRep => _maxShrugRatio;
 
-  /// Max elbow-rise ratio observed during the current rep.
-  /// Telemetry-only; the flag uses the same value compared to
-  /// [kElbowRiseThreshold]. Cleared on rep boundary.
-  @override
-  double get maxElbowRiseRatioThisRep => _maxElbowRiseRatio;
-
   /// Anatomical arm the analyzer locked onto for the most recent rep.
   /// Resolved at [onRepStart] from per-arm landmark-confidence sums and
   /// frozen for the rep. Read by `CurlStrategy._commitRepSamples` so the
@@ -801,12 +752,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
                   ft.backLeanThresholdDeg)
               .clamp(0.0, 1.0);
       score -= severity * kQualityBackLeanMaxDeduction;
-    }
-    if (_maxElbowRiseRatio > ft.elbowRiseThreshold) {
-      final severity =
-          ((_maxElbowRiseRatio - ft.elbowRiseThreshold) / ft.elbowRiseThreshold)
-              .clamp(0.0, 1.0);
-      score -= severity * kQualityElbowRiseMaxDeduction;
     }
     if (_lastEccentricDuration != null &&
         _lastEccentricDuration!.inMilliseconds < kMinEccentricSec * 1000) {

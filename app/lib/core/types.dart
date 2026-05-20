@@ -63,7 +63,6 @@ enum FormError {
   elbowDrift, // elbow moving forward/backward
   shoulderShrug, // lifting shoulders up (trapezius involvement)
   backLean, // excessive backward lean (hyperextension)
-  elbowRise, // upper arm swings forward/up during curl — elbow lifts away from torso (side view only)
   shortRomStart, // rep started without reaching full extension (maxAngle < startAngle − tol)
   shortRomPeak, // abandoned rep — never reached peak (minAngle > peakAngle + tol)
   // Squat
@@ -222,10 +221,11 @@ enum FeedbackSensitivity {
 ///   making the same mistake.
 ///
 /// The cap (and its re-arm) is **per-error**, not global: hearing "torso
-/// swing" repeatedly does not silence a future "elbow rise" — tracking only
-/// follows the cue the user has already been told about. A user who *fixes*
-/// a fault stops clearing its cooldown, so the re-arm streak never advances
-/// and they never hear it again; only a persistently-wrong user is re-nudged.
+/// swing" repeatedly does not silence a future "shoulder shrug" — tracking
+/// only follows the cue the user has already been told about. A user who
+/// *fixes* a fault stops clearing its cooldown, so the re-arm streak never
+/// advances and they never hear it again; only a persistently-wrong user is
+/// re-nudged.
 enum TtsVerbosity {
   low('Low'),
   medium('Medium'),
@@ -402,7 +402,6 @@ class BicepsSideRepMetrics {
     required this.backLeanDeg,
     this.elbowDriftSigned,
     this.shrugRatio,
-    this.elbowRiseRatio,
   });
 
   final int repIndex;
@@ -436,11 +435,6 @@ class BicepsSideRepMetrics {
   /// the data-derived retune channel for [kShrugThreshold]. Null on rows
   /// written before schema v6 and on non-side-view rows.
   final double? shrugRatio;
-
-  /// Peak elbow-rise ratio this rep (`rise / torsoLen`). Drives the
-  /// data-derived retune channel for [kElbowRiseThreshold]. Null on rows
-  /// written before schema v6 and on non-side-view rows.
-  final double? elbowRiseRatio;
 }
 
 /// Required ML Kit landmark indices per exercise.

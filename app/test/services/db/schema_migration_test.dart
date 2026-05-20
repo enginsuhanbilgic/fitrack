@@ -134,7 +134,6 @@ Future<void> _v9OnCreate(Database db, int _) async {
     'ALTER TABLE reps ADD COLUMN biceps_elbow_drift_signed REAL',
   );
   await db.execute('ALTER TABLE reps ADD COLUMN biceps_shrug_ratio REAL');
-  await db.execute('ALTER TABLE reps ADD COLUMN biceps_elbow_rise_ratio REAL');
   await db.execute('ALTER TABLE reps ADD COLUMN biceps_front_swing_ratio REAL');
   await db.execute(
     'ALTER TABLE reps ADD COLUMN biceps_front_depth_swing_ratio REAL',

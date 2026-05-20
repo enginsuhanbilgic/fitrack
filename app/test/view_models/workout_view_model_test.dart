@@ -155,6 +155,9 @@ class _ThrowingSessionRepository implements SessionRepository {
 
   @override
   Future<int> deleteDemoSessions() async => 0;
+
+  @override
+  Future<int> deleteRealSessions() async => 0;
 }
 
 void main() {

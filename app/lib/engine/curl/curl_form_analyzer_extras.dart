@@ -97,14 +97,6 @@ mixin CurlFormAnalyzerExtras {
   /// percentile-tune `kShrugThreshold` against real distributions.
   double get maxShrugRatioThisRep;
 
-  /// Max elbow-rise ratio observed during the current rep. Defined as
-  /// `(baseline_elbowRelY − current_elbowRelY) / torso_len` (positive =
-  /// elbow rose relative to shoulder, i.e. front-delt cheat). 0.0 on the
-  /// front analyzer. Emitted as `elbow_rise_ratio` in the
-  /// `rep.side_metrics` TelemetryLog line so the retune pipeline can
-  /// percentile-tune `kElbowRiseThreshold` against real distributions.
-  double get maxElbowRiseRatioThisRep;
-
   /// Anatomical arm the side analyzer locked onto for the most recent
   /// rep — `true` for left, `false` for right. Resolved from per-arm
   /// landmark confidence at `onRepStart`. Differs from the user's

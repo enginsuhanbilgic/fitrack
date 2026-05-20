@@ -224,7 +224,6 @@ class FormAuditor {
         _CriterionBuilder('Elbow drift'),
         _CriterionBuilder('Shoulder drift'),
         _CriterionBuilder('Shrug'),
-        _CriterionBuilder('Elbow rise'),
       ]);
     }
 
@@ -275,11 +274,6 @@ class FormAuditor {
         if (sm.shrugRatio != null) {
           final fired = sm.shrugRatio! > strictForm.shrugThreshold;
           by('Shrug').record(fired: fired);
-          if (fired) perRepFired[i]++;
-        }
-        if (sm.elbowRiseRatio != null) {
-          final fired = sm.elbowRiseRatio! > strictForm.elbowRiseThreshold;
-          by('Elbow rise').record(fired: fired);
           if (fired) perRepFired[i]++;
         }
       }

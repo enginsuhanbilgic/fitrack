@@ -31,9 +31,6 @@ void main() {
     test('driftThreshold == kDriftThreshold', () {
       expect(CurlFormAuditDefaults.driftThreshold, kDriftThreshold);
     });
-    test('elbowRiseThreshold == kElbowRiseThreshold', () {
-      expect(CurlFormAuditDefaults.elbowRiseThreshold, kElbowRiseThreshold);
-    });
   });
 
   group('SquatFormAuditDefaults — fixed values match previous medium tier', () {

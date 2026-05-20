@@ -20,7 +20,6 @@ void main() {
       expect(t.effectiveBackLeanDeadband, kFormMinMovementLeanDeg);
       expect(t.effectiveShrugDeadband, kFormMinMovementShrugRatio);
       expect(t.effectiveDriftDeadband, kFormMinMovementDriftRatio);
-      expect(t.effectiveRiseDeadband, kFormMinMovementRiseRatio);
     });
 
     test('percent=100 → effective deadbands equal the audit thresholds', () {
@@ -35,7 +34,6 @@ void main() {
       expect(t.effectiveBackLeanDeadband, closeTo(kBackLeanThresholdDeg, 1e-9));
       expect(t.effectiveShrugDeadband, closeTo(kShrugThreshold, 1e-9));
       expect(t.effectiveDriftDeadband, closeTo(kDriftThreshold, 1e-9));
-      expect(t.effectiveRiseDeadband, closeTo(kElbowRiseThreshold, 1e-9));
     });
   });
 
@@ -68,10 +66,6 @@ void main() {
       expect(
         t.effectiveDriftDeadband,
         closeTo(midpoint(kFormMinMovementDriftRatio, kDriftThreshold), 1e-9),
-      );
-      expect(
-        t.effectiveRiseDeadband,
-        closeTo(midpoint(kFormMinMovementRiseRatio, kElbowRiseThreshold), 1e-9),
       );
     });
 
@@ -115,7 +109,6 @@ void main() {
         backLeanThresholdDeg: kBackLeanThresholdDeg,
         shrugThreshold: kShrugThreshold,
         driftThreshold: kDriftThreshold,
-        elbowRiseThreshold: kElbowRiseThreshold,
         formTolerancePercent: 250,
       );
       // Per the defensive clamp the effective value tops out at the
@@ -135,7 +128,6 @@ void main() {
       expect(m.effectiveBackLeanDeadband, kFormMinMovementLeanDeg);
       expect(m.effectiveShrugDeadband, kFormMinMovementShrugRatio);
       expect(m.effectiveDriftDeadband, kFormMinMovementDriftRatio);
-      expect(m.effectiveRiseDeadband, kFormMinMovementRiseRatio);
     });
   });
 
@@ -151,7 +143,6 @@ void main() {
         backLeanThresholdDeg: kBackLeanThresholdDeg,
         shrugThreshold: kShrugThreshold,
         driftThreshold: kDriftThreshold,
-        elbowRiseThreshold: kElbowRiseThreshold,
         formTolerancePercent: 100,
       );
       // Even at the most lenient setting, the degenerate case returns the

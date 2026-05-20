@@ -210,7 +210,7 @@ class DemoSeed {
       reps: 26,
       durSec: 450,
       avgQuality: 0.86,
-      formErrors: {FormError.elbowRise: 1},
+      formErrors: {FormError.elbowDrift: 1},
     ),
     _SessionPlan(
       daysAgo: 3,
@@ -305,7 +305,6 @@ class DemoSeed {
         'biceps_back_lean_deg': 2.0 + j * 5.0,
         'biceps_elbow_drift_signed': (j > 0.5 ? 1 : -1) * (0.04 + j * 0.08),
         'biceps_shrug_ratio': 0.02 + j * 0.06,
-        'biceps_elbow_rise_ratio': 0.03 + j * 0.07,
       };
     }
     if (plan.exercise == ExerciseType.squat) {

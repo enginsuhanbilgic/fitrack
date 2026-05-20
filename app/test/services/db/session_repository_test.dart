@@ -1457,149 +1457,133 @@ void main() {
     });
   });
 
-  group('Biceps side-view schema v6 — shrug + elbow-rise round-trip', () {
-    test(
-      'bicepsCurlSide session writes shrugRatio and elbowRiseRatio per rep',
-      () async {
-        final repo = InMemorySessionRepository();
-        final metrics = List<BicepsSideRepMetrics>.generate(
+  group('Biceps side-view schema v6 — shrug round-trip', () {
+    test('bicepsCurlSide session writes shrugRatio per rep', () async {
+      final repo = InMemorySessionRepository();
+      final metrics = List<BicepsSideRepMetrics>.generate(
+        3,
+        (i) => BicepsSideRepMetrics(
+          repIndex: i + 1,
+          leanDeg: 5.0 + i,
+          shoulderDriftRatio: 0.10 + 0.01 * i,
+          elbowDriftRatio: 0.20 + 0.01 * i,
+          backLeanDeg: 2.0 + 0.5 * i,
+          elbowDriftSigned: 0.20 + 0.01 * i,
+          shrugRatio: 0.10 + 0.01 * i,
+        ),
+      );
+      final event = WorkoutCompletedEvent(
+        exercise: ExerciseType.bicepsCurlSide,
+        totalReps: 3,
+        totalSets: 1,
+        sessionDuration: const Duration(seconds: 45),
+        averageQuality: 0.85,
+        detectedView: CurlCameraView.sideLeft,
+        repQualities: [0.80, 0.85, 0.90],
+        fatigueDetected: false,
+        asymmetryDetected: false,
+        eccentricTooFastCount: 0,
+        errorsTriggered: const {},
+        curlRepRecords: List<CurlRepRecord>.generate(
           3,
-          (i) => BicepsSideRepMetrics(
+          (i) => CurlRepRecord(
             repIndex: i + 1,
-            leanDeg: 5.0 + i,
-            shoulderDriftRatio: 0.10 + 0.01 * i,
-            elbowDriftRatio: 0.20 + 0.01 * i,
-            backLeanDeg: 2.0 + 0.5 * i,
-            elbowDriftSigned: 0.20 + 0.01 * i,
-            shrugRatio: 0.10 + 0.01 * i,
-            elbowRiseRatio: 0.07 + 0.01 * i,
+            side: ProfileSide.left,
+            view: CurlCameraView.sideLeft,
+            minAngle: 60.0 + i,
+            maxAngle: 160.0 + i,
+            source: ThresholdSource.global,
+            bucketUpdated: false,
+            rejectedOutlier: false,
           ),
-        );
-        final event = WorkoutCompletedEvent(
-          exercise: ExerciseType.bicepsCurlSide,
-          totalReps: 3,
-          totalSets: 1,
-          sessionDuration: const Duration(seconds: 45),
-          averageQuality: 0.85,
-          detectedView: CurlCameraView.sideLeft,
-          repQualities: [0.80, 0.85, 0.90],
-          fatigueDetected: false,
-          asymmetryDetected: false,
-          eccentricTooFastCount: 0,
-          errorsTriggered: const {},
-          curlRepRecords: List<CurlRepRecord>.generate(
-            3,
-            (i) => CurlRepRecord(
-              repIndex: i + 1,
-              side: ProfileSide.left,
-              view: CurlCameraView.sideLeft,
-              minAngle: 60.0 + i,
-              maxAngle: 160.0 + i,
-              source: ThresholdSource.global,
-              bucketUpdated: false,
-              rejectedOutlier: false,
-            ),
-          ),
-          curlBucketSummaries: const [],
-          bicepsSideRepMetrics: metrics,
-        );
-        final id = await repo.insertCompletedSession(
-          event,
-          startedAt: DateTime.now(),
-        );
+        ),
+        curlBucketSummaries: const [],
+        bicepsSideRepMetrics: metrics,
+      );
+      final id = await repo.insertCompletedSession(
+        event,
+        startedAt: DateTime.now(),
+      );
 
-        final detail = await repo.getSession(id);
-        expect(detail, isNotNull);
-        final reps = detail!.reps;
-        expect(reps[0].bicepsShrugRatio, closeTo(0.10, 1e-9));
-        expect(reps[1].bicepsShrugRatio, closeTo(0.11, 1e-9));
-        expect(reps[2].bicepsShrugRatio, closeTo(0.12, 1e-9));
-        expect(reps[0].bicepsElbowRiseRatio, closeTo(0.07, 1e-9));
-        expect(reps[1].bicepsElbowRiseRatio, closeTo(0.08, 1e-9));
-        expect(reps[2].bicepsElbowRiseRatio, closeTo(0.09, 1e-9));
-      },
-    );
+      final detail = await repo.getSession(id);
+      expect(detail, isNotNull);
+      final reps = detail!.reps;
+      expect(reps[0].bicepsShrugRatio, closeTo(0.10, 1e-9));
+      expect(reps[1].bicepsShrugRatio, closeTo(0.11, 1e-9));
+      expect(reps[2].bicepsShrugRatio, closeTo(0.12, 1e-9));
+    });
 
-    test(
-      'front-curl session leaves both v6 columns null on every rep',
-      () async {
-        final repo = InMemorySessionRepository();
-        final event = buildCurlEvent(
-          reps: 2,
-          exercise: ExerciseType.bicepsCurlFront,
-          withSideMetrics: false,
-        );
-        final id = await repo.insertCompletedSession(
-          event,
-          startedAt: DateTime.now(),
-        );
-        final detail = await repo.getSession(id);
-        expect(detail, isNotNull);
-        for (final r in detail!.reps) {
-          expect(r.bicepsShrugRatio, isNull);
-          expect(r.bicepsElbowRiseRatio, isNull);
-        }
-      },
-    );
+    test('front-curl session leaves shrug column null on every rep', () async {
+      final repo = InMemorySessionRepository();
+      final event = buildCurlEvent(
+        reps: 2,
+        exercise: ExerciseType.bicepsCurlFront,
+        withSideMetrics: false,
+      );
+      final id = await repo.insertCompletedSession(
+        event,
+        startedAt: DateTime.now(),
+      );
+      final detail = await repo.getSession(id);
+      expect(detail, isNotNull);
+      for (final r in detail!.reps) {
+        expect(r.bicepsShrugRatio, isNull);
+      }
+    });
 
-    test(
-      'getSession reconstructs shrugRatio and elbowRiseRatio on RepRow',
-      () async {
-        final repo = InMemorySessionRepository();
-        final metrics = [
-          const BicepsSideRepMetrics(
+    test('getSession reconstructs shrugRatio on RepRow', () async {
+      final repo = InMemorySessionRepository();
+      final metrics = [
+        const BicepsSideRepMetrics(
+          repIndex: 1,
+          leanDeg: 3.0,
+          shoulderDriftRatio: 0.05,
+          elbowDriftRatio: 0.10,
+          backLeanDeg: 1.0,
+          elbowDriftSigned: 0.10,
+          shrugRatio: 0.19,
+        ),
+      ];
+      final event = WorkoutCompletedEvent(
+        exercise: ExerciseType.bicepsCurlSide,
+        totalReps: 1,
+        totalSets: 1,
+        sessionDuration: const Duration(seconds: 30),
+        averageQuality: 0.90,
+        detectedView: CurlCameraView.sideLeft,
+        repQualities: [0.90],
+        fatigueDetected: false,
+        asymmetryDetected: false,
+        eccentricTooFastCount: 0,
+        errorsTriggered: const {},
+        curlRepRecords: [
+          const CurlRepRecord(
             repIndex: 1,
-            leanDeg: 3.0,
-            shoulderDriftRatio: 0.05,
-            elbowDriftRatio: 0.10,
-            backLeanDeg: 1.0,
-            elbowDriftSigned: 0.10,
-            shrugRatio: 0.19,
-            elbowRiseRatio: 0.22,
+            side: ProfileSide.left,
+            view: CurlCameraView.sideLeft,
+            minAngle: 65.0,
+            maxAngle: 160.0,
+            source: ThresholdSource.global,
+            bucketUpdated: false,
+            rejectedOutlier: false,
           ),
-        ];
-        final event = WorkoutCompletedEvent(
-          exercise: ExerciseType.bicepsCurlSide,
-          totalReps: 1,
-          totalSets: 1,
-          sessionDuration: const Duration(seconds: 30),
-          averageQuality: 0.90,
-          detectedView: CurlCameraView.sideLeft,
-          repQualities: [0.90],
-          fatigueDetected: false,
-          asymmetryDetected: false,
-          eccentricTooFastCount: 0,
-          errorsTriggered: const {},
-          curlRepRecords: [
-            const CurlRepRecord(
-              repIndex: 1,
-              side: ProfileSide.left,
-              view: CurlCameraView.sideLeft,
-              minAngle: 65.0,
-              maxAngle: 160.0,
-              source: ThresholdSource.global,
-              bucketUpdated: false,
-              rejectedOutlier: false,
-            ),
-          ],
-          curlBucketSummaries: const [],
-          bicepsSideRepMetrics: metrics,
-        );
-        final id = await repo.insertCompletedSession(
-          event,
-          startedAt: DateTime.now(),
-        );
-        final detail = await repo.getSession(id);
-        expect(detail, isNotNull);
-        expect(detail!.reps[0].bicepsShrugRatio, closeTo(0.19, 1e-9));
-        expect(detail.reps[0].bicepsElbowRiseRatio, closeTo(0.22, 1e-9));
-      },
-    );
+        ],
+        curlBucketSummaries: const [],
+        bicepsSideRepMetrics: metrics,
+      );
+      final id = await repo.insertCompletedSession(
+        event,
+        startedAt: DateTime.now(),
+      );
+      final detail = await repo.getSession(id);
+      expect(detail, isNotNull);
+      expect(detail!.reps[0].bicepsShrugRatio, closeTo(0.19, 1e-9));
+    });
   });
 
-  group('Schema v5 → v6 migration', () {
+  group('Schema v5 → v11 migration', () {
     test(
-      'onUpgrade adds biceps_shrug_ratio and biceps_elbow_rise_ratio without losing data',
+      'onUpgrade adds biceps_shrug_ratio, then v11 drops biceps_elbow_rise_ratio, without losing data',
       () async {
         final db = await databaseFactoryFfi.openDatabase(
           inMemoryDatabasePath,
@@ -1669,22 +1653,21 @@ void main() {
         final cols = (await db.rawQuery(
           'PRAGMA table_info(reps)',
         )).map((r) => r['name'] as String).toList();
-        expect(
-          cols,
-          containsAll(['biceps_shrug_ratio', 'biceps_elbow_rise_ratio']),
-        );
+        // v6 added shrug; v11 dropped elbow_rise. After full upgrade only
+        // shrug remains, and the row data survives the table rewrite.
+        expect(cols, contains('biceps_shrug_ratio'));
+        expect(cols, isNot(contains('biceps_elbow_rise_ratio')));
 
         final reps = await db.query('reps');
         expect(reps, hasLength(1));
         expect((reps.first['quality'] as num).toDouble(), closeTo(0.93, 1e-9));
         expect(reps.first['biceps_shrug_ratio'], isNull);
-        expect(reps.first['biceps_elbow_rise_ratio'], isNull);
 
         await db.close();
       },
     );
 
-    test('fresh v6 install has all 7 biceps columns', () async {
+    test('fresh install has the post-v11 biceps column set', () async {
       final db = await openTestDb();
       final cols = (await db.rawQuery(
         'PRAGMA table_info(reps)',
@@ -1698,10 +1681,183 @@ void main() {
           'biceps_back_lean_deg',
           'biceps_elbow_drift_signed',
           'biceps_shrug_ratio',
-          'biceps_elbow_rise_ratio',
         ]),
       );
+      expect(cols, isNot(contains('biceps_elbow_rise_ratio')));
       await db.close();
+    });
+  });
+
+  group('deleteRealSessions — wipes is_demo=0 only', () {
+    late Database db;
+    late SqliteSessionRepository repo;
+
+    setUp(() async {
+      db = await openTestDb();
+      repo = SqliteSessionRepository(db);
+    });
+
+    tearDown(() async {
+      await db.close();
+    });
+
+    test('empty DB returns 0 and is a no-op', () async {
+      final deleted = await repo.deleteRealSessions();
+      expect(deleted, 0);
+      final sessions = await db.query('sessions');
+      expect(sessions, isEmpty);
+    });
+
+    test('deletes only real sessions, leaves demo sessions intact', () async {
+      // Insert a real session via the live path (which writes is_demo=0).
+      await repo.insertCompletedSession(
+        buildCurlEvent(reps: 3),
+        startedAt: DateTime.now(),
+      );
+      await repo.insertCompletedSession(
+        buildCurlEvent(reps: 5),
+        startedAt: DateTime.now(),
+      );
+      // Insert a demo session via the seed path (is_demo=1).
+      await repo.insertSeededSession(
+        sessionRow: {
+          'exercise': 'bicepsCurlSide',
+          'started_at': 1_700_000_000_000,
+          'duration_ms': 60000,
+          'total_reps': 1,
+          'total_sets': 1,
+          'fatigue_detected': 0,
+          'asymmetry_detected': 0,
+          'eccentric_too_fast_count': 0,
+          'is_demo': 1,
+        },
+        repRows: [
+          {'rep_index': 1, 'quality': 0.9},
+        ],
+        formErrorRows: const [],
+      );
+
+      final preCount = (await db.query('sessions')).length;
+      expect(preCount, 3);
+
+      final deleted = await repo.deleteRealSessions();
+      expect(deleted, 2);
+
+      final remaining = await db.query('sessions');
+      expect(remaining, hasLength(1));
+      expect(remaining.first['is_demo'], 1);
+    });
+
+    test('cascades to reps + form_errors via FK ON DELETE CASCADE', () async {
+      // One real session with 3 reps and a form-error row.
+      final id = await repo.insertCompletedSession(
+        buildCurlEvent(reps: 3, errors: {FormError.elbowDrift}),
+        startedAt: DateTime.now(),
+      );
+      // Sanity check the children exist.
+      expect(
+        (await db.query('reps', where: 'session_id = ?', whereArgs: [id])),
+        hasLength(3),
+      );
+      expect(
+        (await db.query(
+          'form_errors',
+          where: 'session_id = ?',
+          whereArgs: [id],
+        )),
+        isNotEmpty,
+      );
+
+      await repo.deleteRealSessions();
+
+      // Cascaded — both child tables empty for this session.
+      expect(await db.query('reps'), isEmpty);
+      expect(await db.query('form_errors'), isEmpty);
+    });
+
+    test('idempotent: second call on the same DB returns 0', () async {
+      await repo.insertCompletedSession(
+        buildCurlEvent(reps: 2),
+        startedAt: DateTime.now(),
+      );
+      final firstDelete = await repo.deleteRealSessions();
+      expect(firstDelete, 1);
+      final secondDelete = await repo.deleteRealSessions();
+      expect(secondDelete, 0);
+    });
+
+    test(
+      'does NOT touch the profiles table — calibration survives a reset',
+      () async {
+        await db.insert('profiles', {
+          'profile_key': 'curl_profile_v1',
+          'profile_json': '{"buckets":[]}',
+          'schema_version': 1,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        });
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 2),
+          startedAt: DateTime.now(),
+        );
+        await repo.deleteRealSessions();
+        final profiles = await db.query('profiles');
+        expect(profiles, hasLength(1));
+        expect(profiles.first['profile_key'], 'curl_profile_v1');
+      },
+    );
+  });
+
+  group('InMemorySessionRepository.deleteRealSessions', () {
+    test(
+      'wipes non-demo sessions, preserves demo sessions, returns count',
+      () async {
+        final repo = InMemorySessionRepository();
+        // 2 real sessions via the live path.
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 2),
+          startedAt: DateTime.now(),
+        );
+        await repo.insertCompletedSession(
+          buildCurlEvent(reps: 3),
+          startedAt: DateTime.now(),
+        );
+        // 1 demo session via the seed path.
+        await repo.insertSeededSession(
+          sessionRow: {
+            'exercise': 'bicepsCurlSide',
+            'started_at': 1_700_000_000_000,
+            'duration_ms': 60000,
+            'total_reps': 1,
+            'total_sets': 1,
+            'fatigue_detected': 0,
+            'asymmetry_detected': 0,
+            'eccentric_too_fast_count': 0,
+            'is_demo': 1,
+          },
+          repRows: const [],
+          formErrorRows: const [],
+        );
+
+        final deleted = await repo.deleteRealSessions();
+        expect(deleted, 2);
+
+        final remaining = await repo.listSessions(limit: 100);
+        expect(remaining, hasLength(1));
+        // The InMemory representation surfaces is_demo on the summary row.
+        // If it didn't, the count-only assertion above already confirms the
+        // demo entry survived (since 2 real of 3 were deleted, 1 left).
+      },
+    );
+
+    test('idempotent: empty + repeat both return 0', () async {
+      final repo = InMemorySessionRepository();
+      expect(await repo.deleteRealSessions(), 0);
+      await repo.insertCompletedSession(
+        buildCurlEvent(reps: 1),
+        startedAt: DateTime.now(),
+      );
+      expect(await repo.deleteRealSessions(), 1);
+      expect(await repo.deleteRealSessions(), 0);
     });
   });
 

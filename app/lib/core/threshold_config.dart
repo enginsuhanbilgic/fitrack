@@ -7,7 +7,7 @@
 ///   • Biceps-curl FSM angle gates (start / peak / peakExit / end)
 ///   • Squat FSM angle gates (start / bottom / end)
 ///   • Push-up FSM angle gates (start / bottom / end)
-///   • Form-error thresholds (swing, shrug, drift, lean, elbow rise)
+///   • Form-error thresholds (swing, shrug, drift, lean)
 ///   • Sensitivity deltas (how much ±High / ±Low shift each gate)
 ///   • Per-view telemetry-derived defaults (front / sideLeft / sideRight)
 ///   • Developer flags: kUseTelemetryRomDefaults, kUsePipelineRomDefaults
@@ -60,7 +60,6 @@ export 'constants.dart'
         kBackLeanThresholdDeg,
         kShrugThreshold,
         kDriftThreshold,
-        kElbowRiseThreshold,
         kShortRomTolerance,
         // ── Form-error globals (squat) ──
         kSquatLeanWarnDegBodyweight,

@@ -23,7 +23,8 @@
 ///     retune (plan `federated-tickling-sunset` PR 4).
 /// v6 (biceps side-view shrug/elbow-rise): adds 2 nullable biceps columns
 ///     (`biceps_shrug_ratio`, `biceps_elbow_rise_ratio`). Completes the
-///     retune telemetry channel for kShrugThreshold and kElbowRiseThreshold.
+///     retune telemetry channel for kShrugThreshold and the (later retired
+///     in v11) kElbowRiseThreshold.
 /// v7 (biceps front-view swing/depth-swing): adds 2 nullable biceps
 ///     columns (`biceps_front_swing_ratio`, `biceps_front_depth_swing_ratio`).
 ///     Populated only for `bicepsCurlFront` rows. NULL on side curl, squat,
@@ -53,6 +54,15 @@
 ///     `demo_push_up_profile_v1`) rather than a flag column — see ADR-2 in
 ///     `plans_of_claude/demo-mode-toggle.md`. `reps` + `form_errors` are
 ///     NOT tagged — they cascade-delete with their parent `sessions` row.
+/// v11 (curl elbow-rise retirement, 2026-05-20): drops the
+///     `reps.biceps_elbow_rise_ratio` column. The curl elbow-rise form
+///     audit was retired entirely (elbowDrift is now the sole elbow-related
+///     curl audit); the column is no longer written or read. Implemented as
+///     a portable table rewrite (CREATE TABLE reps_new without the column,
+///     INSERT SELECT all retained columns, DROP old, RENAME) because sqflite
+///     ships SQLite < 3.35 on some platforms and cannot rely on
+///     `ALTER TABLE ... DROP COLUMN`. Dev-mode only — no production data to
+///     preserve.
 ///
 /// Six tables (v1) + one table (v2) + one table (v8):
 ///   - `profiles`         — JSON-blob per-exercise ROM profile (PR1)
@@ -73,7 +83,7 @@ import 'package:sqflite/sqflite.dart';
 /// On-disk schema version. Bump when any CREATE/ALTER landing in `onCreate` or
 /// `onUpgrade` changes. Independent of `CurlRomProfile.schemaVersion` which
 /// tags the JSON blob inside `profiles.profile_json`.
-const int kDbSchemaVersion = 10;
+const int kDbSchemaVersion = 11;
 
 const String ddlProfiles = '''
 CREATE TABLE profiles (
@@ -232,9 +242,8 @@ Future<void> onCreate(Database db, int version) async {
   await db.execute(
     'ALTER TABLE reps ADD COLUMN biceps_shrug_ratio          REAL',
   );
-  await db.execute(
-    'ALTER TABLE reps ADD COLUMN biceps_elbow_rise_ratio     REAL',
-  );
+  // biceps_elbow_rise_ratio: retired v11 (curl elbow-rise removal,
+  // 2026-05-20). Never added on fresh installs after v11.
   await db.execute(
     'ALTER TABLE reps ADD COLUMN biceps_front_swing_ratio    REAL',
   );
@@ -304,8 +313,10 @@ Future<void> onUpgrade(Database db, int oldVersion, int newVersion) async {
   }
   if (oldVersion < 6) {
     // v5 → v6: peak shrug + elbow-rise ratios. Nullable; NULL for all
-    // pre-v6 rows AND for non-side-view rows. Opens the data-driven retune
-    // channel for kShrugThreshold and kElbowRiseThreshold.
+    // pre-v6 rows AND for non-side-view rows. The elbow-rise column was
+    // dropped in v11 (curl elbow-rise retirement) — the ALTER below still
+    // runs to keep the v5→v6→…→v11 path bit-identical to its history, and
+    // the v11 block then rewrites the table without the column.
     await db.execute(
       'ALTER TABLE reps ADD COLUMN biceps_shrug_ratio          REAL',
     );
@@ -362,6 +373,101 @@ Future<void> onUpgrade(Database db, int oldVersion, int newVersion) async {
       'user_profile',
       'is_demo',
       'INTEGER NOT NULL DEFAULT 0',
+    );
+  }
+  if (oldVersion < 11) {
+    // v10 → v11: drop `reps.biceps_elbow_rise_ratio`. Implemented as a
+    // portable table rewrite (CREATE TABLE reps_new excluding the column,
+    // INSERT SELECT remaining columns, DROP old, RENAME) because sqflite
+    // may ship SQLite < 3.35 on some platforms and `ALTER TABLE ... DROP
+    // COLUMN` is not portable. FK CASCADE from `sessions.id` is preserved
+    // because the new table re-declares the same REFERENCES clause; no
+    // table has an inbound FK pointing at `reps`, so dropping the old
+    // `reps` table cannot fail on FK constraints. The `PRAGMA
+    // foreign_keys = OFF/ON` pair is belt-and-suspenders — sqflite wraps
+    // `onUpgrade` in a transaction and PRAGMAs are no-ops mid-transaction,
+    // so the toggle does not actually flip the flag, but it costs nothing
+    // and documents intent if the migration is ever extracted from
+    // `onUpgrade`.
+    // Skipped if the column is already absent (e.g. a fresh install that
+    // started at v11 then ran onUpgrade for some reason).
+    final info = await db.rawQuery('PRAGMA table_info(reps)');
+    final hasColumn = info.any(
+      (row) => row['name'] == 'biceps_elbow_rise_ratio',
+    );
+    if (hasColumn) {
+      await db.execute('PRAGMA foreign_keys = OFF');
+      await db.execute('''
+        CREATE TABLE reps_new (
+          id                              INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id                      INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+          rep_index                       INTEGER NOT NULL,
+          quality                         REAL,
+          min_angle                       REAL,
+          max_angle                       REAL,
+          side                            TEXT,
+          view                            TEXT,
+          threshold_source                TEXT,
+          bucket_updated                  INTEGER,
+          rejected_outlier                INTEGER,
+          concentric_ms                   INTEGER,
+          dtw_similarity                  REAL,
+          squat_lean_deg                  REAL,
+          squat_knee_shift_ratio          REAL,
+          squat_heel_lift_ratio           REAL,
+          squat_variant                   TEXT,
+          biceps_lean_deg                 REAL,
+          biceps_shoulder_drift_ratio     REAL,
+          biceps_elbow_drift_ratio        REAL,
+          biceps_back_lean_deg            REAL,
+          biceps_elbow_drift_signed       REAL,
+          biceps_shrug_ratio              REAL,
+          biceps_front_swing_ratio        REAL,
+          biceps_front_depth_swing_ratio  REAL,
+          squat_min_knee_angle            REAL,
+          squat_max_knee_angle            REAL
+        )
+      ''');
+      await db.execute('''
+        INSERT INTO reps_new (
+          id, session_id, rep_index, quality, min_angle, max_angle, side,
+          view, threshold_source, bucket_updated, rejected_outlier,
+          concentric_ms, dtw_similarity, squat_lean_deg, squat_knee_shift_ratio,
+          squat_heel_lift_ratio, squat_variant, biceps_lean_deg,
+          biceps_shoulder_drift_ratio, biceps_elbow_drift_ratio,
+          biceps_back_lean_deg, biceps_elbow_drift_signed, biceps_shrug_ratio,
+          biceps_front_swing_ratio, biceps_front_depth_swing_ratio,
+          squat_min_knee_angle, squat_max_knee_angle
+        )
+        SELECT
+          id, session_id, rep_index, quality, min_angle, max_angle, side,
+          view, threshold_source, bucket_updated, rejected_outlier,
+          concentric_ms, dtw_similarity, squat_lean_deg, squat_knee_shift_ratio,
+          squat_heel_lift_ratio, squat_variant, biceps_lean_deg,
+          biceps_shoulder_drift_ratio, biceps_elbow_drift_ratio,
+          biceps_back_lean_deg, biceps_elbow_drift_signed, biceps_shrug_ratio,
+          biceps_front_swing_ratio, biceps_front_depth_swing_ratio,
+          squat_min_knee_angle, squat_max_knee_angle
+        FROM reps
+      ''');
+      await db.execute('DROP TABLE reps');
+      await db.execute('ALTER TABLE reps_new RENAME TO reps');
+      // Re-create the dropped index — the table rename does NOT carry it.
+      await db.execute('CREATE INDEX idx_reps_session ON reps(session_id)');
+      await db.execute('PRAGMA foreign_keys = ON');
+    }
+    // Purge orphan `form_errors` rows that reference the retired
+    // `FormError.elbowRise` enum value. The Dart enum no longer contains
+    // `elbowRise`, so `FormError.values.byName('elbowRise')` on the read
+    // path (`_getSessionFormErrors`, `getSession`) would throw
+    // `ArgumentError`. The History-list reader at line 253 has a defensive
+    // try/catch but the detail-view readers do not — deleting the rows
+    // here makes both paths safe. Runs unconditionally (idempotent — a
+    // row count of 0 on a fresh install or a clean dev device is fine).
+    await db.delete(
+      'form_errors',
+      where: 'error = ?',
+      whereArgs: ['elbowRise'],
     );
   }
 }

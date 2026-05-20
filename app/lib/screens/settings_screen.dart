@@ -251,7 +251,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             '• Form-error coaching loudness — that is "Curl form '
             'tolerance" below, a separate dial.\n'
             '• The biomechanical fault thresholds themselves (lean, swing, '
-            'shrug, drift, elbow rise) — those are fixed safety gates.\n'
+            'shrug, drift) — those are fixed safety gates.\n'
             '• Post-session form audit summaries — those always read the '
             'true motion regardless of strictness.\n\n'
             'COACHING STRICTNESS vs FORM TOLERANCE\n'
@@ -313,7 +313,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Text(
             'WHAT IT DOES\n'
             'Widens the silent budget before a form cue fires (lean, swing, '
-            'drift, shrug, elbow rise) on biceps curls.\n\n'
+            'drift, shrug) on biceps curls.\n\n'
             'WHAT THE NUMBERS MEAN\n'
             "0% — Strict (today's default). Every borderline motion is "
             'warned.\n'
@@ -488,6 +488,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _repository.resetPushUp();
       await _reload();
     }
+  }
+
+  /// Wipes every non-demo session row (and its cascaded reps + form_errors)
+  /// from the local DB. Calibration (`profiles` table) is untouched —
+  /// the user still has the existing per-exercise Recalibrate / Reset
+  /// Profile buttons for that. Demo data (`is_demo = 1`) is preserved
+  /// so a user with Demo Mode enabled doesn't lose the seeded sample
+  /// history while clearing their own real history.
+  ///
+  /// After the wipe, calls `DemoService.notifyExternalRefresh()` so the
+  /// home dashboard hero and sparkline re-query and reflect the new
+  /// empty / demo-only state — mirrors the post-EditProfile refresh path
+  /// described in the "Start fresh auto-push" plan.
+  Future<void> _confirmResetSessions() async {
+    final services = AppServicesScope.read(context);
+    final sessionRepo = services.sessionRepository;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset sessions?'),
+        content: const Text(
+          'This deletes every workout session, rep, and form-error '
+          'record from this device. Calibration is kept — your existing '
+          'per-exercise ranges of motion still apply. Demo data is not '
+          'affected. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final deleted = await sessionRepo.deleteRealSessions();
+    TelemetryLog.instance.log('settings.reset_sessions', 'deleted=$deleted');
+    // Bump the dashboard's revision notifier so the home hero + sparkline
+    // re-query the DB (which is now empty of real sessions).
+    _demoService.notifyExternalRefresh();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          deleted == 0
+              ? 'No sessions to delete.'
+              : 'Deleted $deleted session${deleted == 1 ? '' : 's'}.',
+        ),
+      ),
+    );
   }
 
   Future<void> _recalibrate(ExerciseType exercise) async {
@@ -944,6 +1000,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   label: 'Diagnostics',
                   subtitle: '${TelemetryLog.instance.length} telemetry entries',
                   onTap: _openDiagnostics,
+                ),
+                _ActionRow(
+                  icon: Icons.delete_sweep_outlined,
+                  label: 'Reset sessions',
+                  subtitle:
+                      'Delete all workout sessions. Calibration is kept. '
+                      'Demo data is not affected.',
+                  onTap: _confirmResetSessions,
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,

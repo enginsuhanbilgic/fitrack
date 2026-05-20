@@ -238,14 +238,14 @@ void main() {
       final vm = SessionSummaryViewModel.fromInput(
         _curl(
           errorsTriggered: {
-            FormError.elbowRise,
+            FormError.shoulderShrug,
             FormError.squatDepth,
             FormError.hipSag,
             FormError.heelLift,
           },
         ),
       );
-      expect(vm.formIssues, [FormError.elbowRise]);
+      expect(vm.formIssues, [FormError.shoulderShrug]);
     });
 
     test('squat keeps only its four canonical errors', () {
@@ -253,7 +253,7 @@ void main() {
         _squat(
           errorsTriggered: {
             FormError.excessiveForwardLean,
-            FormError.elbowRise, // curl-only — must be filtered out
+            FormError.shoulderShrug, // curl-only — must be filtered out
             FormError.squatDepth,
             FormError.heelLift,
             FormError.forwardKneeShift,
@@ -275,7 +275,7 @@ void main() {
           errorsTriggered: {
             FormError.hipSag,
             FormError.pushUpShortRom,
-            FormError.elbowRise, // curl-only — must be filtered out
+            FormError.shoulderShrug, // curl-only — must be filtered out
             FormError.squatDepth, // squat-only — must be filtered out
           },
         ),
@@ -356,7 +356,7 @@ void main() {
           _curl(
             repQualities: const [0.55],
             averageQuality: 0.55,
-            errorsTriggered: {FormError.elbowRise},
+            errorsTriggered: {FormError.shoulderShrug},
           ),
         );
         expect(
@@ -498,7 +498,7 @@ void main() {
       // surface them in that case — surfacing errors without a rep context
       // is misleading.
       final vm = SessionSummaryViewModel.fromInput(
-        _curl(totalReps: 0, errorsTriggered: {FormError.elbowRise}),
+        _curl(totalReps: 0, errorsTriggered: {FormError.shoulderShrug}),
       );
       expect(vm.formIssues, isNotEmpty);
       expect(vm.hasFormIssues, isFalse);
@@ -506,7 +506,7 @@ void main() {
 
     test('hasFormIssues is true when errors present and reps committed', () {
       final vm = SessionSummaryViewModel.fromInput(
-        _curl(totalReps: 5, errorsTriggered: {FormError.elbowRise}),
+        _curl(totalReps: 5, errorsTriggered: {FormError.shoulderShrug}),
       );
       expect(vm.hasFormIssues, isTrue);
     });

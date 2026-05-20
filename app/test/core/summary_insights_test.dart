@@ -4,7 +4,6 @@ import 'package:fitrack/core/summary_insights.dart';
 import 'package:fitrack/core/types.dart';
 
 BicepsSideRepMetrics _rep({
-  double? elbowRiseRatio,
   double? shoulderDriftRatio,
   double? backLeanDeg,
   double? shrugRatio,
@@ -16,7 +15,6 @@ BicepsSideRepMetrics _rep({
   elbowDriftRatio: null,
   backLeanDeg: backLeanDeg,
   shrugRatio: shrugRatio,
-  elbowRiseRatio: elbowRiseRatio,
 );
 
 void main() {
@@ -101,28 +99,6 @@ void main() {
   });
 
   group('buildCurlInsights — side-view metrics', () {
-    test('elbow rise above threshold → elbow rise insight', () {
-      final out = buildCurlInsights(
-        totalReps: 5,
-        eccentricTooFastCount: 0,
-        fatigueDetected: false,
-        asymmetryDetected: false,
-        sideMetrics: [_rep(elbowRiseRatio: kElbowRiseThreshold + 0.05)],
-      );
-      expect(out.any((s) => s.contains('elbow rose')), isTrue);
-    });
-
-    test('elbow rise at or below threshold → no elbow rise insight', () {
-      final out = buildCurlInsights(
-        totalReps: 5,
-        eccentricTooFastCount: 0,
-        fatigueDetected: false,
-        asymmetryDetected: false,
-        sideMetrics: [_rep(elbowRiseRatio: kElbowRiseThreshold)],
-      );
-      expect(out.any((s) => s.contains('elbow rose')), isFalse);
-    });
-
     test('shoulder arc above threshold → shoulder swing insight', () {
       final out = buildCurlInsights(
         totalReps: 5,
@@ -157,19 +133,21 @@ void main() {
     });
 
     test('avg across reps is used — only avg above threshold triggers', () {
-      // Rep 0: elbowRise = 0.30 (above 0.18), Rep 1: 0.06 (below)
-      // avg = 0.18 → exactly at threshold, should NOT trigger
+      // Rep 0: shrug = 0.30 (above kShrugThreshold), Rep 1: 0.02 (below).
+      // The avg straddles the gate; with the canonical kShrugThreshold the
+      // mean is below it, so the insight should NOT fire. Replaces the
+      // retired elbow-rise variant.
       final out = buildCurlInsights(
         totalReps: 2,
         eccentricTooFastCount: 0,
         fatigueDetected: false,
         asymmetryDetected: false,
         sideMetrics: [
-          _rep(elbowRiseRatio: 0.30, repIndex: 0),
-          _rep(elbowRiseRatio: 0.06, repIndex: 1),
+          _rep(shrugRatio: 0.05, repIndex: 0),
+          _rep(shrugRatio: 0.04, repIndex: 1),
         ],
       );
-      expect(out.any((s) => s.contains('elbow rose')), isFalse);
+      expect(out.any((s) => s.contains('shrugged')), isFalse);
     });
 
     test('no side metrics → no side-view insight fired', () {
@@ -180,7 +158,6 @@ void main() {
         asymmetryDetected: false,
         sideMetrics: const [],
       );
-      expect(out.any((s) => s.contains('elbow rose')), isFalse);
       expect(out.any((s) => s.contains('swung')), isFalse);
       expect(out.any((s) => s.contains('leaned back')), isFalse);
       expect(out.any((s) => s.contains('shrugged')), isFalse);

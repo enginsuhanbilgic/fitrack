@@ -569,10 +569,7 @@ class WorkoutViewModel extends ChangeNotifier {
     LM.rightElbow,
     LM.rightHip,
   ];
-  static const List<int> _plankLeftLowerLandmarks = [
-    LM.leftKnee,
-    LM.leftAnkle,
-  ];
+  static const List<int> _plankLeftLowerLandmarks = [LM.leftKnee, LM.leftAnkle];
   static const List<int> _plankRightLowerLandmarks = [
     LM.rightKnee,
     LM.rightAnkle,
@@ -655,7 +652,6 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.depthSwing: [LM.leftShoulder, LM.rightShoulder],
     FormError.shoulderArc: [LM.leftShoulder, LM.rightShoulder],
     FormError.elbowDrift: [LM.leftElbow, LM.rightElbow],
-    FormError.elbowRise: [LM.leftElbow, LM.rightElbow],
     FormError.shoulderShrug: [LM.leftShoulder, LM.rightShoulder],
     FormError.backLean: [
       LM.leftShoulder,
@@ -1372,7 +1368,6 @@ class WorkoutViewModel extends ChangeNotifier {
                 'elbow_drift_signed=${extras.signedElbowDriftRatioAtMax?.toStringAsFixed(4) ?? "null"} '
                 'back_lean_deg=${extras.maxBackLeanDegThisRep.toStringAsFixed(2)} '
                 'shrug_ratio=${extras.maxShrugRatioThisRep.toStringAsFixed(4)} '
-                'elbow_rise_ratio=${extras.maxElbowRiseRatioThisRep.toStringAsFixed(4)} '
                 'rep_quality=${extras.lastRepQuality.toStringAsFixed(3)} '
                 'concentric_ms=${concentricDuration?.inMilliseconds ?? -1} '
                 'source=global',
@@ -1444,7 +1439,6 @@ class WorkoutViewModel extends ChangeNotifier {
             backLeanDeg: extras.maxBackLeanDegThisRep,
             elbowDriftSigned: extras.signedElbowDriftRatioAtMax,
             shrugRatio: extras.maxShrugRatioThisRep,
-            elbowRiseRatio: extras.maxElbowRiseRatioThisRep,
           ),
         );
       }
@@ -1500,10 +1494,6 @@ class WorkoutViewModel extends ChangeNotifier {
     //   shrug_ratio             — peak −Δ(shoulder.y − hip.y) / torso_len
     //                             (positive = shoulder rose). Retunes
     //                             `kShrugThreshold` from real distributions.
-    //   elbow_rise_ratio        — peak (baseline_elbowRelY − current) /
-    //                             torso_len (positive = elbow swung up,
-    //                             front-delt cheat). Retunes
-    //                             `kElbowRiseThreshold`.
     //   rep_quality             — analyzer's lastRepQuality (0.0–1.0).
     //                             Filter clean-form reps by quality > 0.85
     //                             when computing percentile thresholds.
@@ -1578,7 +1568,6 @@ class WorkoutViewModel extends ChangeNotifier {
               'elbow_drift_signed=${extras.signedElbowDriftRatioAtMax?.toStringAsFixed(4) ?? "null"} '
               'back_lean_deg=${extras.maxBackLeanDegThisRep.toStringAsFixed(2)} '
               'shrug_ratio=${extras.maxShrugRatioThisRep.toStringAsFixed(4)} '
-              'elbow_rise_ratio=${extras.maxElbowRiseRatioThisRep.toStringAsFixed(4)} '
               'rep_quality=${extras.lastRepQuality.toStringAsFixed(3)} '
               'concentric_ms=${concentricDuration?.inMilliseconds ?? -1} '
               'source=${resolved.source.name}',
@@ -2850,10 +2839,12 @@ class WorkoutViewModel extends ChangeNotifier {
       minConfidence: minConfidence,
     );
     if (leftVisible || rightVisible) {
-      final core =
-          leftVisible ? _plankLeftCoreLandmarks : _plankRightCoreLandmarks;
-      final lower =
-          leftVisible ? _plankLeftLowerLandmarks : _plankRightLowerLandmarks;
+      final core = leftVisible
+          ? _plankLeftCoreLandmarks
+          : _plankRightCoreLandmarks;
+      final lower = leftVisible
+          ? _plankLeftLowerLandmarks
+          : _plankRightLowerLandmarks;
       return {
         for (final idx in core) idx: const Color(0xFF00E676),
         for (final idx in lower)
@@ -3046,8 +3037,7 @@ class WorkoutViewModel extends ChangeNotifier {
     final visibilityConfidence = exercise == ExerciseType.plank
         ? kPlankMinLandmarkConfidence
         : kMinLandmarkConfidence;
-    final allVisible =
-        exercise == ExerciseType.pushUp
+    final allVisible = exercise == ExerciseType.pushUp
         ? _pushUpSideVisible(result, minConfidence: visibilityConfidence)
         : exercise == ExerciseType.plank
         ? _plankSideVisible(result, minConfidence: visibilityConfidence)
@@ -3090,18 +3080,15 @@ class WorkoutViewModel extends ChangeNotifier {
     final visible = requirements.landmarkIndices
         .where(
           (idx) =>
-              result.landmark(idx, minConfidence: visibilityConfidence) !=
-              null,
+              result.landmark(idx, minConfidence: visibilityConfidence) != null,
         )
         .length;
-    final hasRequiredPose =
-        exercise == ExerciseType.pushUp
+    final hasRequiredPose = exercise == ExerciseType.pushUp
         ? _pushUpSideVisible(result, minConfidence: visibilityConfidence)
         : exercise == ExerciseType.plank
         ? _plankSideVisible(result, minConfidence: visibilityConfidence)
         : visible == total;
-    final hasPartialPose =
-        exercise == ExerciseType.pushUp
+    final hasPartialPose = exercise == ExerciseType.pushUp
         ? _pushUpAnySideLandmarkVisible(
             result,
             minConfidence: visibilityConfidence,
@@ -3876,7 +3863,6 @@ class WorkoutViewModel extends ChangeNotifier {
     FormError.depthSwing => "Don't rock forward",
     FormError.shoulderArc => "Stop rotating",
     FormError.elbowDrift => 'Keep your elbow still',
-    FormError.elbowRise => 'Elbow down',
     FormError.shoulderShrug => 'Keep your shoulders down',
     FormError.backLean => "Don't lean back",
     FormError.shortRomStart => 'Full extension down',
@@ -4053,7 +4039,9 @@ class WorkoutViewModel extends ChangeNotifier {
           : null,
     );
     // Save first, then emit so Home/History reloads see the inserted row.
-    unawaited(_persistThenEmitCompletion(event, _activeStart ?? DateTime.now()));
+    unawaited(
+      _persistThenEmitCompletion(event, _activeStart ?? DateTime.now()),
+    );
   }
 
   Future<void> _persistThenEmitCompletion(

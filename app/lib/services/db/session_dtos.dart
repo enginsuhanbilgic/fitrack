@@ -105,7 +105,6 @@ class RepRow {
     this.bicepsBackLeanDeg,
     this.bicepsElbowDriftSigned,
     this.bicepsShrugRatio,
-    this.bicepsElbowRiseRatio,
     this.bicepsFrontSwingRatio,
     this.bicepsFrontDepthSwingRatio,
   });
@@ -179,10 +178,6 @@ class RepRow {
   /// Peak shoulder-shrug ratio — schema v6. NULL on non-side-view rows and
   /// pre-v6 rows.
   final double? bicepsShrugRatio;
-
-  /// Peak elbow-rise ratio — schema v6. NULL on non-side-view rows and
-  /// pre-v6 rows.
-  final double? bicepsElbowRiseRatio;
 
   // ── Biceps front-view per-rep metrics (schema v7) ──
   /// Peak torso-swing ratio (`ΔX_shoulder / L_torso`) — front analyzer's
