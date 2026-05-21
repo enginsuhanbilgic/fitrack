@@ -59,9 +59,25 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   final SquatFormThresholds _formThresholds;
 
   /// Active lean threshold (variant-specific + optional +5° boost).
-  /// Frozen at construction so a mid-session Settings change cannot affect
-  /// an in-flight workout (snapshot-on-construction, plan flow-decision #2).
-  final double _leanWarnDeg;
+  /// Initialised at construction from the `longFemurLifter` Settings
+  /// toggle. The auto-detected long-femur classifier in `SquatStrategy`
+  /// can ALSO widen this mid-session by calling
+  /// [applyAutoDetectedLongFemurBoost] — the 2026-05-21 telemetry session
+  /// showed `signed_lean = +42 to +47°` on accurate-form reps from a
+  /// user the anatomical classifier had identified as long-femur but who
+  /// had NOT enabled the manual Settings toggle. Treating the auto-
+  /// classifier as a stricter signal than the manual toggle is wrong —
+  /// they describe the same anatomical fact and should produce the same
+  /// adaptation. The mutable-after-construction property is bounded:
+  /// the boost can only be applied once per session (idempotent guard
+  /// in `applyAutoDetectedLongFemurBoost`) and only WIDENS the threshold,
+  /// never narrows it.
+  double _leanWarnDeg;
+
+  /// Idempotency guard for [applyAutoDetectedLongFemurBoost]. Prevents
+  /// the boost from stacking on a user who has BOTH the manual toggle
+  /// AND the auto-classifier locked.
+  bool _autoLongFemurBoostApplied = false;
 
   // ── Per-rep extremes (all reset by `consumeCompletionErrorsWithDepth`) ──
   double? _minKneeAngle;
@@ -233,6 +249,19 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   bool _lastRepKneeLedDescentFired = false;
   bool _lastRepTempoInconsistentSnapshot = false;
 
+  // ── Side-lock (2026-05-21, telemetry-driven) ──────────────────────
+  // Locked at `onRepStart` from the start-snapshot pose, used for every
+  // `evaluate()` call until the next rep starts. Eliminates mid-rep
+  // camera-side flicker which the in-app telemetry on 2026-05-21 proved
+  // was corrupting per-rep extremes (signed_lean flipping sign between
+  // reps; knee_shift hitting 4.18 when one side's knee was paired with
+  // the other side's ankle; min_knee getting stuck at the wrong side's
+  // angle). The picker still runs fresh inside `evaluate()` for frames
+  // BEFORE any rep starts (SETUP/IDLE), because the HUD's live lean
+  // indicator reads `currentSignedLeanDeg` and we want it to track
+  // whichever side has higher confidence in that moment.
+  ExerciseSide? _lockedSide;
+
   // ── Tempo / fatigue tracking (2026-05-16, curl-parity) ──────────────
   // Phase mapping: DESCENDING = eccentric (lowering), ASCENDING =
   // concentric (lift). The STRATEGY pushes the injected `input.now`
@@ -302,6 +331,38 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
 
   /// Active lean threshold (deg) for the lifetime of this analyzer.
   double get leanWarnDeg => _leanWarnDeg;
+
+  /// Called by [SquatStrategy] once per session when the anatomical
+  /// long-femur classifier locks (or the rep-history fallback fires).
+  /// Widens [_leanWarnDeg] by [kSquatLongFemurLeanBoost] (+5°) so the
+  /// `excessiveForwardLean` cue does not false-fire on a user whose
+  /// anatomy mandates more forward lean at depth to keep COM over
+  /// midfoot.
+  ///
+  /// Idempotent — guarded by [_autoLongFemurBoostApplied], so a user
+  /// with BOTH the manual `longFemurLifter` Settings toggle AND the
+  /// auto-classifier locked does not double-stack the boost. Strategy
+  /// can call this freely on every IDLE tick after detection without
+  /// drift.
+  ///
+  /// Added 2026-05-21 after telemetry of accurate-form reps from a
+  /// long-femur lifter (femur/torso = 0.680) showed
+  /// `lean_exceed_frac = 0.27 - 0.46` on clean reps, well above the
+  /// `kSquatLeanSustainedFraction = 0.35` gate. The auto-classifier
+  /// had locked but only widened the BOTTOM depth gate (80° → 100°);
+  /// the lean gate stayed at 30° because only the manual toggle drove
+  /// it. Same anatomical fact ⇒ same adaptation.
+  void applyAutoDetectedLongFemurBoost() {
+    if (_autoLongFemurBoostApplied) return;
+    if (longFemurLifter) {
+      // Manual toggle already applied the boost at construction; don't
+      // double-stack. Mark applied so subsequent calls no-op.
+      _autoLongFemurBoostApplied = true;
+      return;
+    }
+    _leanWarnDeg += kSquatLongFemurLeanBoost;
+    _autoLongFemurBoostApplied = true;
+  }
 
   /// Most recently committed rep's quality score (0.0–1.0). Null until
   /// the first rep is committed.
@@ -414,6 +475,20 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _maxLeanDeg = null;
     _maxKneeShiftRatio = null;
     _maxHeelLiftRatio = null;
+    // Lock the camera-side for the lifetime of this rep based on the
+    // start-snapshot pose. Per-frame re-picking inside `evaluate()` was
+    // the root cause of the mid-rep signed_lean / knee_shift / min_knee
+    // corruption observed in the 2026-05-21 debug session. The user's
+    // body doesn't mirror itself mid-rep; only ML Kit's per-frame
+    // confidence ranking does. Locking removes the entire flicker class
+    // at zero geometric cost.
+    //
+    // Fallback to null (re-pick per frame) when the start snapshot has
+    // no usable pose, so a degenerate first frame can't permanently lock
+    // the analyzer to an unusable side for the rep — `evaluate()` then
+    // picks fresh on the first good frame and the lock stays null for
+    // this rep. The next `onRepStart` gets another chance.
+    _lockedSide = _pickCameraSide(startSnapshot);
     onDescendingStart();
   }
 
@@ -537,7 +612,11 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   List<FormError> evaluate(PoseResult current, {DateTime? now}) {
     final errors = <FormError>[];
 
-    final side = _pickCameraSide(current);
+    // Side selection: prefer the rep-locked side (set at `onRepStart`)
+    // to prevent mid-rep flicker. Fall back to a fresh per-frame pick
+    // when no rep is active (SETUP / IDLE frames before the first rep
+    // starts) or when the lock is null (degenerate start-snapshot pose).
+    final side = _lockedSide ?? _pickCameraSide(current);
     if (side == null) return errors;
 
     // Hip-lead per-frame accumulation. Only active between
@@ -608,15 +687,19 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       }
     }
 
-    // Heel lift — non-negative ratio; fires when heel rises above forefoot.
+    // Heel lift — TOMBSTONED 2026-05-21 per user request. Ratio is still
+    // computed and `_maxHeelLiftRatio` still tracked so the post-session
+    // summary, persisted `squat_heel_lift_ratio` column, and form-auditor
+    // grading all stay intact. Only the live FormError emission was
+    // removed. `FormError.heelLift` enum value retained for legacy
+    // session deserialization per project policy.
     final heelLift = _heelLiftRatio(current, side);
     if (heelLift != null) {
       if (_maxHeelLiftRatio == null || heelLift > _maxHeelLiftRatio!) {
         _maxHeelLiftRatio = heelLift;
       }
-      if (heelLift > _formThresholds.heelLiftWarnRatio) {
-        errors.add(FormError.heelLift);
-      }
+      // No errors.add(FormError.heelLift) — TTS cue and visual highlight
+      // both retired.
     }
 
     // Hips-forward-on-descent: sample hip.x trajectory in the first
@@ -783,12 +866,24 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       return;
     }
     final kneeTravel = (_lastDescentKneeX! - _descentStartKneeX!).abs();
-    // Hip drop in screen-Y (positive on a real descent). Clamp the
-    // denominator at a small epsilon so a near-zero hip drop (the user
-    // barely sank) doesn't explode the ratio into a false positive — a
-    // shallow rep is already caught by `squatDepth`, not this detector.
-    final hipDrop = math.max(1e-6, _lastDescentHipY! - _descentStartHipY!);
-    final ratio = (kneeTravel / legLen) / (hipDrop / legLen);
+    // Hip drop in screen-Y (positive on a real descent).
+    final hipDrop = _lastDescentHipY! - _descentStartHipY!;
+    // Min-hip-drop floor (2026-05-21, telemetry-driven). The previous
+    // `math.max(1e-6, hipDrop)` clamp let the ratio explode to >9000
+    // whenever the user paused at the top with the anchor frame caught
+    // mid-stillness — the 2026-05-21 debug session captured exactly this
+    // pathology (rep 7 in the faulty session: `ratio=9931.405`,
+    // `window_frames=4`). The fix: require the hip to have dropped at
+    // least [kSquatKneeLedMinHipDropNorm] of leg length within the
+    // sample window. Below that floor we abstain (ratio=0, no fire)
+    // rather than divide by a noise-floor denominator. A genuinely
+    // shallow rep is already caught by `squatDepth`.
+    final hipDropNorm = hipDrop / legLen;
+    if (hipDropNorm < kSquatKneeLedMinHipDropNorm) {
+      _lastRepKneeLedRatio = 0.0;
+      return;
+    }
+    final ratio = (kneeTravel / legLen) / hipDropNorm;
     _lastRepKneeLedRatio = ratio;
     if (ratio > kSquatKneeLedMinRatio) {
       _kneeLedDescentFired = true;
@@ -972,6 +1067,11 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _startKneeAngle = null;
     _leanExceedFrameCount = 0;
     _leanTotalEvalFrameCount = 0;
+    // Release the side-lock at commit so IDLE/SETUP frames between reps
+    // (which the HUD's live lean indicator still consumes via
+    // `currentSignedLeanDeg`) can pick the higher-confidence side fresh.
+    // The next `onRepStart` re-locks from that rep's start snapshot.
+    _lockedSide = null;
     // `_ascendingFrames` is cleared at the NEXT `onDescendingStart` so a
     // test that inspects mid-rep state can still read the buffer
     // post-commit. `_lastRepHipLead*` fields drain the same way.
@@ -1044,6 +1144,21 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
     _tempoReArmRepsRemaining = 0;
     _lastRepTempoInconsistent = false;
     _fatigueFired = false;
+    // Side-lock cleared on session reset; the next `onRepStart` will
+    // pick fresh from that rep's start snapshot.
+    _lockedSide = null;
+    // Auto-detected long-femur boost reset on session reset. The next
+    // session's classifier locks fresh; if it determines long-femur
+    // again, the boost is re-applied. The manual toggle path is
+    // untouched (it lives in `longFemurLifter` which is final from
+    // construction).
+    if (_autoLongFemurBoostApplied && !longFemurLifter) {
+      _leanWarnDeg = _formThresholds.leanWarnFor(
+        variant,
+        longFemur: longFemurLifter,
+      );
+    }
+    _autoLongFemurBoostApplied = false;
   }
 
   // ── Internals ────────────────────────────────────────────
@@ -1080,18 +1195,45 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
   /// Signed forward-lean angle (degrees). Positive = forward (hip ahead of
   /// shoulder along the user's toes direction); negative = backward.
   ///
-  /// **Sign-normalized against the user's facing direction (2026-05-21).**
-  /// The previous formula `dx = hip.x − shoulder.x` was direction-dependent:
-  /// a left-facing user leaning forward produced a NEGATIVE `dx`, which
-  /// suppressed `excessiveForwardLean` and false-fired `excessiveBackwardLean`.
-  /// The "Bug-4" diagnostic block above documents the inversion symptom.
+  /// **Forward direction anchored on the foot's own anatomy (2026-05-21,
+  /// second iteration).** The first iteration used `sign(hip.x − heel.x)`
+  /// — geometrically sound when standing, but it flipped mid-rep on a deep
+  /// squat: as the hip travels forward over the foot during descent,
+  /// `hip.x − heel.x` can change sign at the bottom of the rep, where the
+  /// lean magnitude peaks. The 2026-05-21 second debug session caught
+  /// this: 5 of 6 reps reported `signed_lean ≈ −49°` on a user who was
+  /// leaning forward, because the anchor flipped at the bottom and the
+  /// peak frame got the wrong sign.
   ///
-  /// Fix: anchor "forward" against the heel→hip X direction. The toes are
-  /// (approximately) opposite the heel along the foot's long axis, so a hip
-  /// drifting AWAY from the heel along that axis is leaning forward. We use
-  /// `sign(hip.x − heel.x)` as the forward direction and multiply the raw
-  /// `dx` by it — the result is positive for forward lean regardless of
-  /// whether the camera sees the user from their left or right side.
+  /// Fix (anchor): `sign(foot_index.x − heel.x)` anchors the forward
+  /// direction off the foot's own anatomy — toes are biomechanically
+  /// forward of the heel at all times, regardless of body posture. The
+  /// foot is grounded, so the anchor is invariant to the entire rep.
+  ///
+  /// Fix (comparison direction, 2026-05-21 third iteration — telemetry-
+  /// driven): swap `hip.x − shoulder.x` → `shoulder.x − hip.x`. The third
+  /// debug session captured raw landmark x-coordinates and proved that in
+  /// a squat the **shoulder** tilts forward over the toes while the
+  /// **hip** drops back/down — opposite of the upright biceps-curl
+  /// geometry the original formula was modelled on. Concrete worked
+  /// example from the 2026-05-21 03:55 session, rep 1 deepest BOTTOM
+  /// frame (left-side reading on a left-side-facing user with toes in
+  /// +x): `l_shoulder.x = 0.442, l_hip.x = 0.331, l_heel.x = 0.317,
+  /// l_foot.x = 0.373`. `foot − heel = +0.056 ⇒ forwardSign = +1`.
+  /// With the OLD `hip − shoulder` formula: `dx = 0.331 − 0.442 = −0.111`
+  /// ⇒ atan2 returns negative ⇒ forward lean reported as backward
+  /// (`signed_lean = −45°` on every rep). With the NEW `shoulder − hip`:
+  /// `dx = 0.442 − 0.331 = +0.111` ⇒ positive ⇒ forward lean reads as
+  /// forward. The previous "Bug-4" diagnostic block higher in this file
+  /// was tracking a symptom of THIS bug.
+  ///
+  /// Why squat is opposite of curl: in an upright biceps curl, the
+  /// torso is fixed and the moving frame is the arm; lean is measured
+  /// from a stable hip reference toward where the shoulder drifts. In
+  /// a squat, the hip is the moving frame (drops down/back) and the
+  /// shoulder is what tilts forward to keep balance over the feet. The
+  /// two exercises use the same landmark pair to measure lean but the
+  /// physical "forward = which one moves toward toes" answer flips.
   ///
   /// `atan2(dx, dy)` is used so the magnitude matches the trunk's tilt
   /// from vertical regardless of how far apart the two landmarks are
@@ -1109,36 +1251,56 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       side == ExerciseSide.left ? LM.leftHeel : LM.rightHeel,
       minConfidence: kMinLandmarkConfidence,
     );
-    if (shoulder == null || hip == null || heel == null) return null;
+    final footIndex = p.landmark(
+      side == ExerciseSide.left ? LM.leftFootIndex : LM.rightFootIndex,
+      minConfidence: kMinLandmarkConfidence,
+    );
+    if (shoulder == null || hip == null || heel == null || footIndex == null) {
+      return null;
+    }
     final dy = (hip.y - shoulder.y).abs();
     if (dy < 1e-6) return null;
-    // Forward direction: the X axis pointing from heel toward hip projection.
-    // Returns null sign when hip stacks exactly over heel (degenerate frame,
-    // typically a fully upright standing pose where lean is ~0 anyway).
-    final hipHeelOffset = hip.x - heel.x;
-    if (hipHeelOffset.abs() < 1e-6) return 0.0;
-    final forwardSign = hipHeelOffset >= 0 ? 1.0 : -1.0;
-    final dx = (hip.x - shoulder.x) * forwardSign;
+    // Forward direction: from heel toward foot_index along the X axis.
+    // This vector points toward the user's toes by definition, since
+    // foot_index is the big-toe tip. Stable across the entire rep —
+    // the foot is grounded.
+    final toesOffset = footIndex.x - heel.x;
+    if (toesOffset.abs() < 1e-6) return 0.0;
+    final forwardSign = toesOffset >= 0 ? 1.0 : -1.0;
+    // shoulder.x − hip.x: positive when the shoulder is ahead of the
+    // hip along the toes direction (the squat forward-lean pattern).
+    final dx = (shoulder.x - hip.x) * forwardSign;
     return math.atan2(dx, dy) * 180.0 / math.pi;
   }
 
-  /// Knee shift ratio: how far the knee is displaced horizontally from the
-  /// ankle, normalized by femur length.
+  /// Knee shift ratio: shin-from-vertical magnitude. Returns
+  /// `|knee.x − ankle.x| / tibiaLen` — the sine of the shin's tilt angle
+  /// from vertical. Always in `[0, 1]`; reaches 1.0 only when the shin
+  /// is fully horizontal (knee directly over toes).
   ///
-  /// **Direction-agnostic (2026-05-21).** The previous formula
-  /// `max(0, knee.x − ankle.x)` clamped to zero for left-facing users (whose
-  /// knee tracks toward lower x as it travels forward), making the entire
-  /// `forwardKneeShift` and `kneeDominantPattern` codepath dead for half the
-  /// user population. The new formula uses `.abs()` — the fault is "knee
-  /// displaced from ankle by a lot," regardless of which side of the ankle
-  /// it sits on. In a real side-view squat the knee virtually never sits
-  /// BEHIND the ankle, so the abs is equivalent to the original intent for
-  /// right-facing users while also working for left-facing users.
+  /// **Geometric reformulation (2026-05-21, second iteration).** The
+  /// first iteration used `(knee.x − ankle.x).abs() / euclidean(hip, knee)` —
+  /// horizontal numerator over diagonal femur length. As the femur tilts
+  /// forward at the bottom of a deep squat, the femur length stays
+  /// physically constant but its on-screen length shrinks as the thigh
+  /// projects more horizontally. Meanwhile the horizontal numerator
+  /// grows. Both effects inflate the ratio. The 2026-05-21 second debug
+  /// session captured the symptom: `knee_shift = 1.6 - 1.8` on every
+  /// rep, well above the physically reasonable 0.0-1.0 range.
+  ///
+  /// Fix: normalize by tibia (shin) length `euclidean(knee, ankle)`.
+  /// `knee.x − ankle.x` is the horizontal component of the
+  /// knee → ankle vector, so dividing by the vector's magnitude gives
+  /// `sin(θ)` where θ is the shin-from-vertical angle. The ratio is now
+  /// a clean unit-less geometric proxy: 0.0 = shin perfectly vertical
+  /// (knee stacked over ankle); 1.0 = shin perfectly horizontal (knee
+  /// directly over toes). The audit threshold `kSquatKneeShiftWarnRatio
+  /// = 0.30` corresponds to a ~17° shin-from-vertical angle.
+  ///
+  /// `.abs()` preserves the 2026-05-21 direction-agnostic behavior:
+  /// the fault is "shin tilted forward a lot" regardless of which screen
+  /// direction the toes point.
   double? _kneeShiftRatio(PoseResult p, ExerciseSide side) {
-    final hip = p.landmark(
-      side == ExerciseSide.left ? LM.leftHip : LM.rightHip,
-      minConfidence: kMinLandmarkConfidence,
-    );
     final knee = p.landmark(
       side == ExerciseSide.left ? LM.leftKnee : LM.rightKnee,
       minConfidence: kMinLandmarkConfidence,
@@ -1147,11 +1309,11 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       side == ExerciseSide.left ? LM.leftAnkle : LM.rightAnkle,
       minConfidence: kMinLandmarkConfidence,
     );
-    if (hip == null || knee == null || ankle == null) return null;
-    final femurLen = _euclidean(hip, knee);
-    if (femurLen < 1e-6) return null;
+    if (knee == null || ankle == null) return null;
+    final tibiaLen = _euclidean(knee, ankle);
+    if (tibiaLen < 1e-6) return null;
     final shift = (knee.x - ankle.x).abs();
-    return shift / femurLen;
+    return shift / tibiaLen;
   }
 
   /// Heel lift ratio. Positive when the heel rises above the forefoot
@@ -1230,13 +1392,13 @@ class SquatFormAnalyzer extends FormAnalyzerBase {
       score *= 1.0 - severity * kQualitySquatLeanMaxDeduction;
     }
 
-    // Heel lift — proportional. Severity 1.0 reached at ratio 0.05
-    // (~67% above the warning floor).
-    final maxHeel = _maxHeelLiftRatio;
-    if (maxHeel != null && maxHeel > _formThresholds.heelLiftWarnRatio) {
-      final severity = (maxHeel / 0.05).clamp(0.0, 1.0);
-      score *= 1.0 - severity * kQualitySquatHeelLiftMaxDeduction;
-    }
+    // Heel lift — TOMBSTONED 2026-05-21 per user request. Quality-score
+    // deduction removed. `_maxHeelLiftRatio` is still tracked and
+    // surfaced via `lastRepHeelLiftRatio` for the summary screen, but
+    // it no longer reduces the per-rep numeric grade. Removing the
+    // deduction here is the user-facing "no quality penalty" half of
+    // the retirement; removing the `errors.add(FormError.heelLift)`
+    // in `evaluate()` is the "no live cue" half.
 
     // Hip-lead — proportional. Applied AFTER lean and heel-lift per plan
     // ordering (multiplicative composition, so the order doesn't change

@@ -133,23 +133,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
   /// "elbow back" (rare; setup issue) without ambiguity.
   double? _signedElbowDriftRatioAtMax;
 
-  // ── Sustained elbow-drift gate (per-rep) ──────────────
-  /// Count of evaluated frames this rep whose drift ratio cleared BOTH the
-  /// effective dead-band AND the audit threshold. Numerator of the
-  /// sustained-drift fraction. A single jittery off-line frame in an
-  /// otherwise-clean rep no longer fires `elbowDrift` — the verdict is the
-  /// per-rep fraction, decided at commit. Mirrors squat's
-  /// `_leanExceedFrameCount`. Reset at `onRepStart`, at rep commit, and in
-  /// `reset()`.
-  int _driftExceedFrameCount = 0;
-
-  /// Count of frames this rep with a usable shoulder/hip/elbow triple
-  /// (torso vector resolvable). Denominator of the sustained-drift
-  /// fraction — only frames the drift metric could actually be computed on
-  /// count. Mirrors squat's `_leanTotalEvalFrameCount`. Reset alongside
-  /// [_driftExceedFrameCount].
-  int _driftTotalEvalFrameCount = 0;
-
   // ── Side-view baselines (snapshot at rep start) ──────
   double? _baselineTorsoAngle;
   double? _baselineTorsoAngleSigned;
@@ -206,8 +189,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     _maxBackLeanDeg = 0.0;
     _lastSignedElbowDriftRatio = null;
     _signedElbowDriftRatioAtMax = null;
-    _driftExceedFrameCount = 0;
-    _driftTotalEvalFrameCount = 0;
     // Resolve the active arm BEFORE reading any per-side baselines.
     // Picks the arm with stronger landmark presence in this snapshot —
     // robust against front-camera mirroring + ML Kit's labelling
@@ -408,9 +389,23 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
       useLeft ? LM.leftHip : LM.rightHip,
       minConfidence: kMinLandmarkConfidence,
     );
+    // Elbow gets a RELAXED visibility floor for drift evaluation only.
+    // Symmetric-fix-for-asymmetric-occlusion (2026-05-21): backward
+    // elbow drift (rare tricep-press cheat) moves the elbow into the
+    // path the curling bicep sweeps through, so ML Kit's elbow
+    // confidence drops below kMinLandmarkConfidence (0.4) on more
+    // frames than forward drift. The math at line ~426 is sign-
+    // symmetric (ratio = signedRatio.abs() fires identically for
+    // ±signedRatio), but the *coverage* was asymmetric: backward-
+    // drift frames silently dropped out of both counters and never
+    // updated _maxDriftRatio. Admitting confidence ≥ 0.25 restores
+    // coverage parity. The 0.4 floor stays for every other code path
+    // in this file (FSM angle reads, shrug detector, lean detector,
+    // rotation detector) because those landmarks (shoulder, hip, nose)
+    // are NOT occluded by the bicep arc and don't have this asymmetry.
     final driftElbow = current.landmark(
       useLeft ? LM.leftElbow : LM.rightElbow,
-      minConfidence: kMinLandmarkConfidence,
+      minConfidence: kCurlDriftElbowMinConfidence,
     );
     if (driftShoulder != null && driftHip != null && driftElbow != null) {
       final ux = driftShoulder.x - driftHip.x;
@@ -433,22 +428,29 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
           // survives and the sign is lost at rep commit.
           _signedElbowDriftRatioAtMax = signedRatio;
         }
-        // Sustained-drift gate: accumulate per-frame evidence, emit the
-        // `elbowDrift` verdict ONCE at rep commit (see
-        // `consumeCompletionErrors`). A single jittery off-line frame at
-        // peak flexion — where shoulder/elbow are ML Kit's jitteriest in
-        // side view because both can occlude — no longer false-fires.
+        // Per-frame instantaneous fire (2026-05-21, second-iteration doctrine
+        // change). The earlier sustained-frame gate (2026-05-16) emitted
+        // `elbowDrift` ONCE at rep commit iff ≥35% of evaluated frames
+        // cleared the threshold. User feedback rejected that cadence: the
+        // physical experience of "your elbow is off the torso line right
+        // now" should map to "you hear feedback right now," and stop the
+        // moment the elbow snaps back. Cooldown (3 s, in
+        // `workout_view_model._onFormErrors`) + TTS verbosity cap +
+        // per-frame dead-band do all the throttling that the sustained-
+        // frame layer used to do — no extra logic needed.
         //
-        // The dual-gate (dead-band AND audit threshold) is preserved
-        // verbatim; it now decides whether a frame *counts as exceeding*,
-        // not whether to fire the cue. Dead-band: elbow perpendicular-
-        // offset noise floor sits at ~0.04-0.06; the effective dead-band
-        // absorbs that and widens toward `driftThreshold` as the user
-        // raises the Form Tolerance slider.
-        _driftTotalEvalFrameCount++;
+        // The dual-gate (dead-band AND audit threshold) is the safety net
+        // that the deleted sustained-frame layer was belt-and-suspenders
+        // backstopping. Dead-band: elbow perpendicular-offset noise floor
+        // sits at ~0.04-0.06; `effectiveDriftDeadband` absorbs that and
+        // widens toward `driftThreshold` as the user raises the Form
+        // Tolerance slider. A single jittery off-line frame must cross
+        // BOTH gates to fire — which is the contract every other per-frame
+        // detector in this file already operates on (shrug, lean,
+        // rotation, back-lean).
         if (ratio > _formThresholds.effectiveDriftDeadband &&
             ratio > _formThresholds.driftThreshold) {
-          _driftExceedFrameCount++;
+          errors.add(FormError.elbowDrift);
         }
       }
     }
@@ -551,24 +553,14 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
       }
     }
 
-    // Sustained elbow-drift verdict. `elbowDrift` was a per-frame error
-    // until 2026-05-16; it now joins the other per-rep verdicts here. Emit
-    // ONCE per rep iff a meaningful fraction of the rep's evaluated frames
-    // held the elbow off the torso line. Fails OPEN below the min-frame
-    // floor (mirrors the squat sustained-lean gate and curl's other
-    // fail-open per-rep checks) — a too-short rep can't carry enough
-    // signal to grade, so it's silently passed rather than false-flagged.
-    if (_driftTotalEvalFrameCount >= kDriftMinEvalFrames &&
-        _driftExceedFrameCount / _driftTotalEvalFrameCount >=
-            kDriftSustainedFraction) {
-      errors.add(FormError.elbowDrift);
-    }
-    // Drain the per-rep counters at the commit boundary (mirrors squat's
-    // two-reset-site pattern: `onDescendingStart` + commit). The host
-    // reads quality/telemetry getters post-commit, but those anchor on
-    // `_maxDriftRatio`, not these counters, so zeroing here is safe.
-    _driftExceedFrameCount = 0;
-    _driftTotalEvalFrameCount = 0;
+    // Note: `elbowDrift` is NO LONGER emitted from this rep-commit path
+    // as of 2026-05-21 (second iteration). It is now an instantaneous
+    // per-frame error emitted from `evaluate()` directly — the
+    // sustained-frame verdict gate (35% of evaluated frames, ≥6 frame
+    // floor) was removed because the user-experience contract is "you
+    // hear feedback for as long as your elbow is off the torso line,
+    // and it stops the moment you fix it." The TTS cooldown + dead-band
+    // are the throttling now, not the sustained-frame layer.
 
     return errors;
   }
@@ -593,8 +585,6 @@ class CurlSideFormAnalyzer extends CurlAnalyzer {
     _maxBackLeanDeg = 0.0;
     _lastSignedElbowDriftRatio = null;
     _signedElbowDriftRatioAtMax = null;
-    _driftExceedFrameCount = 0;
-    _driftTotalEvalFrameCount = 0;
     _baselineTorsoAngle = null;
     _baselineTorsoAngleSigned = null;
     _baselineShoulderRelX = null;

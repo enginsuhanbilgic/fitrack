@@ -512,6 +512,14 @@ class SquatStrategy extends ExerciseStrategy {
     if (ratio <= kLongFemurRatioThreshold) return;
     _longFemurDetected = true;
     _effectiveBottomAngle = kLongFemurBottomAngle;
+    // Same anatomical fact widens BOTH gates: BOTTOM depth (above) AND
+    // lean threshold (below). Pre-2026-05-21 only the manual Settings
+    // toggle widened the lean threshold; the auto-classifier widened
+    // only depth. Telemetry of a long-femur lifter's accurate-form reps
+    // showed `lean_exceed_frac = 0.27 - 0.46` (above the 0.35 gate),
+    // proving the lean threshold also needs adaptation when the
+    // classifier locks. Idempotent on the analyzer side.
+    _form.applyAutoDetectedLongFemurBoost();
     if (!_longFemurEmitted) {
       _longFemurEmitted = true;
       _onLongFemurDetected?.call(ratio);
@@ -567,6 +575,10 @@ class SquatStrategy extends ExerciseStrategy {
     if (allAboveParallel && allReached100) {
       _longFemurDetected = true;
       _effectiveBottomAngle = kLongFemurBottomAngle;
+      // Apply the same lean-threshold boost the anatomical-classifier path
+      // applies (see `_maybeApplyAnatomicalLongFemur`). Same anatomical
+      // fact ⇒ same adaptation on both gates.
+      _form.applyAutoDetectedLongFemurBoost();
       // Log only in checked builds — keeps squat_strategy.dart pure-Dart
       // so the offline replay harness (tools/dataset_analysis/dart_replay)
       // can run without pulling in package:flutter.

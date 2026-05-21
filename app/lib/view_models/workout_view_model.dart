@@ -1629,6 +1629,13 @@ class WorkoutViewModel extends ChangeNotifier {
       return 0.0;
     }
 
+    PoseLandmark? lm(int type) {
+      for (final l in result.landmarks) {
+        if (l.type == type) return l;
+      }
+      return null;
+    }
+
     final angle = snapshot.jointAngle;
     TelemetryLog.instance.log(
       'squat.frame_metrics',
@@ -1640,6 +1647,42 @@ class WorkoutViewModel extends ChangeNotifier {
           'r_hip=${conf(LM.rightHip).toStringAsFixed(2)} '
           'r_knee=${conf(LM.rightKnee).toStringAsFixed(2)} '
           'r_ankle=${conf(LM.rightAnkle).toStringAsFixed(2)}',
+    );
+
+    // Sign-convention diagnostic (2026-05-21, third iteration). Emits the
+    // raw x-coordinates of shoulder/hip/heel/foot_index on the camera-near
+    // (left) side, so the offline derivation pipeline can reconstruct the
+    // foot-anchored forward-direction calculation and verify whether the
+    // toes-direction `sign(foot_index.x − heel.x)` is producing the
+    // expected sign given the user's known camera facing. The earlier
+    // hip-anchored anchor (`sign(hip.x − heel.x)`) was shown to flip
+    // mid-rep at depth on the 2026-05-21 second session; the foot anchor
+    // should be stable, but the third session still reported `signed_lean
+    // ≈ −42°` on a forward-leaning user — needing landmark-level ground
+    // truth to diagnose. Emits BOTH sides so cross-side comparison is
+    // possible if the camera-side picker is also implicated.
+    final ls = lm(LM.leftShoulder);
+    final lh = lm(LM.leftHip);
+    final lhe = lm(LM.leftHeel);
+    final lf = lm(LM.leftFootIndex);
+    final rs = lm(LM.rightShoulder);
+    final rh = lm(LM.rightHip);
+    final rhe = lm(LM.rightHeel);
+    final rf = lm(LM.rightFootIndex);
+    String fmt(PoseLandmark? l) => l == null
+        ? 'null'
+        : '${l.x.toStringAsFixed(3)}@${l.confidence.toStringAsFixed(2)}';
+    TelemetryLog.instance.log(
+      'squat.foot_geom',
+      'fsm=${snapshot.state.name} '
+          'l_shoulder.x=${fmt(ls)} '
+          'l_hip.x=${fmt(lh)} '
+          'l_heel.x=${fmt(lhe)} '
+          'l_foot.x=${fmt(lf)} '
+          'r_shoulder.x=${fmt(rs)} '
+          'r_hip.x=${fmt(rh)} '
+          'r_heel.x=${fmt(rhe)} '
+          'r_foot.x=${fmt(rf)}',
     );
   }
 
@@ -3150,6 +3193,13 @@ class WorkoutViewModel extends ChangeNotifier {
       // mirrors the curl contract.
       final previousReps = _snapshot.reps;
       final advanced = snapshot.reps > previousReps;
+      // Progress audio (rep counts + "Well done") stays silent in EVERY
+      // debug session — including a squat verbose-cues session. The
+      // verbose mode (`kSquatDebugVerboseCues`) deliberately surfaces
+      // ONLY the form-audit cue path so a developer can test faulty-rep
+      // feedback without rep-count chatter cluttering the validation.
+      // This asymmetry is intentional: `_onFormErrors` checks the
+      // verbose flag, this progress block does not.
       final isDebugSilent =
           (kCurlDebugSessionEnabled && _isCurlDebugSession) ||
           (kSquatDebugSessionEnabled && _isSquatDebugSession) ||
@@ -3219,23 +3269,29 @@ class WorkoutViewModel extends ChangeNotifier {
   }
 
   /// Whether the given form error should be suppressed from the TTS path.
-  /// Visual highlight still fires, but no spoken cue and no cooldown slot
-  /// is consumed.
+  /// Visual highlight still fires for some entries, but no spoken cue and
+  /// no cooldown slot is consumed.
   ///
-  /// Current suppression set (2026-05-21 squat audit):
+  /// Current suppression set:
   ///   - `forwardKneeShift` — informational only; "knees over toes" was
   ///     retired as a fault but the visual highlight is kept.
   ///   - `excessiveBackwardLean` — telemetry only. True backward lean in
   ///     bodyweight squats is rare and the instantaneous (no sustained-
   ///     frame gate) detection is jitter-prone. We still log the
   ///     backward-frame count for Bug-4 sign-convention diagnostics.
+  ///   - `heelLift` (TOMBSTONED 2026-05-21) — emission removed from
+  ///     `SquatFormAnalyzer.evaluate()` so the cue should never reach
+  ///     this gate in fresh sessions; defensive entry here catches any
+  ///     replay path or third-party caller that might still emit it.
+  ///     `_maxHeelLiftRatio` is still tracked for the summary screen.
   ///
   /// Exposed for unit testing in `workout_view_model_test.dart` so the
   /// suppression contract is locked against future enum-switch additions.
   @visibleForTesting
   static bool isTtsSuppressed(FormError err) =>
       err == FormError.forwardKneeShift ||
-      err == FormError.excessiveBackwardLean;
+      err == FormError.excessiveBackwardLean ||
+      err == FormError.heelLift;
 
   /// Test seam exposing the spoken cue for a given form error. Lets
   /// the test suite pin the user-visible TTS phrasing — without this,
@@ -3260,16 +3316,26 @@ class WorkoutViewModel extends ChangeNotifier {
 
   // ── Form feedback coordinator ─────────────────────────
   void _onFormErrors(List<FormError> errors) {
-    // Debug session (curl OR squat): silent observation. Skip cooldown
-    // bookkeeping, TTS, and visual highlights entirely — the analyzer's
-    // per-rep telemetry still fires (we want the data), but nothing
-    // reaches the user. `_formErrorCounts` is intentionally NOT
-    // incremented either, so the post-session summary doesn't show
-    // inflated counts that never had a chance to be seen and corrected
-    // mid-set. Squat mirrors the curl contract.
-    if ((kCurlDebugSessionEnabled && _isCurlDebugSession) ||
-        (kSquatDebugSessionEnabled && _isSquatDebugSession) ||
-        (kPushUpDebugSessionEnabled && _isPushUpDebugSession)) {
+    // Debug session: silent observation. Skip cooldown bookkeeping, TTS,
+    // and visual highlights entirely — the analyzer's per-rep telemetry
+    // still fires (we want the data), but nothing reaches the user.
+    // `_formErrorCounts` is intentionally NOT incremented either, so the
+    // post-session summary doesn't show inflated counts that never had a
+    // chance to be seen and corrected mid-set.
+    //
+    // EXCEPTION — squat verbose-cues mode (2026-05-21): when
+    // [kSquatDebugVerboseCues] is `true`, a squat debug session keeps the
+    // live cue path active so a developer can validate that faulty reps
+    // actually cue. Curl and push-up debug sessions are unaffected — they
+    // always stay silent. The verbose path still emits all telemetry; it
+    // additionally lets TTS / highlights / counters run.
+    final curlSilent = kCurlDebugSessionEnabled && _isCurlDebugSession;
+    final pushUpSilent = kPushUpDebugSessionEnabled && _isPushUpDebugSession;
+    final squatSilent =
+        kSquatDebugSessionEnabled &&
+        _isSquatDebugSession &&
+        !kSquatDebugVerboseCues;
+    if (curlSilent || pushUpSilent || squatSilent) {
       return;
     }
     final now = DateTime.now();
@@ -3283,8 +3349,10 @@ class WorkoutViewModel extends ChangeNotifier {
       }
       final cooldownKey = _cooldownKeyFor(err);
       final last = _lastFeedbackTime[cooldownKey];
+      // Milliseconds, not `.inSeconds`: `kFeedbackCooldownSec` is fractional
+      // (1.5) and `Duration.inSeconds` truncates — see the constant's doc.
       if (last != null &&
-          now.difference(last).inSeconds < kFeedbackCooldownSec) {
+          now.difference(last).inMilliseconds < kFeedbackCooldownSec * 1000) {
         continue;
       }
       _lastFeedbackTime[cooldownKey] = now;
@@ -3337,6 +3405,20 @@ class WorkoutViewModel extends ChangeNotifier {
         _tts.speak(_errorMessage(err));
       }
       _triggerHighlight(err);
+      // Telemetry: record the cue that won the per-update priority walk.
+      // Emitted only inside a squat debug session so production sessions
+      // pay nothing. Logs the cue AFTER the cooldown + verbosity-cap
+      // gates, so the line reflects what the user actually heard (or
+      // would have heard) — `spoken=true` when TTS fired, `spoken=false`
+      // when the cap muted it but the highlight still ran. Lets a
+      // verbose-cues debug session be cross-checked: every deliberate
+      // fault should produce a matching `squat.cue` line.
+      if (kSquatDebugSessionEnabled && _isSquatDebugSession) {
+        TelemetryLog.instance.log(
+          'squat.cue',
+          'error=${err.name} spoken=$speak text="${_errorMessage(err)}"',
+        );
+      }
       break; // one cue per update — list order defines priority
     }
   }
@@ -3945,8 +4027,10 @@ class WorkoutViewModel extends ChangeNotifier {
 
   bool _canSpeakOcclusionPrompt() {
     if (_lastOcclusionTts == null) return true;
-    return DateTime.now().difference(_lastOcclusionTts!).inSeconds >=
-        kFeedbackCooldownSec;
+    // Milliseconds, not `.inSeconds`: `kFeedbackCooldownSec` is fractional
+    // (1.5) and `Duration.inSeconds` truncates — see the constant's doc.
+    return DateTime.now().difference(_lastOcclusionTts!).inMilliseconds >=
+        kFeedbackCooldownSec * 1000;
   }
 
   // ── Session actions ───────────────────────────────────

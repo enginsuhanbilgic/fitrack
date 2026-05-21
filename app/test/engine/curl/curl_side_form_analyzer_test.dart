@@ -48,27 +48,29 @@ PoseResult buildSidePose({
   );
 }
 
-/// Drive a full rep's worth of identical [frame] poses through [a] and
-/// return the rep-commit errors.
+/// Drive [frameCount] identical [frame] poses through [a] and return the
+/// LAST frame's `evaluate()` errors.
 ///
-/// `elbowDrift` became a PER-REP verdict on 2026-05-16 (sustained-frame
-/// gate, mirroring squat's `excessiveForwardLean`): a single `evaluate()`
-/// call only ACCUMULATES one frame of evidence and never returns
-/// `elbowDrift`. The verdict is emitted once at `consumeCompletionErrors()`
-/// iff ≥ [kDriftSustainedFraction] of ≥ [kDriftMinEvalFrames] evaluated
-/// frames cleared the dead-band + audit threshold. This helper feeds
-/// [frameCount] identical off-line frames (default 8 > the 6-frame floor,
-/// 100% exceed fraction) so a geometry that should fault does, and returns
-/// what the rep boundary emits. [onRepStart] must have run already.
-List<FormError> driveAndCommit(
+/// `elbowDrift` is an INSTANTANEOUS per-frame error as of 2026-05-21 —
+/// every `evaluate()` call on an off-line frame returns it directly; there
+/// is no rep-commit verdict and no sustained-frame gate. This helper feeds
+/// identical frames so a geometry's verdict is unambiguous, then returns
+/// the per-frame errors of the final frame. [onRepStart] must have run
+/// already.
+///
+/// (Historical note: this helper used to be `driveAndCommit` and returned
+/// `consumeCompletionErrors()` because `elbowDrift` was briefly a per-rep
+/// sustained-frame verdict, 2026-05-16 → 2026-05-21.)
+List<FormError> driveFramesLastErrors(
   CurlSideFormAnalyzer a,
   PoseResult frame, {
   int frameCount = 8,
 }) {
+  var last = <FormError>[];
   for (var i = 0; i < frameCount; i++) {
-    a.evaluate(frame);
+    last = a.evaluate(frame);
   }
-  return a.consumeCompletionErrors();
+  return last;
 }
 
 void main() {
@@ -105,25 +107,18 @@ void main() {
         elbowX: 0.55, // halfway between S and H — exactly on the axis
         elbowY: 0.50,
       );
-      // Drive a full clean rep: the elbow sits exactly on the leaned
-      // torso axis every frame, so ZERO frames count as exceeding and the
-      // per-rep verdict must stay silent at commit.
+      // Drive a full rep: the elbow sits exactly on the leaned torso axis
+      // every frame → perpendicular offset is zero → `evaluate()` must not
+      // return elbowDrift on any frame (per-frame doctrine, 2026-05-21).
       for (var i = 0; i < 8; i++) {
         expect(
           a.evaluate(leaned),
           isNot(contains(FormError.elbowDrift)),
           reason:
-              'evaluate() never returns elbowDrift post-2026-05-16 — the '
-              'verdict is per-rep',
+              'elbow pinned to the torso axis has zero perpendicular '
+              'offset — the per-frame elbowDrift gate must stay silent',
         );
       }
-      expect(
-        a.consumeCompletionErrors(),
-        isNot(contains(FormError.elbowDrift)),
-        reason:
-            'elbow on the leaned torso axis registers zero perpendicular '
-            'offset on every frame → sustained gate must not fire',
-      );
       // Sanity: signed ratio rounded to ~0 (modulo float noise).
       expect(a.lastSignedElbowDriftRatio, isNotNull);
       expect(a.lastSignedElbowDriftRatio!.abs(), lessThan(1e-9));
@@ -152,9 +147,9 @@ void main() {
         elbowX: 0.60,
         elbowY: 0.50,
       );
-      // Per-rep contract: a sustained off-line elbow (every frame over
-      // threshold) fires `elbowDrift` once at rep commit.
-      expect(driveAndCommit(a, drifted), contains(FormError.elbowDrift));
+      // Per-frame contract: an off-line elbow fires `elbowDrift` on every
+      // frame `evaluate()` sees it past the dead-band + threshold.
+      expect(driveFramesLastErrors(a, drifted), contains(FormError.elbowDrift));
     });
 
     test('forward-leaning torso AND off-axis elbow DOES fire elbowDrift '
@@ -183,7 +178,7 @@ void main() {
         elbowX: 0.70,
         elbowY: 0.45,
       );
-      expect(driveAndCommit(a, drifted), contains(FormError.elbowDrift));
+      expect(driveFramesLastErrors(a, drifted), contains(FormError.elbowDrift));
     });
   });
 
@@ -251,8 +246,8 @@ void main() {
         a.onRepStart(ref);
 
         // Elbow on the −n̂ side at the same magnitude that fires from +.
-        // The dual-gate compares |ratio|, so a sustained negative offset
-        // fires the per-rep verdict exactly like a positive one.
+        // The dual-gate compares |ratio|, so a negative offset fires the
+        // per-frame elbowDrift cue exactly like a positive one.
         final negDrift = buildSidePose(
           shoulderX: 0.50,
           shoulderY: 0.30,
@@ -261,7 +256,10 @@ void main() {
           elbowX: 0.40,
           elbowY: 0.50,
         );
-        expect(driveAndCommit(a, negDrift), contains(FormError.elbowDrift));
+        expect(
+          driveFramesLastErrors(a, negDrift),
+          contains(FormError.elbowDrift),
+        );
       },
     );
 
@@ -345,18 +343,173 @@ void main() {
           elbowX: 0.60,
           elbowY: 0.50,
         );
-        // The torso-vector guard short-circuits before the eval counter
-        // increments, so even 8 collapsed frames leave the denominator at
-        // 0 → fail-open, no verdict at commit, signed ratio never set.
+        // The torso-vector guard short-circuits before the per-frame
+        // elbowDrift gate runs, so no collapsed frame ever fires the cue
+        // and the signed ratio is never set.
         final errs = a.evaluate(collapsed);
         expect(errs, isNot(contains(FormError.elbowDrift)));
         expect(
-          driveAndCommit(a, collapsed, frameCount: 7),
+          driveFramesLastErrors(a, collapsed, frameCount: 7),
           isNot(contains(FormError.elbowDrift)),
         );
         expect(a.lastSignedElbowDriftRatio, isNull);
       },
     );
+
+    test('backward elbow drift (negative signedRatio) fires elbowDrift with '
+        'the same coverage as the mirrored forward drift (2026-05-21 '
+        'asymmetric-occlusion fix)', () {
+      // Vertical torso (S above H) → n̂ = (+1, 0); signedRatio collapses to
+      // (elbowX − shoulderX) / torsoLen. Drift magnitude 0.10 / 0.40 = 0.25
+      // — clear of the 0.15 threshold + 0.08 dead-band.
+      //
+      // Pre-2026-05-21 the elbow lookup used `kMinLandmarkConfidence` (0.4)
+      // for BOTH directions; in practice ML Kit elbow confidence drops
+      // below 0.4 more often on backward drift (the curling bicep occludes
+      // the elbow). This test mirrors that asymmetric-confidence reality:
+      // identical magnitude on both sides, but the backward elbow's
+      // confidence is 0.30 — between the new `kCurlDriftElbowMinConfidence`
+      // (0.25) and the old `kMinLandmarkConfidence` (0.40). The forward
+      // case uses 0.9. Post-fix BOTH fire and the per-rep magnitude peaks
+      // identically.
+      PoseResult buildAt({required double elbowX, required double elbowConf}) {
+        return PoseResult(
+          inferenceTime: const Duration(milliseconds: 10),
+          landmarks: [
+            const PoseLandmark(
+              type: LM.nose,
+              x: 0.50,
+              y: 0.20,
+              confidence: 0.9,
+            ),
+            const PoseLandmark(
+              type: LM.leftShoulder,
+              x: 0.50,
+              y: 0.30,
+              confidence: 0.9,
+            ),
+            const PoseLandmark(
+              type: LM.leftHip,
+              x: 0.50,
+              y: 0.70,
+              confidence: 0.9,
+            ),
+            PoseLandmark(
+              type: LM.leftElbow,
+              x: elbowX,
+              y: 0.50,
+              confidence: elbowConf,
+            ),
+            const PoseLandmark(
+              type: LM.rightShoulder,
+              x: 0.60,
+              y: 0.30,
+              confidence: 0.9,
+            ),
+            const PoseLandmark(
+              type: LM.rightHip,
+              x: 0.60,
+              y: 0.70,
+              confidence: 0.9,
+            ),
+          ],
+        );
+      }
+
+      // Forward drift: elbow at +0.10 from shoulder, high confidence.
+      final ref = buildAt(elbowX: 0.50, elbowConf: 0.9);
+      a.reset();
+      a.setView(CurlCameraView.sideLeft);
+      a.onRepStart(ref);
+      final forwardDrift = buildAt(elbowX: 0.60, elbowConf: 0.9);
+      final forwardErrors = a.evaluate(forwardDrift);
+      final forwardMaxRatio = a.maxElbowDriftRatioThisRep;
+      final forwardSignedAtMax = a.signedElbowDriftRatioAtMax;
+      expect(forwardErrors, contains(FormError.elbowDrift));
+      expect(forwardSignedAtMax, isPositive);
+      expect(forwardMaxRatio, closeTo(0.25, 0.01));
+
+      // Backward drift: elbow at −0.10, occluded confidence 0.30 — between
+      // the relaxed gate (0.25) and the strict engine gate (0.40). Pre-fix
+      // this frame was gated OUT entirely; post-fix it fires per-frame.
+      final ref2 = buildAt(elbowX: 0.50, elbowConf: 0.9);
+      a.reset();
+      a.setView(CurlCameraView.sideLeft);
+      a.onRepStart(ref2);
+      final backwardDrift = buildAt(elbowX: 0.40, elbowConf: 0.30);
+      final backwardErrors = a.evaluate(backwardDrift);
+      final backwardMaxRatio = a.maxElbowDriftRatioThisRep;
+      final backwardSignedAtMax = a.signedElbowDriftRatioAtMax;
+      expect(
+        backwardErrors,
+        contains(FormError.elbowDrift),
+        reason:
+            'Backward drift at confidence ≥ kCurlDriftElbowMinConfidence '
+            '(0.25) must fire elbowDrift identically to the forward case. '
+            'Pre-fix the strict 0.40 gate dropped these frames silently.',
+      );
+      expect(
+        backwardSignedAtMax,
+        isNegative,
+        reason: 'Sign convention must preserve direction at the peak frame.',
+      );
+      expect(
+        backwardMaxRatio,
+        closeTo(forwardMaxRatio, 0.001),
+        reason:
+            'Symmetric-coverage invariant: identical-magnitude forward and '
+            'backward drift must produce identical `_maxDriftRatio` once '
+            'the elbow-specific relaxed gate admits the backward frames.',
+      );
+    });
+
+    test('elbow below the relaxed gate (conf < 0.25) still drops out — '
+        'the gate did not collapse entirely', () {
+      // Regression guard: the 2026-05-21 fix lowered the elbow visibility
+      // floor from 0.40 to 0.25 for the drift detector. It must NOT
+      // collapse to 0 — frames where ML Kit returned no real positional
+      // evidence (confidence ~ 0.10) must still be ignored so the drift
+      // detector isn't poisoned by skeleton-prior guesses.
+      a.reset();
+      a.setView(CurlCameraView.sideLeft);
+      final ref = buildSidePose(
+        shoulderX: 0.50,
+        shoulderY: 0.30,
+        hipX: 0.50,
+        hipY: 0.70,
+        elbowX: 0.50,
+        elbowY: 0.50,
+      );
+      a.onRepStart(ref);
+      final tooLow = PoseResult(
+        inferenceTime: const Duration(milliseconds: 10),
+        landmarks: const [
+          PoseLandmark(type: LM.nose, x: 0.50, y: 0.20, confidence: 0.9),
+          PoseLandmark(
+            type: LM.leftShoulder,
+            x: 0.50,
+            y: 0.30,
+            confidence: 0.9,
+          ),
+          PoseLandmark(type: LM.leftHip, x: 0.50, y: 0.70, confidence: 0.9),
+          PoseLandmark(
+            type: LM.leftElbow,
+            x: 0.40,
+            y: 0.50,
+            confidence: 0.10, // below kCurlDriftElbowMinConfidence (0.25)
+          ),
+          PoseLandmark(
+            type: LM.rightShoulder,
+            x: 0.60,
+            y: 0.30,
+            confidence: 0.9,
+          ),
+          PoseLandmark(type: LM.rightHip, x: 0.60, y: 0.70, confidence: 0.9),
+        ],
+      );
+      expect(a.evaluate(tooLow), isNot(contains(FormError.elbowDrift)));
+      expect(a.lastSignedElbowDriftRatio, isNull);
+    });
 
     test('missing elbow landmark → no elbowDrift, signed ratio stays null', () {
       a.reset();
@@ -372,9 +525,10 @@ void main() {
       );
       a.onRepStart(ref);
 
-      // Same pose but mark the left elbow as low-confidence — gated out
-      // by `kMinLandmarkConfidence`. Build manually since the helper
-      // forces high confidence on every landmark.
+      // Same pose but mark the left elbow as very low confidence (0.05) —
+      // gated out by `kCurlDriftElbowMinConfidence` (0.25, the relaxed
+      // elbow-drift floor). Build manually since the helper forces high
+      // confidence on every landmark.
       final landmarks = <PoseLandmark>[
         const PoseLandmark(type: LM.nose, x: 0.50, y: 0.20, confidence: 0.9),
         const PoseLandmark(
@@ -407,12 +561,12 @@ void main() {
         inferenceTime: const Duration(milliseconds: 10),
         landmarks: landmarks,
       );
-      // Elbow gated out → drift block never runs → eval counter stays 0 →
-      // fail-open at commit even across a full rep of these frames.
+      // Elbow gated out → drift block never runs → no per-frame fire on
+      // any frame, signed ratio never set.
       final errs = a.evaluate(missingElbow);
       expect(errs, isNot(contains(FormError.elbowDrift)));
       expect(
-        driveAndCommit(a, missingElbow, frameCount: 7),
+        driveFramesLastErrors(a, missingElbow, frameCount: 7),
         isNot(contains(FormError.elbowDrift)),
       );
       expect(a.lastSignedElbowDriftRatio, isNull);
@@ -522,7 +676,10 @@ void main() {
           elbowX: 0.62,
           elbowY: 0.50,
         );
-        expect(driveAndCommit(a, drifted), contains(FormError.elbowDrift));
+        expect(
+          driveFramesLastErrors(a, drifted),
+          contains(FormError.elbowDrift),
+        );
       },
     );
 
@@ -638,7 +795,10 @@ void main() {
           ],
         );
         a.onRepStart(leftOnlyRef);
-        expect(driveAndCommit(a, drifted), contains(FormError.elbowDrift));
+        expect(
+          driveFramesLastErrors(a, drifted),
+          contains(FormError.elbowDrift),
+        );
         // Silence the unused-fixture warning if the test setup variable
         // is otherwise unused.
         expect(ref.landmarks, isNotEmpty);
@@ -863,16 +1023,13 @@ void main() {
           elbowX: 0.62,
           elbowY: 0.50,
         );
-        // `shoulderArc` is still a per-frame error; `elbowDrift` is now a
-        // per-rep verdict. Assert each on its own surface: the frame must
-        // NOT carry shoulderArc, and the rep commit MUST carry elbowDrift.
+        // Both `shoulderArc` and `elbowDrift` are per-frame errors. This
+        // frame moves only the elbow (shoulder/hip fixed), so the very
+        // first `evaluate()` must carry `elbowDrift` and must NOT carry
+        // `shoulderArc` — the two detectors are orthogonal.
         final frameErrors = a.evaluate(evaluated);
         expect(frameErrors, isNot(contains(FormError.shoulderArc)));
-        expect(frameErrors, isNot(contains(FormError.elbowDrift)));
-        // 7 more identical frames (8 total > kDriftMinEvalFrames, 100%
-        // exceed) → fires once at commit.
-        final commitErrors = driveAndCommit(a, evaluated, frameCount: 7);
-        expect(commitErrors, contains(FormError.elbowDrift));
+        expect(frameErrors, contains(FormError.elbowDrift));
       },
     );
   });
@@ -1291,14 +1448,18 @@ void main() {
     });
   });
 
-  // ── Sustained elbow-drift gate (per-rep verdict, 2026-05-16) ────────
+  // ── Per-frame elbow-drift fire (instantaneous doctrine, 2026-05-21) ──
   //
-  // `elbowDrift` moved from a per-frame fire to a per-rep verdict
-  // (mirrors squat's `excessiveForwardLean`). The verdict is emitted at
-  // `consumeCompletionErrors()` iff a rep has ≥ kDriftMinEvalFrames (6)
-  // evaluated frames AND ≥ kDriftSustainedFraction (0.35) of them cleared
-  // the dead-band + audit threshold. Threshold tightened 0.20 → 0.15.
-  group('sustained elbow-drift gate — per-rep verdict', () {
+  // `elbowDrift` is an INSTANTANEOUS per-frame error: `evaluate()` adds it
+  // to the returned list on every frame whose torso-perpendicular elbow-
+  // offset ratio clears BOTH the effective dead-band AND the audit
+  // threshold. There is no rep-commit verdict and no sustained-frame gate
+  // — the user hears the cue for as long as the elbow is off the torso
+  // line and it stops the moment the elbow returns. The TTS cooldown +
+  // verbosity cap (host layer) and the per-frame dead-band do the
+  // throttling. This replaced the 2026-05-16 sustained-frame per-rep
+  // verdict.
+  group('per-frame elbow-drift fire — instantaneous doctrine', () {
     // Clean reference: shoulder over hip, elbow on the torso axis.
     PoseResult cleanRef() => buildSidePose(
       shoulderX: 0.50,
@@ -1320,170 +1481,129 @@ void main() {
       elbowY: 0.50,
     );
 
-    test('single off-line frame in an otherwise-clean rep does NOT fire '
-        '(the core anti-noise win)', () {
+    test('a single off-line frame fires elbowDrift immediately', () {
       a.onRepStart(cleanRef());
-      // 1 jittery off-line frame …
-      a.evaluate(offLineFrame());
-      // … followed by 9 clean frames. exceed/total = 1/10 = 0.10 <
-      // 0.35 → the sustained gate must stay silent.
-      for (var i = 0; i < 9; i++) {
-        a.evaluate(cleanRef());
-      }
       expect(
-        a.consumeCompletionErrors(),
-        isNot(contains(FormError.elbowDrift)),
-        reason: 'one noisy frame must not trip the per-rep verdict',
-      );
-    });
-
-    test('≥35% of frames off-line → fires once at commit', () {
-      a.onRepStart(cleanRef());
-      // 4 off-line + 6 clean = 4/10 = 0.40 ≥ 0.35 → fires.
-      for (var i = 0; i < 4; i++) {
-        a.evaluate(offLineFrame());
-      }
-      for (var i = 0; i < 6; i++) {
-        a.evaluate(cleanRef());
-      }
-      final errors = a.consumeCompletionErrors();
-      expect(
-        errors.where((e) => e == FormError.elbowDrift).length,
-        1,
-        reason: 'verdict is emitted exactly ONCE per bad rep',
-      );
-    });
-
-    test('just-below-threshold sustained (30% of frames) does NOT fire', () {
-      a.onRepStart(cleanRef());
-      // 3 off-line + 7 clean = 3/10 = 0.30 < 0.35 → silent.
-      for (var i = 0; i < 3; i++) {
-        a.evaluate(offLineFrame());
-      }
-      for (var i = 0; i < 7; i++) {
-        a.evaluate(cleanRef());
-      }
-      expect(
-        a.consumeCompletionErrors(),
-        isNot(contains(FormError.elbowDrift)),
-      );
-    });
-
-    test('fewer than kDriftMinEvalFrames, all off-line → fails OPEN', () {
-      a.onRepStart(cleanRef());
-      // 5 frames < 6-frame floor, every one off-line (100% exceed). The
-      // fraction is 1.0 but the min-frame guard suppresses the verdict —
-      // a too-short rep can't carry enough signal to grade.
-      for (var i = 0; i < kDriftMinEvalFrames - 1; i++) {
-        a.evaluate(offLineFrame());
-      }
-      expect(
-        a.consumeCompletionErrors(),
-        isNot(contains(FormError.elbowDrift)),
-        reason: 'below the min-frame floor the verdict fails open',
-      );
-    });
-
-    test('exactly kDriftMinEvalFrames all off-line → fires (floor is '
-        'inclusive)', () {
-      a.onRepStart(cleanRef());
-      for (var i = 0; i < kDriftMinEvalFrames; i++) {
-        a.evaluate(offLineFrame());
-      }
-      expect(
-        a.consumeCompletionErrors(),
-        contains(FormError.elbowDrift),
-        reason: '6 frames at 100% exceed: total >= 6 AND frac (1.0) >= 0.35',
-      );
-    });
-
-    test('stricter threshold: ratio 0.175 (was OK under 0.20, now over '
-        '0.15) counts as an exceed frame', () {
-      a.onRepStart(cleanRef());
-      // elbowX 0.57 → ratio (0.57 − 0.50)/0.40 = 0.175. Under the old
-      // 0.20 gate this frame would NOT have counted; under 0.15 it does.
-      // 8 such frames at 100% exceed → fires, proving the tightened gate.
-      for (var i = 0; i < 8; i++) {
-        a.evaluate(offLineFrame(elbowX: 0.57));
-      }
-      expect(
-        a.consumeCompletionErrors(),
+        a.evaluate(offLineFrame()),
         contains(FormError.elbowDrift),
         reason:
-            'ratio 0.175 is above the new 0.15 audit threshold (and the '
-            '0.08 dead-band) so it must count toward the sustained gate',
+            'Per-frame doctrine: any frame past dead-band + threshold '
+            'fires the cue on that frame, with no sustained-frame wait.',
       );
     });
 
-    test('ratio between dead-band and the new threshold (0.12) does NOT '
-        'count — minimal-movement budget preserved', () {
+    test('a clean frame does NOT fire elbowDrift', () {
+      a.onRepStart(cleanRef());
+      expect(
+        a.evaluate(cleanRef()),
+        isNot(contains(FormError.elbowDrift)),
+        reason: 'elbow on the torso axis → silent.',
+      );
+    });
+
+    test('the cue stops the moment the elbow returns to the torso line', () {
+      a.onRepStart(cleanRef());
+      // Drift off-line: fires.
+      expect(a.evaluate(offLineFrame()), contains(FormError.elbowDrift));
+      // Snap back onto the torso axis: must go silent on the very next
+      // frame — no lingering verdict, no rep-commit echo.
+      expect(
+        a.evaluate(cleanRef()),
+        isNot(contains(FormError.elbowDrift)),
+        reason:
+            'Returning the elbow to the torso line silences the cue '
+            'immediately — that is the whole point of the per-frame model.',
+      );
+    });
+
+    test('re-arms automatically: drift → recover → drift again each fires', () {
+      a.onRepStart(cleanRef());
+      // Episode 1.
+      expect(a.evaluate(offLineFrame()), contains(FormError.elbowDrift));
+      // Recover.
+      expect(a.evaluate(cleanRef()), isNot(contains(FormError.elbowDrift)));
+      // Episode 2 — a fresh drift after recovery fires again. The cue gate
+      // has no memory; only the host-layer TTS cooldown throttles the
+      // spoken cadence.
+      expect(
+        a.evaluate(offLineFrame()),
+        contains(FormError.elbowDrift),
+        reason:
+            'A second drift episode after the elbow recovered must fire '
+            'again — the per-frame gate re-arms with no hysteresis.',
+      );
+    });
+
+    test('elbowDrift is NOT emitted from consumeCompletionErrors', () {
+      a.onRepStart(cleanRef());
+      // Drive a full rep of off-line frames — every evaluate() fired the
+      // cue, but the rep-commit boundary must NOT add another elbowDrift.
+      for (var i = 0; i < 8; i++) {
+        expect(a.evaluate(offLineFrame()), contains(FormError.elbowDrift));
+      }
+      expect(
+        a.consumeCompletionErrors(),
+        isNot(contains(FormError.elbowDrift)),
+        reason:
+            'The rep-commit verdict path was removed 2026-05-21 — '
+            'elbowDrift is purely per-frame now.',
+      );
+    });
+
+    test('a too-short rep (1 frame off-line) still fires per frame — '
+        'no min-frame floor anymore', () {
+      a.onRepStart(cleanRef());
+      // The deleted sustained-frame gate failed OPEN below 6 frames. The
+      // per-frame model has no floor: even a 1-frame rep fires if that
+      // frame is off-line.
+      expect(a.evaluate(offLineFrame()), contains(FormError.elbowDrift));
+    });
+
+    test('ratio 0.175 (above the 0.15 audit threshold + 0.08 dead-band) '
+        'fires on the frame', () {
+      a.onRepStart(cleanRef());
+      // Upright torso, torsoLen 0.40 → elbowX offset 0.07 → ratio 0.175.
+      expect(
+        a.evaluate(offLineFrame(elbowX: 0.57)),
+        contains(FormError.elbowDrift),
+      );
+    });
+
+    test('ratio between dead-band and the threshold (0.12) does NOT fire '
+        '— minimal-movement budget preserved', () {
       a.onRepStart(cleanRef());
       // elbowX 0.548 → ratio 0.12: above the 0.08 dead-band but below the
-      // 0.15 audit threshold. The dual-gate requires BOTH; these frames
-      // are the user's silent movement budget and must not accumulate.
-      for (var i = 0; i < 10; i++) {
-        a.evaluate(offLineFrame(elbowX: 0.548));
-      }
+      // 0.15 audit threshold. The dual-gate requires BOTH — this is the
+      // user's silent movement budget.
       expect(
-        a.consumeCompletionErrors(),
+        a.evaluate(offLineFrame(elbowX: 0.548)),
         isNot(contains(FormError.elbowDrift)),
       );
     });
 
-    test('counters reset across reps — rep 2 not contaminated by rep 1', () {
-      // Rep 1: fully off-line → fires.
+    test('per-rep state cleared on onRepStart — rep 2 not contaminated', () {
+      // Rep 1: off-line, fires per frame.
       a.onRepStart(cleanRef());
-      for (var i = 0; i < 8; i++) {
-        a.evaluate(offLineFrame());
-      }
-      expect(a.consumeCompletionErrors(), contains(FormError.elbowDrift));
-      // Rep 2: fully clean. If rep 1's exceed/total counters leaked, the
-      // commit decision would still see a high fraction. They must be
-      // zeroed at both `onRepStart` and the prior commit.
+      expect(a.evaluate(offLineFrame()), contains(FormError.elbowDrift));
+      a.consumeCompletionErrors();
+      a.onRepEnd();
+      // Rep 2: clean — must be silent. No per-rep state survives onRepStart.
       a.onRepStart(cleanRef());
-      for (var i = 0; i < 8; i++) {
-        a.evaluate(cleanRef());
-      }
       expect(
-        a.consumeCompletionErrors(),
+        a.evaluate(cleanRef()),
         isNot(contains(FormError.elbowDrift)),
-        reason: 'rep 2 is clean — rep 1 evidence must not carry over',
+        reason: 'onRepStart clears all per-rep drift state.',
       );
     });
 
-    test('reset() clears the sustained-gate counters', () {
+    test('reset() clears per-rep drift state', () {
       a.onRepStart(cleanRef());
-      for (var i = 0; i < 8; i++) {
-        a.evaluate(offLineFrame());
-      }
-      // Session boundary BEFORE commit — the live counters hold 8/8.
+      a.evaluate(offLineFrame());
       a.reset();
       a.setView(CurlCameraView.sideLeft);
-      // A fresh clean rep must not inherit the pre-reset evidence.
+      // A fresh clean rep after reset must be silent.
       a.onRepStart(cleanRef());
-      for (var i = 0; i < 8; i++) {
-        a.evaluate(cleanRef());
-      }
-      expect(
-        a.consumeCompletionErrors(),
-        isNot(contains(FormError.elbowDrift)),
-        reason: 'reset() must zero _driftExceed/_driftTotal counters',
-      );
-    });
-
-    test('persistence — 3 consecutive fully-off-line reps each fire '
-        'elbowDrift at commit (tell constantly while consistent)', () {
-      for (var rep = 0; rep < 3; rep++) {
-        a.onRepStart(cleanRef());
-        for (var i = 0; i < 8; i++) {
-          a.evaluate(offLineFrame());
-        }
-        expect(
-          a.consumeCompletionErrors(),
-          contains(FormError.elbowDrift),
-          reason: 'rep ${rep + 1}: a consistently bad rep re-fires',
-        );
-      }
+      expect(a.evaluate(cleanRef()), isNot(contains(FormError.elbowDrift)));
     });
   });
 }

@@ -1,3 +1,4 @@
+import 'package:fitrack/core/constants.dart';
 import 'package:fitrack/core/curl_form_audit_defaults.dart';
 import 'package:fitrack/core/form_thresholds.dart';
 import 'package:fitrack/core/squat_form_audit_defaults.dart';
@@ -105,24 +106,29 @@ void main() {
     }
 
     test('squat lean fires identically across all sensitivity tiers', () {
-      // Fixed gate (bodyweight, no long-femur) is 45°. A 46° rep MUST fire
-      // on every tier; a 44° rep MUST pass on every tier. Re-introducing a
-      // tier branch (e.g. high=42°) would flip the 44° verdict on high.
-      final firingRep = makeRep(leanDeg: 46);
-      final passingRep = makeRep(leanDeg: 44);
+      // Fixed gate (bodyweight, no long-femur) is `kSquatLeanWarnDegBodyweight`
+      // = 30° as of the 2026-05-15 retune (was 45° before; the older figure
+      // is stale-drift). A 31° rep MUST fire on every tier; a 29° rep MUST
+      // pass on every tier. Re-introducing a tier branch would break this
+      // tier-independence invariant.
+      final firingRep = makeRep(leanDeg: 31);
+      final passingRep = makeRep(leanDeg: 29);
       for (final sensitivity in FeedbackSensitivity.values) {
         expect(
           firedFor('Forward lean', firingRep, sensitivity),
           1,
-          reason: 'Tier $sensitivity: 46° must fire on fixed 45° gate.',
+          reason:
+              'Tier $sensitivity: 31° must fire on the fixed '
+              '${kSquatLeanWarnDegBodyweight.toStringAsFixed(0)}° gate.',
         );
         expect(
           firedFor('Forward lean', passingRep, sensitivity),
           0,
           reason:
-              'Tier $sensitivity: 44° must pass on fixed 45° gate. A '
-              'regression to a tier-keyed lookup would tighten High to 42° '
-              'and fire here.',
+              'Tier $sensitivity: 29° must pass on the fixed '
+              '${kSquatLeanWarnDegBodyweight.toStringAsFixed(0)}° gate. A '
+              'regression to a tier-keyed lookup would shift the gate and '
+              'flip this verdict.',
         );
       }
     });

@@ -27,6 +27,31 @@ const double kPoseGateMinConfidence = 0.3;
 /// aren't usable).
 const double kPoseGateMinConfidenceSideRelaxed = 0.15;
 
+/// Relaxed measurement gate for the elbow landmark when used by the
+/// `CurlSideFormAnalyzer` elbow-drift detector specifically. Added
+/// 2026-05-21 to fix asymmetric drift detection: forward elbow drift
+/// (front-delt cheat) moves the elbow AWAY from the bicep arc and the
+/// landmark stays clearly visible to the camera, but backward elbow
+/// drift (tricep-press pattern) moves the elbow INTO the path the bicep
+/// sweeps through during the curl — ML Kit's elbow confidence drops
+/// below `kMinLandmarkConfidence` (0.4) on more frames in the backward
+/// case, so fewer frames contribute to `_driftExceedFrameCount` /
+/// `_driftTotalEvalFrameCount` and the per-rep `_maxDriftRatio` peak is
+/// artificially attenuated.
+///
+/// Scoped narrowly to the drift detector — shrug, lean, rotation, and
+/// FSM rep counting all continue to use `kMinLandmarkConfidence`. Set at
+/// 0.25 (between the side-relaxed pose gate at 0.15 and the standard
+/// engine gate at 0.40): high enough to reject ML Kit "guesses from
+/// skeleton priors" with no positional evidence, low enough to admit
+/// the bicep-occluded backward-drift frames.
+///
+/// The `signedRatio` (and therefore `lastSignedElbowDriftRatio` /
+/// `signedElbowDriftRatioAtMax`) is preserved unchanged — admitting
+/// noisier frames simply increases the *coverage* of the per-rep
+/// magnitude search; sign convention and verdict gate are untouched.
+const double kCurlDriftElbowMinConfidence = 0.25;
+
 // ── Joint-angle sanity clamps ───────────────────────────
 /// Minimum length of each of the two segments forming a joint angle, in
 /// normalized image coordinates (ML Kit returns landmarks in [0, 1]).
@@ -341,7 +366,20 @@ const double kHeadSigmaDriftCap = 2.0;
 
 // ── Timing ──────────────────────────────────────────────
 /// Minimum seconds between two audio cues of the same type.
-const double kFeedbackCooldownSec = 3.0;
+///
+/// Lowered 3.0 → 1.5 on 2026-05-21 so coaching feels more responsive —
+/// especially for the per-frame `elbowDrift` cue, where a 3 s gate let a
+/// drift-then-recover-then-drift sequence within one rep go un-cued the
+/// second time. At 1.5 s the cue can re-fire roughly twice per rep
+/// instead of once.
+///
+/// IMPORTANT: comparison sites MUST use `.inMilliseconds < cooldown *
+/// 1000`, never `.inSeconds < cooldown`. `Duration.inSeconds` truncates
+/// to a whole number, so comparing it against a fractional `1.5` would
+/// silently behave like a 1-second gate (fires at elapsed 0-1 s blocked,
+/// 2 s+ allowed). All current sites were migrated to milliseconds in the
+/// same 2026-05-21 change.
+const double kFeedbackCooldownSec = 1.5;
 
 /// Per-error voice-cue cap when [TtsVerbosity.low] is selected. After this
 /// many fires of the same error in a single session, the voice mutes for
@@ -365,9 +403,10 @@ const int kTtsVerbosityMediumCap = 3;
 /// voice cap ([kTtsVerbosityMediumCap]) mutes a fault, if it keeps clearing
 /// the [kFeedbackCooldownSec] time-cooldown this many more times, the voice
 /// re-alerts EXACTLY ONCE, then re-mutes for another full window. Because the
-/// 3 s cooldown collapses multi-frame error spam to ≈ one fire per rep, this
-/// is effectively "re-nudge after this many more faulty reps." Mirrors the
-/// proven `kTempoConsistencyReArmReps` (5) re-arm shape. A user who fixes the
+/// 1.5 s cooldown collapses multi-frame error spam to ≈ one or two fires per
+/// rep, this is effectively "re-nudge after this many more faulty reps."
+/// Mirrors the proven `kTempoConsistencyReArmReps` (5) re-arm shape. A user
+/// who fixes the
 /// fault never hears it again; a persistently-wrong user gets a periodic
 /// nudge instead of permanent silence. Audio-only — detection, highlights,
 /// `errorCounts`, and the summary are unaffected.
@@ -1280,6 +1319,26 @@ const int kSquatDebugRingBufferSize = 2000;
 /// Target frequency (Hz) for squat frame-metric telemetry.
 /// 3 Hz (vs curl's 2 Hz) — squat reps are slower so slightly higher density is useful.
 const double kSquatDebugFrameMetricsHz = 3.0;
+
+/// Verbose-cues toggle for squat debug sessions (2026-05-21).
+///
+/// A standard squat debug session is "silent observation" — telemetry is
+/// captured but TTS, visual highlights, and form-error counters are all
+/// suppressed (`WorkoutViewModel._onFormErrors` returns early). That mode
+/// exists to gather threshold telemetry uncontaminated by feedback
+/// bookkeeping.
+///
+/// When THIS flag is `true`, a squat debug session ALSO surfaces the live
+/// cue path: TTS speaks, highlights fire, counters bump — exactly as a
+/// production session would — WHILE still emitting all telemetry. This
+/// lets a developer do deliberate faulty reps and verify both that the
+/// cue is heard AND that the telemetry recorded it (via the `squat.cue`
+/// telemetry line). It does NOT affect curl or push-up debug sessions.
+///
+/// Ships `false`; flip to `true` locally only when validating cue
+/// behavior. Has no effect unless [kSquatDebugSessionEnabled] is also
+/// `true` and the user is actually in a squat debug session.
+const bool kSquatDebugVerboseCues = true;
 
 /// Compile-time gate for push-up debug sessions. Ships false in production.
 /// Currently `true` on dev builds — surfaces the home-screen "Push-up Debug

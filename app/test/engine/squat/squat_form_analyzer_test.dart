@@ -104,12 +104,21 @@ void main() {
     // ONCE at rep commit iff a sustained fraction of evaluated frames held
     // the lean over threshold. These tests drive the new contract.
 
-    // A strongly-leaned pose: dx≈0.40, dy=0.30 → atan2 ≈ 53° forward,
-    // well above the 30° BW threshold.
-    PoseResult leaned() =>
-        buildPose(shoulderX: 0.30, shoulderY: 0.20, hipX: 0.70, hipY: 0.50);
+    // Squat forward-lean geometry (post-2026-05-21 swap): shoulder ahead
+    // of hip along toes (+x). dx = shoulder − hip ≈ 0.40, dy = 0.30 →
+    // atan2 ≈ 53° forward, well above the 30° BW threshold. footX > heelX
+    // gives forwardSign = +1 so the signed lean reads positive.
+    PoseResult leaned() => buildPose(
+      shoulderX: 0.70,
+      shoulderY: 0.20,
+      hipX: 0.30,
+      hipY: 0.50,
+      heelX: 0.28,
+      footX: 0.36,
+    );
     // Upright: hip directly under shoulder → 0° lean.
-    PoseResult upright() => buildPose(shoulderX: 0.30, hipX: 0.30);
+    PoseResult upright() =>
+        buildPose(shoulderX: 0.30, hipX: 0.30, heelX: 0.28, footX: 0.36);
 
     test('a single noisy over-threshold frame in an otherwise-good rep does '
         'NOT fire excessiveForwardLean (Phase 1 regression guard)', () {
@@ -199,14 +208,17 @@ void main() {
         variant: SquatVariant.bodyweight,
         longFemurLifter: false,
       );
-      // Hip behind the shoulder along +x → signed lean is NEGATIVE,
-      // beyond -kSquatBackwardLeanWarnDeg. Lumbar hyperextension is a
-      // single-frame injury vector — must fire on the frame, not at commit.
+      // Post-2026-05-21 squat-lean convention: forward = shoulder ahead of
+      // hip along the toes direction. Backward = shoulder BEHIND hip.
+      // Place shoulder at lower x than hip (with toes still in +x) so
+      // signed lean reads NEGATIVE beyond -kSquatBackwardLeanWarnDeg.
       final pose = buildPose(
-        shoulderX: 0.70,
+        shoulderX: 0.30,
         shoulderY: 0.20,
-        hipX: 0.30,
+        hipX: 0.70,
         hipY: 0.50,
+        heelX: 0.28,
+        footX: 0.36,
       );
       expect(
         a.evaluate(pose),
@@ -244,15 +256,17 @@ void main() {
       expect(a.evaluate(pose), isNot(contains(FormError.heelLift)));
     });
 
-    test('heel raised above forefoot fires heelLift', () {
+    test('heel raised above forefoot does NOT fire heelLift '
+        '(TOMBSTONED 2026-05-21 — cue retired per user request)', () {
       final a = SquatFormAnalyzer(
         variant: SquatVariant.bodyweight,
         longFemurLifter: false,
       );
-      // hip.y=0.50 → ankle.y=0.95 → leg_len ≈ 0.45.
-      // heel.y=0.93, foot.y=0.97 → diff=0.04 → ratio ≈ 0.089 (>>0.03).
+      // heel.y=0.93, foot.y=0.97 → a genuine heel lift geometrically.
+      // The ratio is still computed (summary screen reads it) but the
+      // FormError is no longer emitted.
       final pose = buildPose(heelY: 0.93, footY: 0.97);
-      expect(a.evaluate(pose), contains(FormError.heelLift));
+      expect(a.evaluate(pose), isNot(contains(FormError.heelLift)));
     });
   });
 
@@ -284,14 +298,20 @@ void main() {
       expect(a.evaluate(pose), contains(FormError.forwardKneeShift));
     });
 
-    test('knee BEHIND ankle is clamped to 0 (does NOT fire)', () {
+    test('knee displaced BEHIND ankle still fires forwardKneeShift '
+        '(direction-agnostic since the 2026-05-21 abs() reformulation)', () {
       final a = SquatFormAnalyzer(
         variant: SquatVariant.bodyweight,
         longFemurLifter: false,
       );
-      // knee.x < ankle.x — `max(0, knee.x - ankle.x)` clamps shift.
-      final pose = buildPose(kneeX: 0.20, ankleX: 0.30);
-      expect(a.evaluate(pose), isNot(contains(FormError.forwardKneeShift)));
+      // knee.x < ankle.x. The 2026-05-21 fix replaced `max(0, …)` with
+      // `(knee.x − ankle.x).abs()` so left-facing users (whose knee
+      // tracks toward LOWER x as it travels forward) aren't silently
+      // zeroed. Magnitude is what matters, not screen direction.
+      // knee(0.20,0.70), ankle(0.30,0.95) → |Δx|=0.10, tibia=sqrt(0.01+
+      // 0.0625)≈0.269 → ratio≈0.37 (>0.30 warn).
+      final pose = buildPose(kneeX: 0.20, kneeY: 0.70, ankleX: 0.30);
+      expect(a.evaluate(pose), contains(FormError.forwardKneeShift));
     });
   });
 
@@ -312,9 +332,10 @@ void main() {
       final pose = PoseResult(
         inferenceTime: const Duration(milliseconds: 10),
         landmarks: [
-          // Left side — HIGH confidence, strong forward lean
-          lm(LM.leftShoulder, 0.30, 0.20, 0.95),
-          lm(LM.leftHip, 0.70, 0.50, 0.95),
+          // Left side — HIGH confidence, strong forward lean (squat
+          // convention: shoulder ahead of hip along toes +x).
+          lm(LM.leftShoulder, 0.70, 0.20, 0.95),
+          lm(LM.leftHip, 0.30, 0.50, 0.95),
           lm(LM.leftKnee, 0.30, 0.70, 0.95),
           lm(LM.leftAnkle, 0.30, 0.95, 0.95),
           lm(LM.leftHeel, 0.27, 0.97, 0.95),
@@ -516,33 +537,12 @@ void main() {
       },
     );
 
-    test(
-      'injected loose heelLiftWarnRatio does NOT fire at borderline value that defaults would',
-      () {
-        // Default threshold is kSquatHeelLiftWarnRatio (0.03).
-        // We inject 0.20 — a heel lift of 0.05 is above 0.03 but below 0.20.
-        const looseThresholds = SquatFormThresholds(
-          leanWarnDegBodyweight: kSquatLeanWarnDegBodyweight,
-          leanWarnDegHBBS: kSquatLeanWarnDegHBBS,
-          longFemurLeanBoost: kSquatLongFemurLeanBoost,
-          kneeShiftWarnRatio: kSquatKneeShiftWarnRatio,
-          heelLiftWarnRatio: 0.20,
-        );
-        final loose = SquatFormAnalyzer(
-          variant: SquatVariant.bodyweight,
-          longFemurLifter: false,
-          formThresholds: looseThresholds,
-        );
-        final normal = SquatFormAnalyzer(
-          variant: SquatVariant.bodyweight,
-          longFemurLifter: false,
-        );
-        // heelY=0.93, footY=0.97 → (0.97-0.93)/leg_len fires defaults (ratio > 0.03)
-        final pose = buildPose(heelY: 0.93, footY: 0.97);
-        expect(normal.evaluate(pose), contains(FormError.heelLift));
-        expect(loose.evaluate(pose), isNot(contains(FormError.heelLift)));
-      },
-    );
+    // The 'injected loose heelLiftWarnRatio' test was removed 2026-05-21
+    // when the heelLift cue was tombstoned per user request. The
+    // `heelLiftWarnRatio` field still exists on SquatFormThresholds and
+    // is exercised by `form_audit_defaults_test.dart` / the post-session
+    // form auditor, but it no longer drives any live FormError emission,
+    // so there is nothing for an analyzer-level test to assert here.
 
     test(
       'leanWarnDeg is computed from injected thresholds, not kSquat* constants',
@@ -898,11 +898,18 @@ void main() {
           buildPose(kneeX: kneeX, hipY: hipY),
           now: t0.add(Duration(milliseconds: stepMs * i)),
         );
-        a.trackAngle(70.0);
+        // Feed a realistic descending knee angle (170° standing → 70°
+        // bottom) so `kneeDelta` ends up ≈ 100°. A flat 70.0 on every
+        // frame would give kneeDelta ≈ 0, which trips the broadened
+        // stiff-legged `noKneeFlexion` path and shadows the signal this
+        // helper is meant to exercise.
+        a.trackAngle(170.0 - 100.0 * frac);
       }
     }
 
-    test('knee darting forward with little hip drop fires kneeLedDescent', () {
+    test('knee darting forward with little hip drop drives the knee-led '
+        'ratio above threshold (detector TOMBSTONED — no FormError, '
+        'telemetry ratio still computed)', () {
       final a = SquatFormAnalyzer(
         variant: SquatVariant.bodyweight,
         longFemurLifter: false,
@@ -911,7 +918,9 @@ void main() {
       // ratio = 0.18 / 0.04 = 4.5 ≫ kSquatKneeLedMinRatio (1.2).
       driveDescent(a: a, kneeXTravel: 0.18, hipYDrop: 0.04);
       final errs = a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
-      expect(errs, contains(FormError.kneeLedDescent));
+      // kneeLedDescent FormError is no longer emitted (tombstoned
+      // 2026-05-21 audit). The ratio is still computed for telemetry.
+      expect(errs, isNot(contains(FormError.kneeLedDescent)));
       expect(a.lastRepKneeLedRatio, isNotNull);
       expect(a.lastRepKneeLedRatio!, greaterThan(kSquatKneeLedMinRatio));
     });
@@ -966,23 +975,22 @@ void main() {
       expect(a.lastRepKneeLedRatio!, lessThan(kSquatKneeLedMinRatio));
     });
 
-    test('knee-led is CUE-ONLY — does NOT deduct from quality score', () {
+    test('knee-led applies no quality deduction (tombstoned — neither a '
+        'cue nor a grade input)', () {
       final a = SquatFormAnalyzer(
         variant: SquatVariant.bodyweight,
         longFemurLifter: false,
       );
-      // Strong knee-led signal but otherwise a clean deep upright rep
-      // (knee.x travels in X only — lean/heel unaffected; depth reached).
+      // Strong knee-led signal but otherwise a clean deep upright rep.
       driveDescent(a: a, kneeXTravel: 0.18, hipYDrop: 0.04);
       final errs = a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
-      expect(errs, contains(FormError.kneeLedDescent));
-      // Quality must be unaffected — `_computeQualityScore` does NOT read
-      // the knee-led signal (decision 2026-05-16: unproven detectors must
-      // not corrupt the numeric grade until telemetry validates them).
+      // No FormError; no quality deduction. The detector is fully
+      // tombstoned — the ratio survives only as a telemetry value.
+      expect(errs, isNot(contains(FormError.kneeLedDescent)));
       expect(
         a.lastRepQuality,
         closeTo(1.0, 1e-6),
-        reason: 'kneeLedDescent emits as a cue but applies no deduction.',
+        reason: 'kneeLedDescent applies no deduction.',
       );
     });
   });
@@ -1042,93 +1050,36 @@ void main() {
       expect(errs, isNot(contains(FormError.kneeDominantPattern)));
     });
 
-    test('knee-shift AND heel-lift co-occurring DOES fire '
-        'kneeDominantPattern', () {
+    test('knee-shift AND heel-lift co-occurring does NOT fire '
+        'kneeDominantPattern (compound fault TOMBSTONED 2026-05-21)', () {
       final a = SquatFormAnalyzer(
         variant: SquatVariant.bodyweight,
         longFemurLifter: false,
       );
+      // Drive a realistic descent (kneeDelta ≈ 100°) so the broadened
+      // stiff-legged `noKneeFlexion` path does not shadow this assertion.
       a.onRepStart(buildPose());
-      // Both faults present in the same rep.
-      final pose = buildPose(
-        hipX: 0.30,
-        hipY: 0.50,
-        kneeX: 0.45,
-        kneeY: 0.70,
-        ankleX: 0.30,
-        heelY: 0.93,
-      );
-      // The per-frame component signals (`heelLift`, `forwardKneeShift`)
-      // are returned by `evaluate()`, NOT by the rep-boundary commit
-      // method. Assert them on the correct layer to prove the compound
-      // rule's two inputs were genuinely present this rep.
-      var sawHeelLift = false;
-      var sawKneeShift = false;
       for (var i = 0; i < 8; i++) {
-        final frameErrs = a.evaluate(pose);
-        if (frameErrs.contains(FormError.heelLift)) sawHeelLift = true;
-        if (frameErrs.contains(FormError.forwardKneeShift)) {
-          sawKneeShift = true;
-        }
-        a.trackAngle(70.0);
+        final frac = i / 7.0;
+        a.evaluate(
+          buildPose(
+            hipX: 0.30,
+            hipY: 0.50,
+            kneeX: 0.45,
+            kneeY: 0.70,
+            ankleX: 0.30,
+            heelY: 0.93, // genuine heel-lift geometry
+          ),
+        );
+        a.trackAngle(170.0 - 100.0 * frac);
       }
-      expect(sawHeelLift, isTrue, reason: 'heel-lift input must be present');
-      expect(sawKneeShift, isTrue, reason: 'knee-shift input must be present');
       final errs = a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
-      expect(errs, contains(FormError.kneeDominantPattern));
-    });
-
-    test('kneeDominantPattern is CUE-ONLY — no quality deduction beyond '
-        'the heel-lift it already shares', () {
-      final a = SquatFormAnalyzer(
-        variant: SquatVariant.bodyweight,
-        longFemurLifter: false,
-      );
-      a.onRepStart(buildPose());
-      // Knee-shift + heel-lift. Quality is expected to drop ONLY from the
-      // pre-existing heel-lift deduction path — `kneeDominantPattern`
-      // itself must add nothing (decision 2026-05-16). Compare against a
-      // heel-lift-only rep: identical heel-lift severity → identical
-      // quality. If the compound fault leaked a deduction, the two would
-      // diverge.
-      final compoundPose = buildPose(
-        hipX: 0.30,
-        hipY: 0.50,
-        kneeX: 0.45,
-        kneeY: 0.70,
-        ankleX: 0.30,
-        heelY: 0.93,
-      );
-      for (var i = 0; i < 8; i++) {
-        a.evaluate(compoundPose);
-        a.trackAngle(70.0);
-      }
-      a.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
-      final compoundQuality = a.lastRepQuality;
-
-      final b = SquatFormAnalyzer(
-        variant: SquatVariant.bodyweight,
-        longFemurLifter: false,
-      );
-      b.onRepStart(buildPose());
-      // Same heel-lift, knee tracking over ankle (no shift → no compound).
-      final heelOnlyPose = buildPose(kneeX: 0.30, ankleX: 0.30, heelY: 0.93);
-      for (var i = 0; i < 8; i++) {
-        b.evaluate(heelOnlyPose);
-        b.trackAngle(70.0);
-      }
-      b.consumeCompletionErrorsWithDepth(kSquatBottomAngle);
-      final heelOnlyQuality = b.lastRepQuality;
-
-      expect(compoundQuality, isNotNull);
-      expect(heelOnlyQuality, isNotNull);
-      expect(
-        compoundQuality!,
-        closeTo(heelOnlyQuality!, 1e-9),
-        reason:
-            'kneeDominantPattern must add zero deduction — the only '
-            'quality delta is the shared heel-lift path.',
-      );
+      // `kneeDominantPattern` is tombstoned — both its inputs (heelLift,
+      // forwardKneeShift) are informational/retired and the compound
+      // FormError is no longer emitted.
+      expect(errs, isNot(contains(FormError.kneeDominantPattern)));
+      // The retired `heelLift` cue must also not appear.
+      expect(errs, isNot(contains(FormError.heelLift)));
     });
   });
 
@@ -1158,6 +1109,14 @@ void main() {
     }) {
       a.onRepStart(buildPose());
       a.stampDescentStart(start);
+      // Feed a standing knee angle FIRST so `_startKneeAngle` ≈ 170°,
+      // THEN the bottom angle. This gives `kneeDelta` ≈ 100° so the
+      // broadened stiff-legged `noKneeFlexion` path (kneeDelta < 15°)
+      // does not shadow the tempo/fatigue assertions. A single
+      // `trackAngle(70.0)` would set both start and min to 70 ⇒
+      // kneeDelta 0 ⇒ noKneeFlexion fires and replaces the expected
+      // tempo error.
+      a.trackAngle(170.0);
       // Reach a deep bottom so squatDepth doesn't fire on committed reps.
       if (deepEnough) a.trackAngle(70.0);
       final ascentStart = start.add(descent);
@@ -1193,7 +1152,8 @@ void main() {
       expect(slowErrs, isNot(contains(FormError.squatEccentricTooFast)));
     });
 
-    test('fast ascent fires squatConcentricTooFast; slow does not', () {
+    test('fast ascent does NOT fire squatConcentricTooFast '
+        '(cue TOMBSTONED 2026-05-21 — explosive ascent is good form)', () {
       final fast = make();
       final fastErrs = runRep(
         fast,
@@ -1201,56 +1161,32 @@ void main() {
         ascent: const Duration(milliseconds: 300), // < 0.5s floor
         start: t0,
       );
-      expect(fastErrs, contains(FormError.squatConcentricTooFast));
-
-      final slow = make();
-      final slowErrs = runRep(
-        slow,
-        descent: const Duration(milliseconds: 900),
-        ascent: const Duration(milliseconds: 700), // > 0.5s
-        start: t0,
-      );
-      expect(slowErrs, isNot(contains(FormError.squatConcentricTooFast)));
+      // squatConcentricTooFast is no longer emitted — a fast concentric
+      // (drive up) is desirable form when unloaded. Only the eccentric
+      // (lowering) too-fast cue survives.
+      expect(fastErrs, isNot(contains(FormError.squatConcentricTooFast)));
     });
 
-    test('wide ascent-duration variance fires squatTempoInconsistent', () {
-      // ONE-REP-LAG (intentional, see SKILLS §6a): the rolling window is
-      // fed by `commitAscentToWindow` AFTER `consumeCompletionErrorsWithDepth`
-      // returns (the half-squat-veto split). So rep N's commit evaluates
-      // the window of reps 1..N-1. A 3-deep window therefore first becomes
-      // checkable on the 4th rep's commit.
+    test('wide ascent-duration variance does NOT fire '
+        'squatTempoInconsistent (cue TOMBSTONED 2026-05-21 — statistical '
+        'detector, low confidence at typical rep counts)', () {
       final a = make();
       var start = t0;
-      // Reps 1-3 steady (800ms). Rep 3's window=[800,800] (len<3, skip).
-      for (var i = 0; i < 3; i++) {
+      // Run a sequence with a deliberate 1800ms outlier among 800ms reps.
+      // Pre-tombstone this tripped squatTempoInconsistent; post-tombstone
+      // the detector still computes its rolling-window verdict for
+      // telemetry but emits no FormError.
+      final ascents = [800, 800, 800, 1800, 820, 800];
+      for (final ms in ascents) {
         final errs = runRep(
           a,
           descent: const Duration(milliseconds: 900),
-          ascent: const Duration(milliseconds: 800),
+          ascent: Duration(milliseconds: ms),
           start: start,
         );
         expect(errs, isNot(contains(FormError.squatTempoInconsistent)));
         start = start.add(const Duration(seconds: 5));
       }
-      // Rep 4: at consume time the window is reps 1..3 = [800,800,800]
-      // (steady) → still no fire. But this rep commits a 1800ms ascent.
-      final r4 = runRep(
-        a,
-        descent: const Duration(milliseconds: 900),
-        ascent: const Duration(milliseconds: 1800),
-        start: start,
-      );
-      expect(r4, isNot(contains(FormError.squatTempoInconsistent)));
-      start = start.add(const Duration(seconds: 5));
-      // Rep 5: window is now reps 2..4 = [800,800,1800].
-      // (max−min)/mean = 1000/1133 ≈ 0.88 > 0.30 → FIRES.
-      final r5 = runRep(
-        a,
-        descent: const Duration(milliseconds: 900),
-        ascent: const Duration(milliseconds: 820),
-        start: start,
-      );
-      expect(r5, contains(FormError.squatTempoInconsistent));
     });
 
     test('steady ascent durations do NOT fire squatTempoInconsistent', () {
@@ -1268,15 +1204,12 @@ void main() {
       }
     });
 
-    test('squatFatigue fires once when ascent slows past the ratio', () {
-      // ONE-REP-LAG (SKILLS §6a): the 6-deep window
-      // (kSquatFatigueMinReps) is first evaluable on the 7th rep's commit,
-      // because `commitAscentToWindow` runs AFTER the consume that checks
-      // it. Run 9 reps: 3 fast (600ms) then 6 slow (1000ms) so by the
-      // time the window holds 6 entries, firstAvg≈600 / lastAvg≈1000 →
-      // 1000/600 = 1.67 > kSquatFatigueSlowdownRatio (1.4).
+    test('squatFatigue does NOT fire even on a clear in-session slowdown '
+        '(cue TOMBSTONED 2026-05-21 — statistical, needs many reps)', () {
       final a = make();
       var start = t0;
+      // 3 fast then 6 slow — a textbook fatigue slowdown that pre-tombstone
+      // would have fired squatFatigue once. Post-tombstone: no FormError.
       final plan = [600, 600, 600, 1000, 1000, 1000, 1000, 1000, 1000];
       var fired = 0;
       for (final ms in plan) {
@@ -1289,7 +1222,7 @@ void main() {
         if (errs.contains(FormError.squatFatigue)) fired++;
         start = start.add(const Duration(seconds: 5));
       }
-      expect(fired, 1, reason: 'fatigue is a one-shot per session');
+      expect(fired, 0, reason: 'squatFatigue is tombstoned — never emitted');
     });
 
     test(
@@ -1389,9 +1322,13 @@ void main() {
       }
     });
 
-    test('reset() clears tempo/fatigue state (fatigue re-armable)', () {
-      // 9-rep fast→slow plan (same as the fatigue test — accounts for the
-      // one-rep window-feed lag, SKILLS §6a).
+    test('reset() runs cleanly across a tempo/fatigue rep sequence — the '
+        'tombstoned squatFatigue cue never emits before OR after reset', () {
+      // squatFatigue is tombstoned (2026-05-21): the rolling-window math
+      // still runs (the window + one-shot guard are still reset by
+      // `reset()`), but no FormError is emitted. This test now just
+      // guards that the tombstoned cue stays silent and that a fatigue-
+      // shaped rep sequence does not throw across a reset boundary.
       const plan = [600, 600, 600, 1000, 1000, 1000, 1000, 1000, 1000];
       final a = make();
       var start = t0;
@@ -1406,12 +1343,10 @@ void main() {
         if (errs.contains(FormError.squatFatigue)) firedBefore++;
         start = start.add(const Duration(seconds: 5));
       }
-      expect(firedBefore, 1, reason: 'sanity: fatigue tripped pre-reset');
+      expect(firedBefore, 0, reason: 'squatFatigue tombstoned — never fires');
 
       a.reset();
 
-      // Post-reset: a fresh fast→slow sequence fires fatigue AGAIN — the
-      // one-shot guard AND the rolling window were cleared.
       var firedAfter = 0;
       for (final ms in plan) {
         final errs = runRep(
@@ -1423,11 +1358,7 @@ void main() {
         if (errs.contains(FormError.squatFatigue)) firedAfter++;
         start = start.add(const Duration(seconds: 5));
       }
-      expect(
-        firedAfter,
-        1,
-        reason: 'reset() must clear _fatigueFired + _ascentDurations',
-      );
+      expect(firedAfter, 0, reason: 'still tombstoned post-reset');
     });
   });
 }

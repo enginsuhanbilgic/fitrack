@@ -632,23 +632,39 @@ void main() {
   });
 
   group('WorkoutViewModel — TTS suppression contract', () {
+    // The TTS suppression set as of the 2026-05-21 squat audit. Any error
+    // here computes + highlights but never speaks. Keeping the set as a
+    // named constant makes the "all other errors flow through" test
+    // self-maintaining.
+    const suppressedFromTts = {
+      FormError.forwardKneeShift, // informational ("knees over toes" myth)
+      FormError.excessiveBackwardLean, // telemetry only — jitter-prone
+      FormError.heelLift, // tombstoned 2026-05-21 per user request
+    };
+
     test('forwardKneeShift is suppressed from TTS path', () {
-      // Pure-Dart unit test on the static suppression predicate. Locks the
-      // contract that `forwardKneeShift` must not trigger TTS — a future
-      // developer adding it back to the spoken path would have to change
-      // this test, making the regression visible at review time.
       expect(
         WorkoutViewModel.isTtsSuppressed(FormError.forwardKneeShift),
         isTrue,
       );
     });
 
-    test('all other FormError values flow through TTS', () {
-      // Every other error must reach the TTS coordinator. If a new
-      // informational-only error is added in the future, this test will
-      // need to be updated alongside `isTtsSuppressed`.
+    test('excessiveBackwardLean is suppressed from TTS path '
+        '(telemetry only since the 2026-05-21 audit)', () {
+      expect(
+        WorkoutViewModel.isTtsSuppressed(FormError.excessiveBackwardLean),
+        isTrue,
+      );
+    });
+
+    test('heelLift is suppressed from TTS path '
+        '(cue tombstoned 2026-05-21)', () {
+      expect(WorkoutViewModel.isTtsSuppressed(FormError.heelLift), isTrue);
+    });
+
+    test('all non-suppressed FormError values flow through TTS', () {
       for (final err in FormError.values) {
-        if (err == FormError.forwardKneeShift) continue;
+        if (suppressedFromTts.contains(err)) continue;
         expect(
           WorkoutViewModel.isTtsSuppressed(err),
           isFalse,
@@ -657,15 +673,15 @@ void main() {
       }
     });
 
-    test('FormError.hipLead → "Lead with your chest" cue', () {
-      // Lock the user-visible TTS phrasing for the new hip-lead cue.
-      // The plan explicitly named this string ("Lead with your chest")
-      // — a future refactor that swaps it for a less-actionable phrase
-      // ("Chest up", etc.) would be visible at review time via this
-      // test rather than only at on-device QA.
+    test('FormError.hipLead → "Chest up" cue (terse vocabulary, '
+        '2026-05-21 audit)', () {
+      // The 2026-05-21 audit moved squat cues to a terse one-direction-
+      // one-bodypart vocabulary. hipLead and excessiveForwardLean both
+      // map to "Chest up" — the user-visible action is the same; the two
+      // FormErrors differ only in which detector fired.
       expect(
         WorkoutViewModel.errorMessageForTest(FormError.hipLead),
-        'Lead with your chest',
+        'Chest up',
       );
     });
 
