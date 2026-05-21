@@ -289,14 +289,22 @@ class _HomeScreenState extends State<HomeScreen> {
             builder: (ctx, setModalState) {
               final bottomInset = MediaQuery.viewInsetsOf(ctx).bottom;
               final unit = config.isTimed ? 'seconds' : 'reps';
+              final isEmpty = controller.text.trim().isEmpty;
               final customText = config.isTimed
                   ? '${config.labelFor(customValue)} target'
                   : '$customValue reps target';
 
               void updateCustom(String value) {
-                final parsed = int.tryParse(value.trim());
+                final trimmed = value.trim();
+                final parsed = int.tryParse(trimmed);
                 setModalState(() {
-                  customValid = parsed != null &&
+                  if (trimmed.isEmpty) {
+                    // Empty field is an in-progress edit, not invalid input.
+                    customValid = true;
+                    return;
+                  }
+                  customValid =
+                      parsed != null &&
                       parsed >= config.min &&
                       parsed <= config.max;
                   if (parsed != null) customValue = parsed;
@@ -345,10 +353,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                         decoration: InputDecoration(
                           labelText: 'Custom $unit',
-                          helperText: customValid
-                              ? customText
-                              : 'Enter ${config.min}-${config.max} $unit',
-                          errorText: customValid ? null : 'Out of range',
+                          helperText: !customValid
+                              ? 'Enter ${config.min}-${config.max} $unit'
+                              : isEmpty
+                              ? 'Or enter a custom $unit value'
+                              : customText,
+                          errorText: customValid || isEmpty
+                              ? null
+                              : 'Out of range (${config.min}-${config.max})',
                           border: const OutlineInputBorder(),
                         ),
                         onChanged: updateCustom,
@@ -357,7 +369,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton(
-                          onPressed: customValid && controller.text.isNotEmpty
+                          onPressed: customValid && !isEmpty
                               ? () => Navigator.of(ctx).pop(customValue)
                               : null,
                           child: const Text('Start'),
